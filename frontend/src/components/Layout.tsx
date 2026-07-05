@@ -12,6 +12,7 @@ import {
   LogOut,
   Plug,
   Plus,
+  Library,
   Users,
   Workflow,
 } from "lucide-react";
@@ -38,6 +39,7 @@ export default function Layout() {
 
   const scopedNav = [
     { tab: "profile", label: "Профиль и критерии", icon: FileText },
+    { tab: "materials", label: "Материалы курса", icon: Library },
     { tab: "prompts", label: "Промпты", icon: Bot },
     { tab: "tasks", label: "Задания", icon: ListChecks },
     { tab: "pipeline", label: "Пайплайн проверки", icon: Workflow },

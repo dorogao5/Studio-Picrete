@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import time
@@ -42,6 +43,45 @@ def _apply_family_params(payload: dict, model: ModelEntry, temperature: float | 
         payload["temperature"] = temperature
 
 
+# Семейства, у OpenAI-совместимых API которых поддерживается stream_options.include_usage.
+STREAM_USAGE_FAMILIES = {"deepseek", "qwen", "gpt", "generic"}
+RETRYABLE_ATTEMPTS = 3
+
+
+async def _stream_completion(client: httpx.AsyncClient, url: str, payload: dict, headers: dict, provider_name: str) -> tuple[str, dict]:
+    text_parts: list[str] = []
+    usage: dict = {}
+    async with client.stream("POST", url, json=payload, headers=headers) as response:
+        if response.status_code >= 400:
+            body_bytes = await response.aread()
+            try:
+                body = json.loads(body_bytes)
+                message = body.get("error", {}).get("message") if isinstance(body.get("error"), dict) else body.get("error")
+            except json.JSONDecodeError:
+                message = body_bytes.decode("utf-8", errors="replace")[:500]
+            raise LlmError(f"{provider_name} HTTP {response.status_code}: {message}")
+        async for line in response.aiter_lines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                event = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if event.get("usage"):
+                usage = event["usage"]
+            choices = event.get("choices") or []
+            if choices:
+                delta = choices[0].get("delta") or {}
+                piece = delta.get("content")
+                if piece:
+                    text_parts.append(piece)
+    return "".join(text_parts), usage
+
+
 async def chat(
     provider: Provider,
     model: ModelEntry,
@@ -59,8 +99,11 @@ async def chat(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
+        "stream": True,
     }
     _apply_family_params(payload, model, temperature, thinking)
+    if model.family in STREAM_USAGE_FAMILIES:
+        payload["stream_options"] = {"include_usage": True}
     if max_tokens:
         payload["max_tokens"] = max_tokens
     if json_mode and model.supports_json:
@@ -71,38 +114,38 @@ async def chat(
 
     url = f"{provider.base_url.rstrip('/')}/chat/completions"
     started = time.monotonic()
+    read_timeout = timeout or get_settings().llm_request_timeout
+    # В стриме read-таймаут действует на каждый чанк, а не на весь ответ — поток не даёт
+    # промежуточным узлам (VPN, прокси, nginx) закрыть «молчащее» соединение.
+    timeouts = httpx.Timeout(connect=30.0, read=read_timeout, write=60.0, pool=30.0)
 
-    async with httpx.AsyncClient(timeout=timeout or get_settings().llm_request_timeout) as client:
-        try:
-            response = await client.post(url, json=payload, headers=headers)
-        except httpx.HTTPError as err:
-            raise LlmError(f"Сетевая ошибка при запросе к {provider.name}: {err}") from err
+    last_error: Exception | None = None
+    async with httpx.AsyncClient(timeout=timeouts) as client:
+        for attempt in range(RETRYABLE_ATTEMPTS):
+            try:
+                text, usage = await _stream_completion(client, url, payload, headers, provider.name)
+                break
+            except httpx.HTTPError as err:
+                last_error = err
+                if attempt == RETRYABLE_ATTEMPTS - 1:
+                    raise LlmError(f"Сетевая ошибка при запросе к {provider.name}: {err}") from err
+                await asyncio.sleep(2**attempt)
+        else:
+            raise LlmError(f"Сетевая ошибка при запросе к {provider.name}: {last_error}")
 
     duration_ms = int((time.monotonic() - started) * 1000)
+    if not text:
+        raise LlmError(f"{provider.name} вернул пустой ответ (стрим без content)")
 
-    try:
-        body = response.json()
-    except json.JSONDecodeError:
-        raise LlmError(f"{provider.name} вернул не-JSON ответ (HTTP {response.status_code}): {response.text[:500]}")
-
-    if response.status_code >= 400:
-        message = body.get("error", {}).get("message") if isinstance(body.get("error"), dict) else body.get("error")
-        raise LlmError(f"{provider.name} HTTP {response.status_code}: {message or response.text[:500]}")
-
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise LlmError(f"Ответ {provider.name} без choices[0].message.content: {str(body)[:500]}")
-
-    usage = body.get("usage") or {}
     return LlmResult(
-        text=content or "",
+        text=text,
         duration_ms=duration_ms,
         tokens_total=usage.get("total_tokens"),
         tokens_prompt=usage.get("prompt_tokens"),
         tokens_completion=usage.get("completion_tokens"),
-        raw=body,
+        raw={"usage": usage},
     )
+
 
 
 def extract_json(text: str) -> dict:

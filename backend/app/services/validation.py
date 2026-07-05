@@ -15,7 +15,7 @@ ANSWER_FORMAT_HINTS = {
     "text": "краткий текст",
 }
 
-DUPLICATE_THRESHOLD = 0.65
+DUPLICATE_THRESHOLD = 0.85
 
 _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
 _NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?", re.IGNORECASE)
@@ -26,6 +26,13 @@ _WORD_RE = re.compile(r"\w+")
 def normalize_numeric_text(text: str) -> str:
     text = (text or "").translate(_SUPERSCRIPTS)
     text = text.replace("−", "-")
+    # LaTeX: -28{,}7\\,\\text{кДж}, 2\\cdot10^{-5}, H_2O — чистим макросы и индексы до извлечения чисел.
+    text = text.replace("\\cdot", "·").replace("\\times", "×")
+    text = text.replace("{,}", ",")
+    text = re.sub(r"\^\s*\{\s*([-+]?\d+)\s*\}", r"^\1", text)
+    text = re.sub(r"\\text\s*\{([^{}]*)\}", r" \1 ", text)
+    text = re.sub(r"_\{?\d+\}?", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+|\\[,;!: ]", " ", text)
     text = re.sub(r"(?<=\d)[\u00a0\u2007\u2009\u202f](?=\d)", "", text)
     text = re.sub(r"[·×∙⋅*]\s*10\s*\^?\s*(?=[-+]?\d)", "e", text)
     text = re.sub(r"(?<=\d),(?=\d)", ".", text)
@@ -50,7 +57,11 @@ def _close(a: float, b: float, rel: float) -> bool:
     return abs(a - b) <= max(rel * max(abs(a), abs(b)), 1e-9)
 
 
-def compare_answers(reference: str, solver: str, tolerance_pct: float) -> dict:
+def _drop_context_numbers(values: list[float], context_values: list[float]) -> list[float]:
+    return [v for v in values if not any(_close(v, c, 1e-6) for c in context_values)]
+
+
+def compare_answers(reference: str, solver: str, tolerance_pct: float, context: str = "") -> dict:
     ref_text = (reference or "").strip()
     solver_text = (solver or "").strip()
     result: dict = {"verdict": "uncertain", "reference": ref_text, "solver": solver_text}
@@ -60,15 +71,17 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float) -> dict:
     solver_numbers = extract_numbers(solver_text)
     if ref_numbers and solver_numbers:
         rel = tolerance_pct / 100
-        pairs = {
-            (ref_numbers[-1], solver_numbers[-1]),
-            (ref_numbers[0], solver_numbers[0]),
-            (ref_numbers[-1], solver_numbers[0]),
-            (ref_numbers[0], solver_numbers[-1]),
-        }
-        result["reference_number"] = ref_numbers[-1]
-        result["solver_number"] = solver_numbers[-1]
-        result["verdict"] = "match" if any(_close(a, b, rel) for a, b in pairs) else "mismatch"
+        # Числа из условия (T=298, табличные значения) — контекст, а не ответ: убираем их с обеих сторон.
+        context_values = extract_numbers(context)
+        ref_filtered = _drop_context_numbers(ref_numbers, context_values)
+        solver_filtered = _drop_context_numbers(solver_numbers, context_values)
+        if not ref_filtered or not solver_filtered:
+            ref_filtered, solver_filtered = ref_numbers, solver_numbers
+        result["reference_number"] = ref_filtered[-1]
+        result["solver_number"] = solver_filtered[-1]
+        result["verdict"] = (
+            "match" if any(_close(a, b, rel) for a in ref_filtered for b in solver_filtered) else "mismatch"
+        )
         return result
     ref_norm = " ".join(ref_text.casefold().split())
     solver_norm = " ".join(solver_text.casefold().split())
@@ -137,14 +150,26 @@ def sanity_check(task: dict) -> dict:
 
 def dedup_check(statement: str, existing_statements: list[str]) -> dict:
     tokens = set(_WORD_RE.findall((statement or "").lower()))
+    numbers = {token.lstrip("+") for token in _number_tokens(statement or "")}
     best = 0.0
+    duplicate = False
     if tokens:
         for other in existing_statements:
             other_tokens = set(_WORD_RE.findall((other or "").lower()))
             if not other_tokens:
                 continue
-            best = max(best, len(tokens & other_tokens) / len(tokens | other_tokens))
-    return {"duplicate": best > DUPLICATE_THRESHOLD, "similarity": round(best, 2)}
+            similarity = len(tokens & other_tokens) / len(tokens | other_tokens)
+            best = max(best, similarity)
+            if similarity <= DUPLICATE_THRESHOLD:
+                continue
+            # Задачи одного блюпринта похожи текстом по построению — дубликат только при совпадении чисел.
+            other_numbers = {token.lstrip("+") for token in _number_tokens(other or "")}
+            if not numbers and not other_numbers:
+                duplicate = True
+            elif numbers | other_numbers:
+                overlap = len(numbers & other_numbers) / len(numbers | other_numbers)
+                duplicate = duplicate or overlap >= 0.8
+    return {"duplicate": duplicate, "similarity": round(best, 2)}
 
 
 async def solver_check(
@@ -202,7 +227,7 @@ async def run_validation(
         if solved["status"] == "error":
             reasons.append(f"Решатель не смог решить задачу: {solved['error']}")
         else:
-            compared = compare_answers(reference_answer, solved["answer"], tolerance_pct)
+            compared = compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
             solver["status"] = compared["verdict"]
             if compared["verdict"] == "mismatch":
                 reasons.append(
