@@ -120,6 +120,14 @@ class TaskTemplate(Base):
     difficulty: Mapped[str] = mapped_column(String(16), default="medium")
     instructions: Mapped[str] = mapped_column(Text, default="")
     example: Mapped[str] = mapped_column(Text, default="")
+    task_kind: Mapped[str] = mapped_column(String(16), default="calculation")
+    answer_format: Mapped[str] = mapped_column(String(16), default="numeric")
+    numeric_tolerance_pct: Mapped[float] = mapped_column(Float, default=2.0)
+    reference_sheet_ids: Mapped[list] = mapped_column(JSON, default=list)
+    example_tasks: Mapped[list] = mapped_column(JSON, default=list)
+    kb_query: Mapped[str] = mapped_column(String(512), default="")
+    validation_solver: Mapped[bool] = mapped_column(Boolean, default=True)
+    validation_data_check: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -129,15 +137,110 @@ class GeneratedTask(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
     template_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    batch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     statement: Mapped[str] = mapped_column(Text)
     reference_solution: Mapped[str] = mapped_column(Text, default="")
+    answer: Mapped[str] = mapped_column(Text, default="")
     rubric: Mapped[list] = mapped_column(JSON, default=list)
     max_score: Mapped[float] = mapped_column(Float, default=10.0)
     difficulty: Mapped[str] = mapped_column(String(16), default="medium")
     topic: Mapped[str] = mapped_column(String(256), default="")
     model_used: Mapped[str] = mapped_column(String(256), default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    validation: Mapped[dict] = mapped_column(JSON, default=dict)
+    grounding: Mapped[dict] = mapped_column(JSON, default=dict)
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(512))
+    doc_type: Mapped[str] = mapped_column(String(32), default="other")
+    original_filename: Mapped[str] = mapped_column(String(512), default="")
+    file_path: Mapped[str] = mapped_column(String(1024), default="")
+    mime_type: Mapped[str] = mapped_column(String(128), default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="uploaded")
+    markdown: Mapped[str] = mapped_column(Text, default="")
+    page_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    chunks: Mapped[list["KnowledgeChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True)
+    assistant_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    ord: Mapped[int] = mapped_column(Integer, default=0)
+    heading: Mapped[str] = mapped_column(String(512), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    kind: Mapped[str] = mapped_column(String(16), default="text")
+    char_len: Mapped[int] = mapped_column(Integer, default=0)
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
+
+
+class ReferenceSheet(Base):
+    __tablename__ = "reference_sheets"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(512))
+    kind: Mapped[str] = mapped_column(String(32), default="data_table")
+    description: Mapped[str] = mapped_column(Text, default="")
+    content_markdown: Mapped[str] = mapped_column(Text, default="")
+    source_document_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_canonical: Mapped[bool] = mapped_column(Boolean, default=True)
+    ord: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class GenerationBatch(Base):
+    __tablename__ = "generation_batches"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
+    template_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="running")
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    model_used: Mapped[str] = mapped_column(String(256), default="")
+    requested_count: Mapped[int] = mapped_column(Integer, default=0)
+    generated_count: Mapped[int] = mapped_column(Integer, default=0)
+    validated_count: Mapped[int] = mapped_column(Integer, default=0)
+    progress: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TutorRun(Base):
+    __tablename__ = "tutor_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    prompt_version_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_name: Mapped[str] = mapped_column(String(128), default="")
+    model_id: Mapped[str] = mapped_column(String(256), default="")
+    student_work: Mapped[str] = mapped_column(Text, default="")
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class Pipeline(Base):

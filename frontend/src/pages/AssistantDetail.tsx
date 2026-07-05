@@ -6,6 +6,7 @@ import { apiErrorMessage, assistantsApi, providersApi } from "../lib/api";
 import { useApp } from "../lib/context";
 import type { Assistant, Provider } from "../lib/types";
 import CoursesTab from "./assistant/CoursesTab";
+import MaterialsTab from "./assistant/MaterialsTab";
 import PipelinesTab from "./assistant/PipelinesTab";
 import ProfileTab from "./assistant/ProfileTab";
 import PromptsTab from "./assistant/PromptsTab";
@@ -13,6 +14,7 @@ import TasksTab from "./assistant/TasksTab";
 
 const TABS = [
   { key: "profile", label: "Профиль и критерии" },
+  { key: "materials", label: "Материалы курса" },
   { key: "prompts", label: "Промпты" },
   { key: "tasks", label: "Задания" },
   { key: "pipeline", label: "Пайплайн проверки" },
@@ -90,6 +92,7 @@ export default function AssistantDetail() {
           }}
         />
       )}
+      {tab === "materials" && <MaterialsTab assistant={assistant} providers={providers} onProfileChanged={reload} />}
       {tab === "prompts" && <PromptsTab assistant={assistant} providers={providers} />}
       {tab === "tasks" && <TasksTab assistant={assistant} providers={providers} />}
       {tab === "pipeline" && <PipelinesTab assistant={assistant} providers={providers} />}

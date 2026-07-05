@@ -82,10 +82,12 @@ export interface Course {
   created_at: string;
 }
 
+export type PromptRole = "grader" | "generator" | "tutor";
+
 export interface PromptVersion {
   id: string;
   assistant_id: string;
-  role: "grader" | "generator";
+  role: PromptRole;
   version: number;
   system_prompt: string;
   notes: string;
@@ -96,6 +98,15 @@ export interface PromptVersion {
   created_at: string;
 }
 
+export type TaskKind = "calculation" | "conceptual" | "test_tf" | "test_mc" | "derivation";
+export type AnswerFormat = "numeric" | "formula" | "text" | "choice";
+
+export interface ExampleTask {
+  statement: string;
+  solution: string;
+  answer: string;
+}
+
 export interface TaskTemplate {
   id: string;
   assistant_id: string;
@@ -104,21 +115,140 @@ export interface TaskTemplate {
   difficulty: string;
   instructions: string;
   example: string;
+  task_kind: TaskKind;
+  answer_format: AnswerFormat;
+  numeric_tolerance_pct: number;
+  reference_sheet_ids: string[];
+  example_tasks: ExampleTask[];
+  kb_query: string;
+  validation_solver: boolean;
+  validation_data_check: boolean;
+}
+
+export type GeneratedTaskStatus = "draft" | "validated" | "needs_review" | "approved" | "rejected";
+
+export interface TaskValidation {
+  solver?: {
+    status?: "match" | "mismatch" | "uncertain" | "error" | "skipped";
+    answer?: string;
+    solution?: string;
+    model?: string;
+    error?: string;
+  };
+  data?: { status?: "ok" | "warn" | "skipped"; unknown_numbers?: string[] };
+  sanity?: { issues?: string[] };
+  dedup?: { duplicate?: boolean; similarity?: number };
+  verdict?: "validated" | "needs_review";
+  reasons?: string[];
 }
 
 export interface GeneratedTask {
   id: string;
   assistant_id: string;
   template_id: string | null;
+  batch_id: string | null;
   statement: string;
   reference_solution: string;
+  answer: string;
   rubric: Array<{ criterion_name: string; max_score: number; description?: string }>;
   max_score: number;
   difficulty: string;
   topic: string;
   model_used: string;
+  status: GeneratedTaskStatus;
+  validation: TaskValidation;
+  grounding: { sheets?: Array<{ id: string; title: string }>; kb_chunks?: number };
   approved: boolean;
   created_at: string;
+}
+
+export interface GenerationBatch {
+  id: string;
+  assistant_id: string;
+  template_id: string | null;
+  status: "running" | "completed" | "failed";
+  params: Record<string, unknown>;
+  model_used: string;
+  requested_count: number;
+  generated_count: number;
+  validated_count: number;
+  progress: { stage?: string; done?: number; total?: number };
+  error: string;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export type KnowledgeDocType = "rpd" | "notes" | "textbook" | "problem_book" | "reference" | "methodical" | "other";
+
+export interface KnowledgeDocument {
+  id: string;
+  assistant_id: string;
+  title: string;
+  doc_type: KnowledgeDocType;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  status: "uploaded" | "parsing" | "parsed" | "failed";
+  page_count: number;
+  error: string;
+  created_at: string;
+  chunk_count: number;
+}
+
+export interface KnowledgeDocumentDetail extends KnowledgeDocument {
+  markdown: string;
+}
+
+export interface KnowledgeChunk {
+  id: string;
+  document_id: string;
+  assistant_id: string;
+  ord: number;
+  heading: string;
+  content: string;
+  kind: "text" | "table";
+  char_len: number;
+}
+
+export type ReferenceSheetKind = "data_table" | "glossary" | "conventions" | "formulas" | "other";
+
+export interface ReferenceSheet {
+  id: string;
+  assistant_id: string;
+  title: string;
+  kind: ReferenceSheetKind;
+  description: string;
+  content_markdown: string;
+  source_document_id: string | null;
+  is_canonical: boolean;
+  ord: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TutorMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface TutorRun {
+  id: string;
+  assistant_id: string;
+  task_id: string | null;
+  prompt_version_id: string | null;
+  provider_name: string;
+  model_id: string;
+  student_work: string;
+  messages: TutorMessage[];
+  rating: number | null;
+  comment: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptPreview {
+  system_prompt: string;
+  user_message: string;
 }
 
 export interface PipelineStep {

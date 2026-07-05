@@ -194,16 +194,22 @@ class PromptVersionOut(ORMModel):
 
 
 class PromptVersionCreate(BaseModel):
-    role: str = Field(pattern="^(grader|generator)$")
+    role: str = Field(pattern="^(grader|generator|tutor)$")
     system_prompt: str
     notes: str = ""
     target_family: str = "generic"
 
 
 class PromptGenerateRequest(BaseModel):
-    role: str = Field(pattern="^(grader|generator)$")
+    role: str = Field(pattern="^(grader|generator|tutor)$")
     target_model_entry_id: str
     extra_instructions: str = ""
+
+
+class ExampleTask(BaseModel):
+    statement: str
+    solution: str = ""
+    answer: str = ""
 
 
 class TaskTemplateOut(ORMModel):
@@ -214,6 +220,14 @@ class TaskTemplateOut(ORMModel):
     difficulty: str
     instructions: str
     example: str
+    task_kind: str
+    answer_format: str
+    numeric_tolerance_pct: float
+    reference_sheet_ids: list
+    example_tasks: list
+    kb_query: str
+    validation_solver: bool
+    validation_data_check: bool
 
 
 class TaskTemplateCreate(BaseModel):
@@ -222,19 +236,48 @@ class TaskTemplateCreate(BaseModel):
     difficulty: str = "medium"
     instructions: str = ""
     example: str = ""
+    task_kind: str = Field(default="calculation", pattern="^(calculation|conceptual|test_tf|test_mc|derivation)$")
+    answer_format: str = Field(default="numeric", pattern="^(numeric|formula|text|choice)$")
+    numeric_tolerance_pct: float = Field(default=2.0, ge=0, le=50)
+    reference_sheet_ids: list[str] = []
+    example_tasks: list[ExampleTask] = []
+    kb_query: str = ""
+    validation_solver: bool = True
+    validation_data_check: bool = True
+
+
+class TaskTemplateUpdate(BaseModel):
+    name: str | None = None
+    topic: str | None = None
+    difficulty: str | None = None
+    instructions: str | None = None
+    example: str | None = None
+    task_kind: str | None = Field(default=None, pattern="^(calculation|conceptual|test_tf|test_mc|derivation)$")
+    answer_format: str | None = Field(default=None, pattern="^(numeric|formula|text|choice)$")
+    numeric_tolerance_pct: float | None = Field(default=None, ge=0, le=50)
+    reference_sheet_ids: list[str] | None = None
+    example_tasks: list[ExampleTask] | None = None
+    kb_query: str | None = None
+    validation_solver: bool | None = None
+    validation_data_check: bool | None = None
 
 
 class GeneratedTaskOut(ORMModel):
     id: str
     assistant_id: str
     template_id: str | None
+    batch_id: str | None
     statement: str
     reference_solution: str
+    answer: str
     rubric: list
     max_score: float
     difficulty: str
     topic: str
     model_used: str
+    status: str
+    validation: dict
+    grounding: dict
     approved: bool
     created_at: datetime
 
@@ -242,8 +285,10 @@ class GeneratedTaskOut(ORMModel):
 class GeneratedTaskUpdate(BaseModel):
     statement: str | None = None
     reference_solution: str | None = None
+    answer: str | None = None
     rubric: list | None = None
     max_score: float | None = None
+    status: str | None = Field(default=None, pattern="^(draft|validated|needs_review|approved|rejected)$")
     approved: bool | None = None
 
 
@@ -256,6 +301,177 @@ class TaskGenerateRequest(BaseModel):
     count: int = Field(default=3, ge=1, le=10)
     instructions: str = ""
     temperature: float = 0.7
+
+
+class GenerationBatchRequest(BaseModel):
+    template_id: str | None = None
+    model_entry_id: str
+    solver_model_entry_id: str | None = None
+    prompt_version_id: str | None = None
+    topic: str = ""
+    difficulty: str = "medium"
+    count: int = Field(default=5, ge=1, le=20)
+    instructions: str = ""
+    temperature: float = 0.7
+    validate_tasks: bool = True
+
+
+class GenerationBatchOut(ORMModel):
+    id: str
+    assistant_id: str
+    template_id: str | None
+    status: str
+    params: dict
+    model_used: str
+    requested_count: int
+    generated_count: int
+    validated_count: int
+    progress: dict
+    error: str
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class RevalidateRequest(BaseModel):
+    solver_model_entry_id: str | None = None
+
+
+class TaskExportRequest(BaseModel):
+    task_ids: list[str] = []
+    mode: str = Field(default="bank", pattern="^(bank|variants)$")
+    source_code: str = "studio"
+    source_title: str = ""
+    version: str = "1.0"
+
+
+class KnowledgeDocumentOut(ORMModel):
+    id: str
+    assistant_id: str
+    title: str
+    doc_type: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    status: str
+    page_count: int
+    error: str
+    created_at: datetime
+    chunk_count: int = 0
+
+
+class KnowledgeDocumentDetailOut(KnowledgeDocumentOut):
+    markdown: str = ""
+
+
+class KnowledgeChunkOut(ORMModel):
+    id: str
+    document_id: str
+    assistant_id: str
+    ord: int
+    heading: str
+    content: str
+    kind: str
+    char_len: int
+
+
+class SyllabusExtractRequest(BaseModel):
+    document_id: str
+
+
+class SyllabusExtractResponse(BaseModel):
+    topics: list[str]
+
+
+class ReferenceSheetOut(ORMModel):
+    id: str
+    assistant_id: str
+    title: str
+    kind: str
+    description: str
+    content_markdown: str
+    source_document_id: str | None
+    is_canonical: bool
+    ord: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReferenceSheetCreate(BaseModel):
+    title: str = Field(min_length=1)
+    kind: str = Field(default="data_table", pattern="^(data_table|glossary|conventions|formulas|other)$")
+    description: str = ""
+    content_markdown: str = ""
+    is_canonical: bool = True
+    ord: int = 0
+
+
+class ReferenceSheetUpdate(BaseModel):
+    title: str | None = None
+    kind: str | None = Field(default=None, pattern="^(data_table|glossary|conventions|formulas|other)$")
+    description: str | None = None
+    content_markdown: str | None = None
+    is_canonical: bool | None = None
+    ord: int | None = None
+
+
+class SheetFromChunksRequest(BaseModel):
+    document_id: str
+    chunk_ids: list[str] = Field(min_length=1)
+    title: str = Field(min_length=1)
+    kind: str = Field(default="data_table", pattern="^(data_table|glossary|conventions|formulas|other)$")
+
+
+class TutorMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str
+
+
+class TutorChatRequest(BaseModel):
+    run_id: str | None = None
+    task_id: str | None = None
+    prompt_version_id: str | None = None
+    model_entry_id: str
+    student_work: str = ""
+    messages: list[TutorMessage] = Field(min_length=1)
+
+
+class TutorRunOut(ORMModel):
+    id: str
+    assistant_id: str
+    task_id: str | None
+    prompt_version_id: str | None
+    provider_name: str
+    model_id: str
+    student_work: str
+    messages: list
+    rating: int | None
+    comment: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class TutorChatResponse(BaseModel):
+    run: TutorRunOut
+    reply: str
+
+
+class TutorFeedbackRequest(BaseModel):
+    rating: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = None
+
+
+class PromptPreviewRequest(BaseModel):
+    role: str = Field(pattern="^(grader|generator|tutor)$")
+    prompt_version_id: str | None = None
+    task_id: str | None = None
+    template_id: str | None = None
+    ocr_text: str = "(здесь будет OCR-расшифровка решения студента)"
+    student_work: str = ""
+
+
+class PromptPreviewResponse(BaseModel):
+    system_prompt: str
+    user_message: str
 
 
 class PipelineOut(ORMModel):
@@ -342,6 +558,7 @@ class CompareRequest(BaseModel):
     image_ids: list[str] = []
     model_entry_ids: list[str] = Field(min_length=1, max_length=6)
     temperature: float = 0.1
+    include_reference: bool = True
 
 
 class FeedbackRequest(BaseModel):

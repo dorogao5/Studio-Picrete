@@ -3,15 +3,23 @@ import type {
   Assistant,
   Course,
   GeneratedTask,
+  GenerationBatch,
+  KnowledgeChunk,
+  KnowledgeDocument,
+  KnowledgeDocumentDetail,
   Pipeline,
   PipelineRun,
   PipelineStep,
   PlaygroundResult,
   PlaygroundRun,
+  PromptPreview,
   Provider,
   ProviderPreset,
   PromptVersion,
+  ReferenceSheet,
   TaskTemplate,
+  TutorMessage,
+  TutorRun,
   UserOut,
 } from "./types";
 
@@ -117,6 +125,8 @@ export const tasksApi = {
   templates: (assistantId: string) => api.get<TaskTemplate[]>(`/assistants/${assistantId}/templates`).then((r) => r.data),
   createTemplate: (assistantId: string, body: Partial<TaskTemplate>) =>
     api.post<TaskTemplate>(`/assistants/${assistantId}/templates`, body).then((r) => r.data),
+  updateTemplate: (assistantId: string, templateId: string, body: Partial<TaskTemplate>) =>
+    api.patch<TaskTemplate>(`/assistants/${assistantId}/templates/${templateId}`, body).then((r) => r.data),
   removeTemplate: (assistantId: string, templateId: string) =>
     api.delete(`/assistants/${assistantId}/templates/${templateId}`),
   list: (assistantId: string) => api.get<GeneratedTask[]>(`/assistants/${assistantId}/tasks`).then((r) => r.data),
@@ -134,6 +144,100 @@ export const tasksApi = {
   update: (assistantId: string, taskId: string, body: Partial<GeneratedTask>) =>
     api.patch<GeneratedTask>(`/assistants/${assistantId}/tasks/${taskId}`, body).then((r) => r.data),
   remove: (assistantId: string, taskId: string) => api.delete(`/assistants/${assistantId}/tasks/${taskId}`),
+  createBatch: (
+    assistantId: string,
+    body: {
+      template_id?: string | null;
+      model_entry_id: string;
+      solver_model_entry_id?: string | null;
+      prompt_version_id?: string | null;
+      topic?: string;
+      difficulty?: string;
+      count?: number;
+      instructions?: string;
+      temperature?: number;
+      validate_tasks?: boolean;
+    },
+  ) => api.post<GenerationBatch>(`/assistants/${assistantId}/tasks/batches`, body).then((r) => r.data),
+  batches: (assistantId: string, limit = 10) =>
+    api.get<GenerationBatch[]>(`/assistants/${assistantId}/tasks/batches`, { params: { limit } }).then((r) => r.data),
+  batch: (assistantId: string, batchId: string) =>
+    api.get<GenerationBatch>(`/assistants/${assistantId}/tasks/batches/${batchId}`).then((r) => r.data),
+  revalidate: (assistantId: string, taskId: string, body: { solver_model_entry_id?: string | null } = {}) =>
+    api.post<GeneratedTask>(`/assistants/${assistantId}/tasks/${taskId}/revalidate`, body).then((r) => r.data),
+  exportTasks: (
+    assistantId: string,
+    body: { task_ids?: string[]; mode: "bank" | "variants"; source_code?: string; source_title?: string; version?: string },
+  ) => api.post<Record<string, unknown>>(`/assistants/${assistantId}/tasks/export`, body).then((r) => r.data),
+};
+
+export const kbApi = {
+  documents: (assistantId: string) =>
+    api.get<KnowledgeDocument[]>(`/assistants/${assistantId}/kb/documents`).then((r) => r.data),
+  document: (assistantId: string, documentId: string) =>
+    api.get<KnowledgeDocumentDetail>(`/assistants/${assistantId}/kb/documents/${documentId}`).then((r) => r.data),
+  upload: (assistantId: string, file: File, title: string, docType: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("title", title);
+    form.append("doc_type", docType);
+    return api.post<KnowledgeDocument>(`/assistants/${assistantId}/kb/documents`, form).then((r) => r.data);
+  },
+  reparse: (assistantId: string, documentId: string) =>
+    api.post<KnowledgeDocument>(`/assistants/${assistantId}/kb/documents/${documentId}/reparse`).then((r) => r.data),
+  removeDocument: (assistantId: string, documentId: string) =>
+    api.delete(`/assistants/${assistantId}/kb/documents/${documentId}`),
+  chunks: (assistantId: string, documentId: string) =>
+    api.get<KnowledgeChunk[]>(`/assistants/${assistantId}/kb/documents/${documentId}/chunks`).then((r) => r.data),
+  search: (assistantId: string, q: string, limit = 8) =>
+    api.get<KnowledgeChunk[]>(`/assistants/${assistantId}/kb/search`, { params: { q, limit } }).then((r) => r.data),
+  extractSyllabus: (assistantId: string, documentId: string) =>
+    api
+      .post<{ topics: string[] }>(`/assistants/${assistantId}/kb/extract-syllabus`, { document_id: documentId })
+      .then((r) => r.data),
+};
+
+export const sheetsApi = {
+  list: (assistantId: string) => api.get<ReferenceSheet[]>(`/assistants/${assistantId}/sheets`).then((r) => r.data),
+  create: (assistantId: string, body: Partial<ReferenceSheet>) =>
+    api.post<ReferenceSheet>(`/assistants/${assistantId}/sheets`, body).then((r) => r.data),
+  update: (assistantId: string, sheetId: string, body: Partial<ReferenceSheet>) =>
+    api.patch<ReferenceSheet>(`/assistants/${assistantId}/sheets/${sheetId}`, body).then((r) => r.data),
+  remove: (assistantId: string, sheetId: string) => api.delete(`/assistants/${assistantId}/sheets/${sheetId}`),
+  fromChunks: (assistantId: string, body: { document_id: string; chunk_ids: string[]; title: string; kind: string }) =>
+    api.post<ReferenceSheet>(`/assistants/${assistantId}/sheets/from-chunks`, body).then((r) => r.data),
+};
+
+export const tutorApi = {
+  chat: (
+    assistantId: string,
+    body: {
+      run_id?: string | null;
+      task_id?: string | null;
+      prompt_version_id?: string | null;
+      model_entry_id: string;
+      student_work?: string;
+      messages: TutorMessage[];
+    },
+  ) => api.post<{ run: TutorRun; reply: string }>(`/assistants/${assistantId}/tutor/chat`, body).then((r) => r.data),
+  runs: (assistantId: string, limit = 20) =>
+    api.get<TutorRun[]>(`/assistants/${assistantId}/tutor/runs`, { params: { limit } }).then((r) => r.data),
+  feedback: (runId: string, body: { rating?: number; comment?: string }) =>
+    api.post<TutorRun>(`/tutor/runs/${runId}/feedback`, body).then((r) => r.data),
+};
+
+export const previewApi = {
+  preview: (
+    assistantId: string,
+    body: {
+      role: "grader" | "generator" | "tutor";
+      prompt_version_id?: string | null;
+      task_id?: string | null;
+      template_id?: string | null;
+      ocr_text?: string;
+      student_work?: string;
+    },
+  ) => api.post<PromptPreview>(`/assistants/${assistantId}/prompt-preview`, body).then((r) => r.data),
 };
 
 export const pipelinesApi = {

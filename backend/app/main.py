@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.api import assistants, auth, pipelines, playground, providers, tasks
+from app.api import assistants, auth, kb, pipelines, playground, preview, providers, tasks, tutor
 from app.config import get_settings
 from app.db import SessionLocal, engine
 from app.models import Base, ModelEntry, Provider, User
@@ -73,21 +73,49 @@ async def seed_architect() -> None:
         await db.commit()
 
 
+SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
+    "assistants": {
+        "updated_by": "VARCHAR(32) DEFAULT ''",
+        "updated_at": "DATETIME",
+    },
+    "task_templates": {
+        "task_kind": "VARCHAR(16) DEFAULT 'calculation'",
+        "answer_format": "VARCHAR(16) DEFAULT 'numeric'",
+        "numeric_tolerance_pct": "FLOAT DEFAULT 2.0",
+        "reference_sheet_ids": "JSON DEFAULT '[]'",
+        "example_tasks": "JSON DEFAULT '[]'",
+        "kb_query": "VARCHAR(512) DEFAULT ''",
+        "validation_solver": "BOOLEAN DEFAULT 1",
+        "validation_data_check": "BOOLEAN DEFAULT 1",
+    },
+    "generated_tasks": {
+        "batch_id": "VARCHAR(32)",
+        "answer": "TEXT DEFAULT ''",
+        "status": "VARCHAR(16) DEFAULT 'draft'",
+        "validation": "JSON DEFAULT '{}'",
+        "grounding": "JSON DEFAULT '{}'",
+    },
+}
+
+
 async def ensure_sqlite_columns(conn) -> None:
-    result = await conn.exec_driver_sql("PRAGMA table_info(assistants)")
-    columns = {row[1] for row in result}
-    if "updated_by" not in columns:
-        await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN updated_by VARCHAR(32) DEFAULT ''")
-    if "updated_at" not in columns:
-        await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN updated_at DATETIME")
+    for table, wanted in SQLITE_COLUMN_BACKFILL.items():
+        result = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in result}
+        for column, ddl in wanted.items():
+            if column not in columns:
+                await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.services.kb import ensure_fts
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if conn.dialect.name == "sqlite":
             await ensure_sqlite_columns(conn)
+            await ensure_fts(conn)
     await bootstrap_admin()
     await seed_architect()
     yield
@@ -109,5 +137,15 @@ async def healthz() -> dict:
     return {"status": "ok"}
 
 
-for router in (auth.router, providers.router, assistants.router, tasks.router, pipelines.router, playground.router):
+for router in (
+    auth.router,
+    providers.router,
+    assistants.router,
+    tasks.router,
+    pipelines.router,
+    playground.router,
+    kb.router,
+    tutor.router,
+    preview.router,
+):
     app.include_router(router, prefix="/api")

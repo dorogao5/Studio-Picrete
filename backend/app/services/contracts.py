@@ -27,12 +27,16 @@ GENERATION_JSON_CONTRACT = """
     {
       "statement": "полное условие задачи (Markdown, формулы в $...$)",
       "reference_solution": "подробное эталонное решение по шагам",
+      "answer": "краткий финальный ответ (число с единицами измерения / формула / краткий текст)",
       "rubric": [
         {"criterion_name": "название критерия", "max_score": <число>, "description": "за что начисляется"}
       ],
       "max_score": <число>,
       "difficulty": "easy|medium|hard",
-      "topic": "тема задачи"
+      "topic": "тема задачи",
+      "data_used": [
+        {"sheet_title": "название справочной таблицы", "values": ["какие именно значения взяты"]}
+      ]
     }
   ]
 }

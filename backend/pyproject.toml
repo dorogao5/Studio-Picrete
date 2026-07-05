@@ -16,6 +16,7 @@ dependencies = [
     "bcrypt>=4.2",
     "cryptography>=43.0",
     "python-multipart>=0.0.9",
+    "snowballstemmer>=2.2",
 ]
 
 [tool.ruff]

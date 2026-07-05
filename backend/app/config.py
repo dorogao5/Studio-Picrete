@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     datalab_mode: str = "accurate"
     datalab_poll_interval_seconds: float = 2.0
     datalab_max_poll_attempts: int = 120
+    # Документы базы знаний могут быть большими (главы учебников) — ждём дольше.
+    datalab_kb_max_poll_attempts: int = 600
+    kb_max_file_mb: int = 60
 
     # Модель-архитектор промптов — работает в фоне, преподаватели её не видят и не выбирают.
     architect_base_url: str = ""
@@ -39,9 +42,14 @@ class Settings(BaseSettings):
     def uploads_dir(self) -> Path:
         return self.data_dir / "uploads"
 
+    @property
+    def kb_dir(self) -> Path:
+        return self.data_dir / "kb"
+
 
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    settings.kb_dir.mkdir(parents=True, exist_ok=True)
     return settings
