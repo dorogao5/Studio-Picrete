@@ -1,0 +1,33 @@
+services:
+  studio-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    network_mode: host
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - STUDIO_DATABASE_URL=${STUDIO_DATABASE_URL:-postgresql+asyncpg://picretesuperuser:${POSTGRES_PASSWORD}@localhost:5432/picrete_studio}
+      - STUDIO_SECRET_KEY=${STUDIO_SECRET_KEY}
+      - STUDIO_FIRST_ADMIN_USERNAME=${STUDIO_FIRST_ADMIN_USERNAME:-admin}
+      - STUDIO_FIRST_ADMIN_PASSWORD=${STUDIO_FIRST_ADMIN_PASSWORD}
+      - STUDIO_CORS_ORIGINS=${STUDIO_CORS_ORIGINS:-https://dev.picrete.com}
+      - STUDIO_DATALAB_API_KEY=${STUDIO_DATALAB_API_KEY}
+      - STUDIO_DATALAB_BASE_URL=${STUDIO_DATALAB_BASE_URL:-https://www.datalab.to/api/v1}
+      - STUDIO_DATALAB_MODE=${STUDIO_DATALAB_MODE:-accurate}
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8100/healthz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

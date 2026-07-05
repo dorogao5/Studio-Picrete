@@ -1,0 +1,101 @@
+import json
+
+from app.llm import client as llm
+from app.llm.guidance import GENERAL_BEST_PRACTICES, guidance_for
+from app.models import Assistant, ModelEntry, Provider
+from app.services.contracts import GENERATION_JSON_CONTRACT, GRADING_JSON_CONTRACT
+
+ARCHITECT_SYSTEM_PROMPT = """Вы — инженер промптов мирового уровня, специализирующийся на образовательных
+ИИ-системах для высшей школы. Вы пишете системные промпты для LLM-ассистентов, которые проверяют
+рукописные решения студентов (по OCR-расшифровке) и генерируют учебные задания.
+
+Требования к вашей работе:
+- Пишите промпт на русском языке, если не указано иное.
+- Промпт должен быть самодостаточным: модель, получившая его, не знает ничего о платформе.
+- Строго следуйте переданным лучшим практикам и рекомендациям для целевого семейства моделей.
+- Включите в промпт все критерии оценивания и нюансы преподавателя дословно по смыслу,
+  переформулировав их в чёткие операционные инструкции.
+- Требуемый JSON-контракт ответа включите в промпт без изменений структуры полей.
+
+Ответьте строго JSON-объектом вида:
+{"system_prompt": "<полный текст системного промпта>", "design_notes": "<2-4 предложения: какие решения вы приняли и почему>"}
+Никакого текста вне JSON."""
+
+
+def _profile_block(assistant: Assistant) -> str:
+    criteria = "\n".join(
+        f"- {c.get('name')} (макс. {c.get('max_score')} б.): {c.get('description', '')}" for c in assistant.criteria
+    ) or "- (критерии не заданы — предложите разумные для дисциплины)"
+    nuances = "\n".join(f"- {n}" for n in assistant.nuances) or "- (нет)"
+    topics = ", ".join(assistant.topics) or "(темы не указаны)"
+    return f"""## Профиль ассистента
+Дисциплина: {assistant.discipline}
+Название: {assistant.name}
+Аудитория: {assistant.audience}
+Описание: {assistant.description or "(нет)"}
+Темы курса: {topics}
+Язык ответов: {assistant.language}
+
+## Критерии оценивания (заданы преподавателем)
+{criteria}
+
+## Нюансы и требования преподавателя
+{nuances}"""
+
+
+def build_meta_prompt(assistant: Assistant, role: str, target_family: str, extra_instructions: str = "") -> str:
+    if role == "grader":
+        role_block = (
+            "## Задача создаваемого промпта\n"
+            "Проверка решения студента по OCR-расшифровке рукописной работы. На вход модель получит: условие задачи, "
+            "эталонное решение, критерии оценивания с баллами, OCR-текст решения студента (возможны артефакты "
+            "распознавания формул и индексов). Модель должна выставить баллы по критериям, найти ошибки, дать фидбек "
+            "и оценить свою уверенность.\n\n"
+            f"## Обязательный JSON-контракт ответа проверяющей модели\n```json\n{GRADING_JSON_CONTRACT}\n```"
+        )
+    else:
+        role_block = (
+            "## Задача создаваемого промпта\n"
+            "Генерация типовых учебных заданий по дисциплине. На вход модель получит: тему, уровень сложности, "
+            "количество задач, инструкции шаблона и примеры существующих задач (для стиля и во избежание дублей). "
+            "Каждая задача должна включать условие, подробное эталонное решение и рубрику оценивания.\n\n"
+            f"## Обязательный JSON-контракт ответа генерирующей модели\n```json\n{GENERATION_JSON_CONTRACT}\n```"
+        )
+
+    extra = f"\n\n## Дополнительные пожелания преподавателя к промпту\n{extra_instructions}" if extra_instructions else ""
+
+    return f"""Создайте системный промпт для ИИ-ассистента.
+
+{_profile_block(assistant)}
+
+{role_block}
+
+## Лучшие практики промптинга (обязательны к применению)
+{GENERAL_BEST_PRACTICES}
+
+## Рекомендации для целевого семейства моделей
+{guidance_for(target_family)}{extra}"""
+
+
+async def generate_system_prompt(
+    architect_provider: Provider,
+    architect_model: ModelEntry,
+    assistant: Assistant,
+    role: str,
+    target_family: str,
+    extra_instructions: str = "",
+) -> tuple[str, str]:
+    meta = build_meta_prompt(assistant, role, target_family, extra_instructions)
+    result = await llm.chat(
+        architect_provider,
+        architect_model,
+        ARCHITECT_SYSTEM_PROMPT,
+        meta,
+        temperature=0.3,
+        json_mode=True,
+    )
+    parsed = llm.extract_json(result.text)
+    system_prompt = parsed.get("system_prompt", "")
+    if not system_prompt:
+        raise llm.LlmError(f"Архитектор не вернул system_prompt: {json.dumps(parsed, ensure_ascii=False)[:300]}")
+    return system_prompt, parsed.get("design_notes", "")

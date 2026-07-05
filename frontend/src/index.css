@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Токены дизайн-системы Picrete — «лабораторный журнал» (синхронизированы с Front-Picrete). */
+@layer base {
+  :root {
+    --background: 42 32% 96%;
+    --foreground: 233 28% 15%;
+    --card: 40 40% 99%;
+    --card-foreground: 233 28% 15%;
+    --primary: 233 28% 17%;
+    --primary-foreground: 40 40% 98%;
+    --secondary: 42 22% 90%;
+    --secondary-foreground: 233 22% 20%;
+    --muted: 42 18% 91%;
+    --muted-foreground: 233 10% 42%;
+    --accent: 256 50% 46%;
+    --accent-foreground: 40 40% 98%;
+    --destructive: 348 70% 43%;
+    --destructive-foreground: 40 40% 98%;
+    --success: 161 55% 30%;
+    --success-foreground: 40 40% 98%;
+    --warning: 35 90% 34%;
+    --warning-foreground: 40 40% 98%;
+    --info: 206 65% 38%;
+    --info-foreground: 40 40% 98%;
+    --border: 40 16% 82%;
+    --input: 40 16% 78%;
+    --ring: 256 50% 46%;
+    --radius: 0.5rem;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+.markdown-body :is(p, ul, ol) {
+  margin-bottom: 0.5rem;
+}
