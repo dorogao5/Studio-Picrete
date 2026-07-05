@@ -14,6 +14,7 @@ from app.models import GeneratedTask, PlaygroundResult, PlaygroundRun, PromptVer
 from app.schemas import CompareRequest, FeedbackRequest, OcrResponse, PlaygroundResultOut, PlaygroundRunOut
 from app.security import get_current_user
 from app.services import grading, ocr
+from app.services.grounding import build_grounding_block
 
 router = APIRouter(prefix="/playground", tags=["playground"])
 
@@ -113,6 +114,10 @@ async def compare(
     for model_entry_id in body.model_entry_ids:
         resolved.append(await resolve_model(db, model_entry_id))
 
+    grounding = ""
+    if body.include_reference:
+        grounding = await build_grounding_block(db, assistant.id, query=task_text[:200] or body.ocr_text[:200])
+
     run = PlaygroundRun(
         assistant_id=assistant.id,
         prompt_version_id=prompt.id,
@@ -138,6 +143,7 @@ async def compare(
             rubric,
             max_score,
             body.ocr_text,
+            grounding=grounding,
             temperature=body.temperature,
         )
 

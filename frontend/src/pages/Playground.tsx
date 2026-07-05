@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Crown, Lightbulb, Play, ScanText, Star, Upload } from "lucide-react";
+import { Crown, History, Lightbulb, Loader2, Play, RotateCcw, ScanText, Send, Star, Upload } from "lucide-react";
 import {
   apiErrorMessage,
   assistantsApi,
@@ -9,6 +9,7 @@ import {
   promptsApi,
   providersApi,
   tasksApi,
+  tutorApi,
 } from "../lib/api";
 import { useApp } from "../lib/context";
 import type {
@@ -20,6 +21,8 @@ import type {
   PlaygroundRun,
   PromptVersion,
   Provider,
+  TutorMessage,
+  TutorRun,
 } from "../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Tabs, Textarea } from "../components/ui";
 import { modelOptions } from "./assistant/PromptsTab";
@@ -76,6 +79,7 @@ export default function Playground() {
         tabs={[
           { key: "compare", label: "Сравнение моделей" },
           { key: "pipeline", label: "Пайплайн E2E" },
+          { key: "tutor", label: "Разбор со студентом" },
           { key: "history", label: "История" },
         ]}
         active={mode}
@@ -88,6 +92,8 @@ export default function Playground() {
         <CompareMode assistant={assistant} providers={providers} />
       ) : mode === "pipeline" ? (
         <PipelineMode assistant={assistant} />
+      ) : mode === "tutor" ? (
+        <TutorMode assistant={assistant} providers={providers} />
       ) : (
         <HistoryMode assistant={assistant} />
       )}
@@ -672,6 +678,329 @@ function StepOutput({ step }: { step: PipelineRun["steps_log"][number] }) {
         {String(output.spread_pct)}%)
       </p>
       {Boolean(output.needs_teacher_review) && <Badge tone="warning">требует проверки преподавателем</Badge>}
+    </div>
+  );
+}
+
+const TASK_STATUS_ORDER: Record<string, number> = { approved: 0, validated: 1 };
+
+function TutorMode({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
+  const production = useMemo(() => modelOptions(providers, true), [providers]);
+  const [tasks, setTasks] = useState<GeneratedTask[]>([]);
+  const [tutorPrompts, setTutorPrompts] = useState<PromptVersion[]>([]);
+  const [taskId, setTaskId] = useState("");
+  const [manualTask, setManualTask] = useState("");
+  const [studentWork, setStudentWork] = useState("");
+  const [modelEntryId, setModelEntryId] = useState("");
+  const [promptVersionId, setPromptVersionId] = useState("");
+  const [messages, setMessages] = useState<TutorMessage[]>([]);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
+  const [comment, setComment] = useState("");
+  const [savedComment, setSavedComment] = useState("");
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [nuanceOpen, setNuanceOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<TutorRun[] | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const resetDialog = () => {
+    setMessages([]);
+    setRunId(null);
+    setRating(null);
+    setComment("");
+    setSavedComment("");
+    setInput("");
+    setError("");
+  };
+
+  useEffect(() => {
+    tasksApi
+      .list(assistant.id)
+      .then((list) =>
+        setTasks([...list].sort((a, b) => (TASK_STATUS_ORDER[a.status] ?? 2) - (TASK_STATUS_ORDER[b.status] ?? 2))),
+      )
+      .catch(() => {});
+    promptsApi
+      .list(assistant.id)
+      .then((list) => {
+        const tutor = list.filter((p) => p.role === "tutor");
+        setTutorPrompts(tutor);
+        setPromptVersionId(tutor.find((p) => p.status === "active")?.id ?? "");
+      })
+      .catch(() => {});
+    resetDialog();
+    setTaskId("");
+    setManualTask("");
+    setStudentWork("");
+    setHistoryOpen(false);
+    setHistory(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistant.id]);
+
+  useEffect(() => {
+    if (!modelEntryId && production[0]) setModelEntryId(production[0].id);
+  }, [production, modelEntryId]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "nearest" });
+  }, [messages, sending]);
+
+  const composedWork = () => {
+    const parts: string[] = [];
+    if (!taskId && manualTask.trim()) parts.push(`Условие задачи:\n${manualTask.trim()}`);
+    if (studentWork.trim()) parts.push(studentWork.trim());
+    return parts.join("\n\n");
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || !modelEntryId || sending) return;
+    const historyMsgs: TutorMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(historyMsgs);
+    setInput("");
+    setSending(true);
+    setError("");
+    try {
+      const { run } = await tutorApi.chat(assistant.id, {
+        run_id: runId,
+        task_id: taskId || null,
+        prompt_version_id: promptVersionId || null,
+        model_entry_id: modelEntryId,
+        student_work: composedWork(),
+        messages: historyMsgs,
+      });
+      setRunId(run.id);
+      setMessages(run.messages);
+      setRating(run.rating);
+      setComment(run.comment);
+      setSavedComment(run.comment);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setMessages(messages);
+      setInput(text);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const sendFeedback = async (body: { rating?: number; comment?: string }) => {
+    if (!runId) return;
+    try {
+      const run = await tutorApi.feedback(runId, body);
+      setRating(run.rating);
+      setComment(run.comment);
+      setSavedComment(run.comment);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  };
+
+  const toggleHistory = async () => {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next) {
+      setHistory(null);
+      try {
+        setHistory(await tutorApi.runs(assistant.id));
+      } catch {
+        setHistory([]);
+      }
+    }
+  };
+
+  const loadRun = (run: TutorRun) => {
+    setRunId(run.id);
+    setMessages(run.messages);
+    setStudentWork(run.student_work);
+    setTaskId(run.task_id ?? "");
+    setManualTask("");
+    setPromptVersionId(run.prompt_version_id ?? "");
+    setRating(run.rating);
+    setComment(run.comment);
+    setSavedComment(run.comment);
+    setInput("");
+    setError("");
+  };
+
+  const lastAssistantReply = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Card className="p-5 space-y-4">
+          <h2 className="text-sm font-semibold">Сценарий разбора</h2>
+          <Field label="Задача из банка">
+            <Select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+              <option value="">— ввести условие вручную —</option>
+              {tasks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {(t.topic ? `${t.topic} — ` : "") + t.statement.slice(0, 60)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {!taskId && (
+            <Field label="Условие задачи (вручную)">
+              <Textarea rows={3} value={manualTask} onChange={(e) => setManualTask(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Решение / вопрос студента" hint="Контекст, который ассистент будет разбирать в диалоге">
+            <Textarea rows={4} value={studentWork} onChange={(e) => setStudentWork(e.target.value)} />
+          </Field>
+          <Field label="Модель">
+            <Select value={modelEntryId} onChange={(e) => setModelEntryId(e.target.value)}>
+              {production.length === 0 && <option value="">— подключите провайдера —</option>}
+              {production.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Версия tutor-промпта">
+            <Select value={promptVersionId} onChange={(e) => setPromptVersionId(e.target.value)}>
+              <option value="">— активная версия / встроенный —</option>
+              {tutorPrompts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  v{p.version} · {p.target_family}
+                  {p.status === "active" ? " · активен" : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Button variant="secondary" onClick={resetDialog} disabled={messages.length === 0 && runId === null}>
+            <RotateCcw className="h-4 w-4" /> Новый диалог
+          </Button>
+        </Card>
+
+        <Card className="p-5 space-y-3 lg:col-span-2 flex flex-col">
+          <div>
+            <h2 className="text-sm font-semibold">Диалог со студентом</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Вы играете роль студента — проверьте, как ассистент объясняет ошибки: в тех ли терминах и на данных курса
+            </p>
+          </div>
+          <div className="flex-1 space-y-3 overflow-y-auto max-h-[28rem] pr-1">
+            {messages.length === 0 && !sending && (
+              <EmptyState
+                title="Диалог не начат"
+                hint="Напишите сообщение от лица студента — вопрос или фрагмент решения"
+              />
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                    m.role === "user" ? "bg-accent/10" : "bg-card border border-border"
+                  }`}
+                >
+                  <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+                </div>
+              </div>
+            ))}
+            {sending && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Ассистент отвечает...
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+          <ErrorNote message={error} />
+          <div className="flex items-end gap-2">
+            <Textarea
+              rows={2}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              placeholder="Сообщение от лица студента... (Ctrl/Cmd+Enter — отправить)"
+              className="font-sans"
+            />
+            <Button onClick={send} loading={sending} disabled={!input.trim() || !modelEntryId}>
+              <Send className="h-4 w-4" /> Отправить
+            </Button>
+          </div>
+          {runId !== null && lastAssistantReply && (
+            <div className="border-t border-border pt-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-0.5">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button key={star} onClick={() => void sendFeedback({ rating: star })}>
+                      <Star
+                        className={`h-4 w-4 ${
+                          rating && star <= rating ? "fill-warning text-warning" : "text-muted-foreground"
+                        }`}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <Button variant="ghost" className="text-xs" onClick={() => setNuanceOpen(true)}>
+                  <Lightbulb className="h-3.5 w-3.5" /> Сохранить как нюанс
+                </Button>
+              </div>
+              <Input
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Комментарий к диалогу — что объяснено хорошо, что нет"
+                className="text-xs"
+                onBlur={() => {
+                  if (comment !== savedComment) void sendFeedback({ comment });
+                }}
+              />
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="space-y-2">
+        <Button variant="ghost" onClick={toggleHistory}>
+          <History className="h-4 w-4" /> {historyOpen ? "Скрыть историю" : "Показать историю"}
+        </Button>
+        {historyOpen &&
+          (history === null ? (
+            <Spinner />
+          ) : history.length === 0 ? (
+            <EmptyState title="Диалогов ещё не было" hint="Оценённые разборы — датасет для улучшения tutor-промпта" />
+          ) : (
+            <div className="space-y-2">
+              {history.map((run) => (
+                <Card key={run.id} className="p-3 cursor-pointer hover:bg-muted/40" onClick={() => loadRun(run)}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm truncate">
+                        {run.messages.find((m) => m.role === "user")?.content.slice(0, 120) || "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(run.created_at).toLocaleString("ru-RU")} · {run.model_id} · сообщений:{" "}
+                        {run.messages.length}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {run.rating !== null && <Badge tone="warning">★ {run.rating}</Badge>}
+                      {run.task_id && <Badge tone="info">задача из банка</Badge>}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ))}
+      </div>
+
+      <NuanceModal
+        open={nuanceOpen}
+        onClose={() => setNuanceOpen(false)}
+        assistantId={assistant.id}
+        suggestion={lastAssistantReply}
+      />
     </div>
   );
 }

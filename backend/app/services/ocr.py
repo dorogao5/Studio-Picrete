@@ -9,7 +9,7 @@ class OcrError(Exception):
     pass
 
 
-async def run_datalab_ocr(filename: str, content: bytes, mime_type: str) -> str:
+async def run_datalab_ocr(filename: str, content: bytes, mime_type: str, max_poll_attempts: int | None = None) -> str:
     settings = get_settings()
     if not settings.datalab_api_key:
         raise OcrError("DATALAB_API_KEY не настроен на сервере Studio")
@@ -35,7 +35,7 @@ async def run_datalab_ocr(filename: str, content: bytes, mime_type: str) -> str:
                 raise OcrError(f"DataLab не вернул request_check_url: {body}")
             check_url = f"{base}/marker/{request_id}"
 
-        for _ in range(settings.datalab_max_poll_attempts):
+        for _ in range(settings.datalab_max_poll_attempts if max_poll_attempts is None else max_poll_attempts):
             await asyncio.sleep(settings.datalab_poll_interval_seconds)
             poll = await client.get(check_url, headers=headers)
             poll_body = poll.json()

@@ -20,8 +20,12 @@ def build_grading_user_message(
     rubric: list,
     max_score: float,
     ocr_text: str,
+    grounding: str = "",
 ) -> str:
     rubric_json = json.dumps(rubric, ensure_ascii=False, indent=2) if rubric else "(рубрика не задана)"
+    grounding_block = (
+        f"Справочные материалы курса (используйте ТОЛЬКО эти данные):\n{grounding}\n\n" if grounding else ""
+    )
     return f"""Задача:
 {task_text}
 
@@ -31,7 +35,7 @@ def build_grading_user_message(
 Критерии оценивания (максимум {max_score} баллов):
 {rubric_json}
 
-OCR-расшифровка решения студента:
+{grounding_block}OCR-расшифровка решения студента:
 {ocr_text}
 
 Выполните проверку строго по критериям. Ответ — строго JSON по контракту из инструкции."""
@@ -46,9 +50,12 @@ async def run_grading(
     rubric: list,
     max_score: float,
     ocr_text: str,
+    grounding: str = "",
     temperature: float = 0.1,
 ) -> GradeOutcome:
-    user_message = build_grading_user_message(task_text, reference_solution, rubric, max_score, ocr_text)
+    user_message = build_grading_user_message(
+        task_text, reference_solution, rubric, max_score, ocr_text, grounding=grounding
+    )
     try:
         result = await llm.chat(provider, model, system_prompt, user_message, temperature=temperature, json_mode=True)
     except llm.LlmError as err:

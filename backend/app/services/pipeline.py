@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models import ModelEntry, Pipeline, PipelineRun, PromptVersion, Provider, utcnow
 from app.services import grading, ocr
+from app.services.grounding import build_grounding_block
 
 STEP_TYPES = ("ocr", "grade", "consensus")
 
@@ -113,6 +114,7 @@ async def execute_pipeline(db: AsyncSession, pipeline: Pipeline, run: PipelineRu
     run_input = run.input
     steps_log: list[dict] = []
     ocr_text = run_input.get("ocr_text", "")
+    grounding: str | None = None
 
     try:
         for index, step in enumerate(pipeline.steps):
@@ -130,6 +132,10 @@ async def execute_pipeline(db: AsyncSession, pipeline: Pipeline, run: PipelineRu
                     raise PipelineError("Нет OCR-текста: добавьте шаг OCR перед проверкой или передайте ocr_text")
                 provider, model = await _resolve_model(db, config.get("model_entry_id", ""))
                 prompt = await _resolve_grader_prompt(db, pipeline.assistant_id, config.get("prompt_version_id"))
+                if grounding is None:
+                    grounding = await build_grounding_block(
+                        db, pipeline.assistant_id, query=str(run_input.get("task_text", ""))[:200]
+                    )
                 outcome = await grading.run_grading(
                     provider,
                     model,
@@ -139,6 +145,7 @@ async def execute_pipeline(db: AsyncSession, pipeline: Pipeline, run: PipelineRu
                     run_input.get("rubric", []),
                     run_input.get("max_score", 10),
                     ocr_text,
+                    grounding=grounding,
                     temperature=float(config.get("temperature", 0.1)),
                 )
                 if outcome.error:

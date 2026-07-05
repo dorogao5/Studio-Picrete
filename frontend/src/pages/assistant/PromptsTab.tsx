@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Plus, Sparkles, Trash2 } from "lucide-react";
-import { apiErrorMessage, promptsApi } from "../../lib/api";
-import type { Assistant, PromptVersion, Provider } from "../../lib/types";
+import { CheckCircle2, ChevronDown, ChevronRight, Eye, Plus, Sparkles, Trash2 } from "lucide-react";
+import { apiErrorMessage, previewApi, promptsApi } from "../../lib/api";
+import type { Assistant, PromptPreview, PromptVersion, Provider } from "../../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Modal, Select, Spinner, Textarea } from "../../components/ui";
 
 export function modelOptions(providers: Provider[], productionOnly: boolean) {
@@ -17,7 +17,12 @@ export function modelOptions(providers: Provider[], productionOnly: boolean) {
     );
 }
 
-const ROLE_LABELS: Record<string, string> = { grader: "Проверка решений", generator: "Генерация заданий" };
+const ROLE_LABELS: Record<string, string> = {
+  grader: "Проверка решений",
+  generator: "Генерация заданий",
+  tutor: "Разбор со студентом",
+};
+const ROLE_BADGES: Record<string, string> = { grader: "Проверка", generator: "Генерация", tutor: "Разбор" };
 
 export default function PromptsTab({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
   const [prompts, setPrompts] = useState<PromptVersion[] | null>(null);
@@ -62,7 +67,7 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
           hint="Заполните профиль и нажмите «Сгенерировать ИИ-архитектором» — это отправная точка для итераций"
         />
       ) : (
-        (["grader", "generator"] as const).map((role) => {
+        (["grader", "generator", "tutor"] as const).map((role) => {
           const rolePrompts = prompts.filter((p) => p.role === role);
           if (rolePrompts.length === 0) return null;
           return (
@@ -90,12 +95,14 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
 
 function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion; assistantId: string; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between gap-2">
         <button className="flex items-center gap-2 min-w-0 text-left" onClick={() => setExpanded(!expanded)}>
           {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
           <span className="font-medium text-sm">v{prompt.version}</span>
+          <Badge>{ROLE_BADGES[prompt.role]}</Badge>
           {prompt.status === "active" && <Badge tone="success">активен</Badge>}
           {prompt.status === "draft" && <Badge>черновик</Badge>}
           {prompt.status === "archived" && <Badge>архив</Badge>}
@@ -103,6 +110,9 @@ function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion;
           {prompt.source === "generated" && <Badge tone="accent">архитектор: {prompt.architect_model}</Badge>}
         </button>
         <div className="flex gap-1.5 shrink-0">
+          <Button variant="secondary" onClick={() => setPreviewOpen(true)}>
+            <Eye className="h-3.5 w-3.5" /> Что видит модель
+          </Button>
           {prompt.status !== "active" && (
             <Button
               variant="secondary"
@@ -133,7 +143,62 @@ function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion;
           {prompt.system_prompt}
         </pre>
       )}
+      <PreviewModal open={previewOpen} onClose={() => setPreviewOpen(false)} assistantId={assistantId} prompt={prompt} />
     </Card>
+  );
+}
+
+function PreviewModal({
+  open,
+  onClose,
+  assistantId,
+  prompt,
+}: {
+  open: boolean;
+  onClose: () => void;
+  assistantId: string;
+  prompt: PromptVersion;
+}) {
+  const [preview, setPreview] = useState<PromptPreview | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setPreview(null);
+    setError("");
+    previewApi
+      .preview(assistantId, { role: prompt.role, prompt_version_id: prompt.id })
+      .then(setPreview)
+      .catch((err) => setError(apiErrorMessage(err)));
+  }, [open, assistantId, prompt.id, prompt.role]);
+
+  return (
+    <Modal title={`Что видит модель — v${prompt.version} · ${ROLE_BADGES[prompt.role]}`} open={open} onClose={onClose} wide>
+      <div className="space-y-4">
+        <ErrorNote message={error} />
+        {preview === null && !error && <Spinner label="Собираем промпт..." />}
+        {preview && (
+          <>
+            <div>
+              <h3 className="text-sm font-semibold mb-1.5">System prompt</h3>
+              <pre className="whitespace-pre-wrap text-xs font-mono rounded-md bg-muted p-3 max-h-72 overflow-y-auto">
+                {preview.system_prompt}
+              </pre>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold mb-1.5">User message</h3>
+              <pre className="whitespace-pre-wrap text-xs font-mono rounded-md bg-muted p-3 max-h-72 overflow-y-auto">
+                {preview.user_message}
+              </pre>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Пример собран на плейсхолдерах; в бою подставляются реальная задача, решение студента и справочные
+              материалы курса.
+            </p>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -187,6 +252,7 @@ function GenerateModal({
           <Select value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="grader">Проверка решений</option>
             <option value="generator">Генерация заданий</option>
+            <option value="tutor">Разбор со студентом</option>
           </Select>
         </Field>
         <Field
@@ -267,6 +333,7 @@ function ManualModal({
           <Select value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="grader">Проверка решений</option>
             <option value="generator">Генерация заданий</option>
+            <option value="tutor">Разбор со студентом</option>
           </Select>
         </Field>
         <Field label="Системный промпт">
