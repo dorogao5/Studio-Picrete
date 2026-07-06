@@ -96,6 +96,31 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
 function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion; assistantId: string; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [error, setError] = useState("");
+
+  const activate = async () => {
+    setError("");
+    try {
+      await promptsApi.activate(assistantId, prompt.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      onChanged();
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm(`Удалить версию v${prompt.version}?`)) return;
+    setError("");
+    try {
+      await promptsApi.remove(assistantId, prompt.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      onChanged();
+    }
+  };
+
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between gap-2">
@@ -114,29 +139,20 @@ function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion;
             <Eye className="h-3.5 w-3.5" /> Что видит модель
           </Button>
           {prompt.status !== "active" && (
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                await promptsApi.activate(assistantId, prompt.id);
-                onChanged();
-              }}
-            >
+            <Button variant="secondary" onClick={activate}>
               <CheckCircle2 className="h-3.5 w-3.5" /> Активировать
             </Button>
           )}
-          <Button
-            variant="destructive"
-            onClick={async () => {
-              if (confirm(`Удалить версию v${prompt.version}?`)) {
-                await promptsApi.remove(assistantId, prompt.id);
-                onChanged();
-              }
-            }}
-          >
+          <Button variant="destructive" onClick={remove}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
+      {error && (
+        <div className="mt-2">
+          <ErrorNote message={error} />
+        </div>
+      )}
       {prompt.notes && <p className="text-xs text-muted-foreground mt-2 ml-6">{prompt.notes}</p>}
       {expanded && (
         <pre className="mt-3 ml-6 whitespace-pre-wrap rounded-md bg-muted p-3 text-xs font-mono max-h-96 overflow-y-auto">

@@ -107,6 +107,33 @@ async def ensure_sqlite_columns(conn) -> None:
                 await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+async def reconcile_interrupted_work() -> None:
+    """Фоновые задачи не переживают рестарт — зависшие статусы переводим в failed, чтобы UI не ждал вечно."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from app.models import GeneratedTask, GenerationBatch, KnowledgeDocument
+
+    async with SessionLocal() as db:
+        await db.execute(
+            update(GenerationBatch)
+            .where(GenerationBatch.status == "running")
+            .values(status="failed", error="Прервано перезапуском сервера", finished_at=datetime.now(UTC))
+        )
+        await db.execute(
+            update(KnowledgeDocument)
+            .where(KnowledgeDocument.status.in_(["uploaded", "parsing"]))
+            .values(status="failed", error="Прервано перезапуском сервера — нажмите «Переразобрать»")
+        )
+        await db.execute(
+            update(GeneratedTask)
+            .where(GeneratedTask.approved.is_(True), GeneratedTask.status == "draft")
+            .values(status="approved")
+        )
+        await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.services.kb import ensure_fts
@@ -118,6 +145,7 @@ async def lifespan(app: FastAPI):
             await ensure_fts(conn)
     await bootstrap_admin()
     await seed_architect()
+    await reconcile_interrupted_work()
     yield
 
 

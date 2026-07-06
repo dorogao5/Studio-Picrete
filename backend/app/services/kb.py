@@ -23,9 +23,23 @@ _stemmer = snowballstemmer.stemmer("russian")
 
 
 async def ensure_fts(conn) -> None:
-    await conn.exec_driver_sql(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(chunk_id UNINDEXED, content_norm)"
-    )
+    result = await conn.exec_driver_sql("PRAGMA table_info(kb_fts)")
+    columns = {row[1] for row in result}
+    needs_reindex = bool(columns) and "assistant_id" not in columns
+    if needs_reindex:
+        await conn.exec_driver_sql("DROP TABLE kb_fts")
+        columns = set()
+    if not columns:
+        await conn.exec_driver_sql(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(chunk_id UNINDEXED, assistant_id UNINDEXED, content_norm)"
+        )
+    if needs_reindex:
+        rows = await conn.exec_driver_sql("SELECT id, assistant_id, heading, content FROM knowledge_chunks")
+        for chunk_id, assistant_id, heading, content in rows:
+            await conn.exec_driver_sql(
+                "INSERT INTO kb_fts (chunk_id, assistant_id, content_norm) VALUES (?, ?, ?)",
+                (chunk_id, assistant_id, normalize_ru(f"{heading} {content}")),
+            )
 
 
 def normalize_ru(text: str) -> str:
@@ -128,8 +142,15 @@ def split_markdown(md: str) -> list[dict]:
 async def index_chunks(db: AsyncSession, chunks: list[KnowledgeChunk]) -> None:
     for chunk in chunks:
         await db.execute(
-            sql_text("INSERT INTO kb_fts (chunk_id, content_norm) VALUES (:chunk_id, :content_norm)"),
-            {"chunk_id": chunk.id, "content_norm": normalize_ru(f"{chunk.heading} {chunk.content}")},
+            sql_text(
+                "INSERT INTO kb_fts (chunk_id, assistant_id, content_norm) "
+                "VALUES (:chunk_id, :assistant_id, :content_norm)"
+            ),
+            {
+                "chunk_id": chunk.id,
+                "assistant_id": chunk.assistant_id,
+                "content_norm": normalize_ru(f"{chunk.heading} {chunk.content}"),
+            },
         )
 
 
@@ -140,6 +161,10 @@ async def deindex_document(db: AsyncSession, document_id: str) -> None:
     )
 
 
+async def deindex_assistant(db: AsyncSession, assistant_id: str) -> None:
+    await db.execute(sql_text("DELETE FROM kb_fts WHERE assistant_id = :aid"), {"aid": assistant_id})
+
+
 async def search_chunks(db: AsyncSession, assistant_id: str, query: str, limit: int = 8) -> list[KnowledgeChunk]:
     normalized = normalize_ru(query)
     if not normalized:
@@ -148,8 +173,11 @@ async def search_chunks(db: AsyncSession, assistant_id: str, query: str, limit: 
     try:
         chunk_ids = (
             await db.execute(
-                sql_text("SELECT chunk_id FROM kb_fts WHERE kb_fts MATCH :q ORDER BY bm25(kb_fts) LIMIT :n"),
-                {"q": match_query, "n": limit * 4},
+                sql_text(
+                    "SELECT chunk_id FROM kb_fts WHERE kb_fts MATCH :q AND assistant_id = :aid "
+                    "ORDER BY bm25(kb_fts) LIMIT :n"
+                ),
+                {"q": match_query, "aid": assistant_id, "n": limit},
             )
         ).scalars().all()
     except Exception:
@@ -157,14 +185,10 @@ async def search_chunks(db: AsyncSession, assistant_id: str, query: str, limit: 
     if not chunk_ids:
         return []
     chunks = (
-        await db.execute(
-            select(KnowledgeChunk).where(
-                KnowledgeChunk.id.in_(chunk_ids), KnowledgeChunk.assistant_id == assistant_id
-            )
-        )
+        await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.id.in_(chunk_ids)))
     ).scalars().all()
     by_id = {chunk.id: chunk for chunk in chunks}
-    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id][:limit]
+    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
 async def _load_document(db: AsyncSession, document_id: str) -> KnowledgeDocument | None:

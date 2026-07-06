@@ -41,6 +41,7 @@ async def build_grounding_block(
 
     used = 0
     sheet_parts: list[str] = []
+    omitted: list[str] = []
     for sheet in sheets:
         content = (sheet.content_markdown or "").strip()
         if not content:
@@ -49,9 +50,24 @@ async def build_grounding_block(
         section = f"### {sheet.title} ({label})\n{content}"
         cost = len(section) + (0 if sheet_parts else len(SHEETS_HEADER))
         if used + cost > max_chars:
-            break
+            remaining = max_chars - used - len(SHEETS_HEADER if not sheet_parts else "") - 200
+            # Слишком большой лист режем по остатку бюджета, а не выкидываем молча; мелкие пробуем дальше.
+            if remaining > 2000:
+                section = (
+                    f"### {sheet.title} ({label})\n{content[:remaining]}\n"
+                    f"[…обрезано: справочник больше бюджета контекста, полная версия — во вкладке «Материалы»]"
+                )
+                sheet_parts.append(section)
+                used += len(section)
+            else:
+                omitted.append(sheet.title)
+            continue
         sheet_parts.append(section)
         used += cost
+    if omitted:
+        note = "(Не поместились в контекст: " + ", ".join(omitted) + ")"
+        sheet_parts.append(note)
+        used += len(note)
 
     kb_parts: list[str] = []
     if include_kb and query.strip() and used < max_chars:

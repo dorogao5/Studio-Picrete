@@ -217,6 +217,12 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
   const solution = useSolutionInput();
 
   useEffect(() => {
+    setPromptVersionId("");
+    setTaskId("");
+    setTaskText("");
+    setReferenceSolution("");
+    setRun(null);
+    setError("");
     promptsApi.list(assistant.id).then((list) => {
       setPrompts(list.filter((p) => p.role === "grader"));
       const active = list.find((p) => p.role === "grader" && p.status === "active");
@@ -542,9 +548,14 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
   const solution = useSolutionInput();
 
   useEffect(() => {
+    setTaskId("");
+    setTaskText("");
+    setReferenceSolution("");
+    setRun(null);
+    setError("");
     pipelinesApi.list(assistant.id).then((list) => {
       setPipelines(list);
-      if (list[0]) setPipelineId(list[0].id);
+      setPipelineId(list[0]?.id ?? "");
     });
   }, [assistant.id]);
 
@@ -705,6 +716,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<TutorRun[] | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const assistantIdRef = useRef(assistant.id);
 
   const resetDialog = () => {
     setMessages([]);
@@ -717,6 +729,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
   };
 
   useEffect(() => {
+    assistantIdRef.current = assistant.id;
     tasksApi
       .list(assistant.id)
       .then((list) =>
@@ -732,6 +745,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
       })
       .catch(() => {});
     resetDialog();
+    setSending(false);
     setTaskId("");
     setManualTask("");
     setStudentWork("");
@@ -758,13 +772,14 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
   const send = async () => {
     const text = input.trim();
     if (!text || !modelEntryId || sending) return;
+    const sentAssistantId = assistant.id;
     const historyMsgs: TutorMessage[] = [...messages, { role: "user", content: text }];
     setMessages(historyMsgs);
     setInput("");
     setSending(true);
     setError("");
     try {
-      const { run } = await tutorApi.chat(assistant.id, {
+      const { run } = await tutorApi.chat(sentAssistantId, {
         run_id: runId,
         task_id: taskId || null,
         prompt_version_id: promptVersionId || null,
@@ -772,17 +787,19 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
         student_work: composedWork(),
         messages: historyMsgs,
       });
+      if (assistantIdRef.current !== sentAssistantId) return;
       setRunId(run.id);
       setMessages(run.messages);
       setRating(run.rating);
       setComment(run.comment);
       setSavedComment(run.comment);
     } catch (err) {
+      if (assistantIdRef.current !== sentAssistantId) return;
       setError(apiErrorMessage(err));
       setMessages(messages);
       setInput(text);
     } finally {
-      setSending(false);
+      if (assistantIdRef.current === sentAssistantId) setSending(false);
     }
   };
 
@@ -815,9 +832,11 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
     setRunId(run.id);
     setMessages(run.messages);
     setStudentWork(run.student_work);
-    setTaskId(run.task_id ?? "");
+    setTaskId(run.task_id && tasks.some((t) => t.id === run.task_id) ? run.task_id : "");
     setManualTask("");
-    setPromptVersionId(run.prompt_version_id ?? "");
+    setPromptVersionId(
+      run.prompt_version_id && tutorPrompts.some((p) => p.id === run.prompt_version_id) ? run.prompt_version_id : "",
+    );
     setRating(run.rating);
     setComment(run.comment);
     setSavedComment(run.comment);

@@ -159,10 +159,10 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     setBulkLoading(true);
     try {
       await Promise.all(validated.map((t) => tasksApi.update(assistant.id, t.id, { status: "approved" })));
-      await reloadTasks();
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
+      await reloadTasks();
       setBulkLoading(false);
     }
   };
@@ -529,6 +529,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
         <Button
           variant="destructive"
           onClick={async () => {
+            if (!confirm(`Удалить задачу?`)) return;
             try {
               await tasksApi.remove(assistantId, task.id);
               onChanged();
@@ -755,7 +756,10 @@ function TemplateModal({
         <Field label="Запрос к базе знаний" hint="По этому запросу подтянутся выдержки из материалов курса">
           <Input value={kbQuery} onChange={(e) => setKbQuery(e.target.value)} placeholder="буферные растворы pH расчёт" />
         </Field>
-        <Field label="Привязанные справочники" hint="Их данные инжектятся в промпт генерации дословно">
+        <Field
+          label="Привязанные справочники"
+          hint="Их данные инжектятся в промпт генерации дословно. Ничего не выбрано — в генерацию попадут все канонические справочники дисциплины"
+        >
           {sheets.length === 0 ? (
             <p className="text-xs text-muted-foreground">Добавьте справочные материалы на вкладке «Материалы курса»</p>
           ) : (
@@ -869,7 +873,7 @@ function BatchLaunchModal({
   const [solverId, setSolverId] = useState(production.find((m) => m.id !== (production[0]?.id ?? ""))?.id ?? "");
   const [promptVersionId, setPromptVersionId] = useState("");
   const [topic, setTopic] = useState("");
-  const [difficulty, setDifficulty] = useState("medium");
+  const [difficulty, setDifficulty] = useState(initialTemplateId ? "" : "medium");
   const [count, setCount] = useState(5);
   const [temperature, setTemperature] = useState(0.7);
   const [validateTasks, setValidateTasks] = useState(true);
@@ -905,7 +909,14 @@ function BatchLaunchModal({
     <Modal title="Партия генерации" open onClose={onClose}>
       <div className="space-y-4">
         <Field label="Блюпринт (необязательно)">
-          <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+          <Select
+            value={templateId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setTemplateId(next);
+              setDifficulty(next ? "" : "medium");
+            }}
+          >
             <option value="">— без блюпринта, по теме —</option>
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
@@ -961,6 +972,7 @@ function BatchLaunchModal({
           </Field>
           <Field label="Сложность">
             <Select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
+              {templateId ? <option value="">— из блюпринта —</option> : null}
               <option value="easy">лёгкая</option>
               <option value="medium">средняя</option>
               <option value="hard">сложная</option>

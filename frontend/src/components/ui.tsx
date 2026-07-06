@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import { Loader2, X } from "lucide-react";
+import { useRef } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "accent" | "ghost" | "destructive";
@@ -159,9 +160,18 @@ export function Modal({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const mouseDownOnOverlay = useRef(false);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-foreground/40 p-4 sm:p-8" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-foreground/40 p-4 sm:p-8"
+      onMouseDown={(e) => {
+        mouseDownOnOverlay.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && mouseDownOnOverlay.current) onClose();
+      }}
+    >
       <div
         className={clsx("w-full rounded-lg border border-border bg-card shadow-soft", wide ? "max-w-4xl" : "max-w-lg")}
         onClick={(e) => e.stopPropagation()}

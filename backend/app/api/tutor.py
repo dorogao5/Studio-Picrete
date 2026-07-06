@@ -69,7 +69,12 @@ async def tutor_chat(
         if task is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
 
-    query = (task.statement if task else body.messages[-1].content)[:200]
+    query_source = (
+        task.statement
+        if task
+        else " ".join(part for part in (body.student_work, body.messages[-1].content) if part)
+    )
+    query = query_source[:200]
     grounding = await build_grounding_block(db, assistant.id, query=query)
     context = build_tutor_context(task, body.student_work, grounding)
     user_message = flatten_dialog([m.model_dump() for m in body.messages], context)

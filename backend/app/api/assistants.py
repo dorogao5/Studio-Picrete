@@ -4,9 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pathlib import Path
+
 from app.db import get_db
+from app.services import kb as kb_service
 from app.llm import client as llm
-from app.models import Assistant, Course, ModelEntry, PromptVersion, Provider, User
+from app.models import KnowledgeDocument, Assistant, Course, ModelEntry, PromptVersion, Provider, User
 from app.schemas import (
     AssistantCreate,
     AssistantOut,
@@ -156,6 +159,13 @@ async def delete_assistant(
     assistant_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
 ) -> dict:
     assistant = await get_assistant_or_404(assistant_id, db)
+    documents = (
+        await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.assistant_id == assistant_id))
+    ).scalars().all()
+    for document in documents:
+        if document.file_path:
+            Path(document.file_path).unlink(missing_ok=True)
+    await kb_service.deindex_assistant(db, assistant_id)
     await db.delete(assistant)
     await db.commit()
     return {"ok": True}

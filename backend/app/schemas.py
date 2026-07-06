@@ -297,7 +297,7 @@ class TaskGenerateRequest(BaseModel):
     model_entry_id: str
     prompt_version_id: str | None = None
     topic: str = ""
-    difficulty: str = "medium"
+    difficulty: str = ""
     count: int = Field(default=3, ge=1, le=10)
     instructions: str = ""
     temperature: float = 0.7
@@ -309,7 +309,7 @@ class GenerationBatchRequest(BaseModel):
     solver_model_entry_id: str | None = None
     prompt_version_id: str | None = None
     topic: str = ""
-    difficulty: str = "medium"
+    difficulty: str = ""
     count: int = Field(default=5, ge=1, le=20)
     instructions: str = ""
     temperature: float = 0.7

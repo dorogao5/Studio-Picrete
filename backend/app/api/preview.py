@@ -59,15 +59,16 @@ async def _resolve_system_prompt(
 
 
 def _build_generation_message(template: TaskTemplate | None, grounding: str, existing_statements: list[str]) -> str:
+    merged = taskgen.merge_template_params(template, topic="", difficulty="", instructions="")
     return taskgen.build_generation_user_message(
-        topic=template.topic if template else "",
-        difficulty=template.difficulty if template else "medium",
+        topic=merged["topic"],
+        difficulty=merged["difficulty"],
         count=3,
-        task_kind=template.task_kind if template else "calculation",
-        answer_format=template.answer_format if template else "numeric",
-        instructions=template.instructions if template else "",
+        task_kind=merged["task_kind"],
+        answer_format=merged["answer_format"],
+        instructions=merged["instructions"],
         grounding=grounding,
-        example_tasks=list(template.example_tasks or []) if template else [],
+        example_tasks=merged["example_tasks"],
         existing_statements=existing_statements,
     )
 
@@ -106,8 +107,9 @@ async def prompt_preview(
             ).scalar_one_or_none()
             if template is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
-        sheet_ids = (template.reference_sheet_ids or None) if template else None
-        query = (template.kb_query or template.topic) if template else ""
+        merged = taskgen.merge_template_params(template, topic="", difficulty="", instructions="")
+        sheet_ids = merged["sheet_ids"]
+        query = merged["kb_query"] or merged["topic"]
         grounding = await build_grounding_block(db, assistant.id, sheet_ids=sheet_ids, query=query)
         existing_statements = list(
             (
@@ -121,11 +123,10 @@ async def prompt_preview(
         )
         user_message = _build_generation_message(template, grounding, existing_statements)
     elif body.role == "tutor":
-        student_message = body.student_work or SAMPLE_STUDENT_MESSAGE
-        query = (task.statement if task else student_message)[:200]
-        grounding = await build_grounding_block(db, assistant.id, query=query)
-        context = build_tutor_context(task, "", grounding)
-        user_message = flatten_dialog([{"role": "user", "content": student_message}], context)
+        query_source = task.statement if task else (body.student_work or SAMPLE_STUDENT_MESSAGE)
+        grounding = await build_grounding_block(db, assistant.id, query=query_source[:200])
+        context = build_tutor_context(task, body.student_work, grounding)
+        user_message = flatten_dialog([{"role": "user", "content": SAMPLE_STUDENT_MESSAGE}], context)
     else:
         task_text = task.statement if task else "(условие задачи)"
         query = (task.statement if task else "")[:200] or body.ocr_text[:200]

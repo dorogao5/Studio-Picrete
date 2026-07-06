@@ -24,7 +24,12 @@ _WORD_RE = re.compile(r"\w+")
 
 
 def normalize_numeric_text(text: str) -> str:
-    text = (text or "").translate(_SUPERSCRIPTS)
+    # Надстрочные степени превращаем в ^-форму ДО общей транслитерации: 10⁻¹⁴ → 10^-14, а не 10-14.
+    text = re.sub(
+        r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]+",
+        lambda m: "^" + m.group(0).translate(_SUPERSCRIPTS),
+        text or "",
+    )
     text = text.replace("−", "-")
     # LaTeX: -28{,}7\\,\\text{кДж}, 2\\cdot10^{-5}, H_2O — чистим макросы и индексы до извлечения чисел.
     text = text.replace("\\cdot", "·").replace("\\times", "×")
@@ -34,7 +39,8 @@ def normalize_numeric_text(text: str) -> str:
     text = re.sub(r"_\{?\d+\}?", " ", text)
     text = re.sub(r"\\[a-zA-Z]+|\\[,;!: ]", " ", text)
     text = re.sub(r"(?<=\d)[\u00a0\u2007\u2009\u202f](?=\d)", "", text)
-    text = re.sub(r"[·×∙⋅*]\s*10\s*\^?\s*(?=[-+]?\d)", "e", text)
+    text = re.sub(r"\s*[·×∙⋅*]\s*10\s*\^?\s*(?=[-+]?\d)", "e", text)
+    text = re.sub(r"(?<![\d.,eE])10\s*\^\s*(?=[-+]?\d)", "1e", text)
     text = re.sub(r"(?<=\d),(?=\d)", ".", text)
     return text
 
@@ -109,7 +115,10 @@ def data_check(statement: str, sheets_text: str) -> dict:
             value = float(token)
         except ValueError:
             continue
-        if _INTEGER_RE.fullmatch(token) and abs(value) < 100:
+        # Целые до 1000 и «круглые» десятые — это заданные условия (масса, объём, T), а не табличные данные.
+        if _INTEGER_RE.fullmatch(token) and abs(value) < 1000:
+            continue
+        if re.fullmatch(r"[-+]?\d+\.\d", token) and abs(value) < 100:
             continue
         key = token.lower().lstrip("+")
         if key in sheet_tokens or key in unknown:

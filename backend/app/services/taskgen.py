@@ -93,7 +93,9 @@ def build_generation_user_message(
     sections.append(f"Уже существующие задачи (НЕ повторяйте их сюжеты и числа):\n{existing or '(нет)'}")
     sections.append(
         "Каждая задача: условие + подробное эталонное решение + краткий финальный ответ (answer) "
-        "+ рубрика с баллами + список использованных справочных значений (data_used). Ответ строго JSON."
+        "+ рубрика с баллами + список использованных справочных значений (data_used).\n"
+        "Ответ — строго JSON по схеме (эта схема главнее любых других форматов):\n"
+        f"{GENERATION_JSON_CONTRACT}"
     )
     return "\n\n".join(sections)
 
@@ -129,7 +131,9 @@ async def generate_tasks(
         example_tasks=example_tasks,
         existing_statements=existing_statements,
     )
-    result = await llm.chat(provider, model, prompt, user_message, temperature=temperature, json_mode=True)
+    result = await llm.chat(
+        provider, model, prompt, user_message, temperature=temperature, json_mode=True, max_tokens=8000
+    )
     parsed = llm.extract_json(result.text)
     tasks = parsed.get("tasks")
     if not isinstance(tasks, list) or not tasks:
@@ -143,7 +147,7 @@ def merge_template_params(
     if template is None:
         return {
             "topic": topic,
-            "difficulty": difficulty,
+            "difficulty": difficulty or "medium",
             "instructions": instructions,
             "task_kind": "calculation",
             "answer_format": "numeric",
@@ -159,7 +163,7 @@ def merge_template_params(
         example_tasks = [{"statement": template.example, "solution": "", "answer": ""}]
     return {
         "topic": topic or template.topic,
-        "difficulty": template.difficulty if difficulty == "medium" else difficulty,
+        "difficulty": difficulty or template.difficulty or "medium",
         "instructions": "\n".join(filter(None, [template.instructions, instructions])),
         "task_kind": template.task_kind,
         "answer_format": template.answer_format,
