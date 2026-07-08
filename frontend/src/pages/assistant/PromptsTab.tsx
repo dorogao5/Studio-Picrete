@@ -24,11 +24,14 @@ const ROLE_LABELS: Record<string, string> = {
 };
 const ROLE_BADGES: Record<string, string> = { grader: "Проверка", generator: "Генерация", tutor: "Разбор" };
 
+const ALL_ROLES = ["generator", "grader", "tutor"] as const;
+
 export default function PromptsTab({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
   const [prompts, setPrompts] = useState<PromptVersion[] | null>(null);
   const [error, setError] = useState("");
   const [generateOpen, setGenerateOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [bulkState, setBulkState] = useState("");
 
   const reload = async () => {
     try {
@@ -42,20 +45,55 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
     void reload();
   }, [assistant.id]);
 
+  const missingRoles = useMemo(() => {
+    const active = new Set((prompts ?? []).filter((p) => p.status === "active").map((p) => p.role));
+    return ALL_ROLES.filter((r) => !active.has(r));
+  }, [prompts]);
+
+  const bulkGenerate = async () => {
+    const target = modelOptions(providers, true)[0];
+    if (!target) {
+      setError("Сначала подключите production-провайдера (например DeepSeek)");
+      return;
+    }
+    setError("");
+    try {
+      for (const role of missingRoles) {
+        setBulkState(`Архитектор пишет промпт «${ROLE_LABELS[role]}»… (до минуты)`);
+        const p = await promptsApi.generate(assistant.id, {
+          role,
+          target_model_entry_id: target.id,
+          extra_instructions: "",
+        });
+        await promptsApi.activate(assistant.id, p.id);
+        await reload();
+      }
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBulkState("");
+    }
+  };
+
   return (
     <div className="space-y-5">
-      <div className="flex gap-2">
-        <Button variant="accent" onClick={() => setGenerateOpen(true)}>
-          <Sparkles className="h-4 w-4" /> Сгенерировать ИИ-архитектором
+      <div className="flex gap-2 items-center flex-wrap">
+        {missingRoles.length > 0 && (
+          <Button variant="accent" onClick={bulkGenerate} loading={Boolean(bulkState)}>
+            <Sparkles className="h-4 w-4" /> Собрать промпты автоматически ({missingRoles.length})
+          </Button>
+        )}
+        <Button variant="secondary" onClick={() => setGenerateOpen(true)}>
+          <Sparkles className="h-4 w-4" /> Новая версия архитектором
         </Button>
-        <Button variant="secondary" onClick={() => setManualOpen(true)}>
-          <Plus className="h-4 w-4" /> Написать вручную
+        <Button variant="ghost" onClick={() => setManualOpen(true)}>
+          <Plus className="h-4 w-4" /> Вручную
         </Button>
+        {bulkState && <span className="text-xs text-muted-foreground">{bulkState}</span>}
       </div>
       <p className="text-xs text-muted-foreground">
-        Архитектор (например GPT-5.5) собирает системный промпт из профиля дисциплины, критериев и нюансов —
-        с учётом рекомендаций для конкретного семейства целевой модели (DeepSeek, Qwen, YandexGPT). Активная версия
-        используется в Playground и пайплайнах.
+        Три роли ассистента — генерация заданий, проверка решений и разбор со студентом. Промпты для них пишет
+        фоновая модель-архитектор из профиля дисциплины, критериев и нюансов; активная версия используется везде.
       </p>
 
       <ErrorNote message={error} />
@@ -64,7 +102,7 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
       ) : prompts.length === 0 ? (
         <EmptyState
           title="Промптов пока нет"
-          hint="Заполните профиль и нажмите «Сгенерировать ИИ-архитектором» — это отправная точка для итераций"
+          hint="Нажмите «Собрать промпты автоматически» — архитектор напишет все три роли из профиля дисциплины"
         />
       ) : (
         (["grader", "generator", "tutor"] as const).map((role) => {

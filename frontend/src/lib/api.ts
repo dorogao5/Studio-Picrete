@@ -2,6 +2,7 @@ import axios from "axios";
 import type {
   Assistant,
   Course,
+  DocumentAnalysis,
   GeneratedTask,
   GenerationBatch,
   KnowledgeChunk,
@@ -14,6 +15,7 @@ import type {
   PlaygroundRun,
   PromptPreview,
   Provider,
+  ProviderBalance,
   ProviderPreset,
   PromptVersion,
   ReferenceSheet,
@@ -91,6 +93,7 @@ export const providersApi = {
   remove: (id: string) => api.delete(`/providers/${id}`),
   test: (id: string) =>
     api.post<{ ok: boolean; message: string; duration_ms: number | null }>(`/providers/${id}/test`).then((r) => r.data),
+  balance: (id: string) => api.get<ProviderBalance>(`/providers/${id}/balance`).then((r) => r.data),
   addModel: (
     providerId: string,
     body: { model_id: string; display_name?: string; family?: string; supports_vision?: boolean; supports_json?: boolean },
@@ -194,6 +197,12 @@ export const kbApi = {
   extractSyllabus: (assistantId: string, documentId: string) =>
     api
       .post<{ topics: string[] }>(`/assistants/${assistantId}/kb/extract-syllabus`, { document_id: documentId })
+      .then((r) => r.data),
+  analyze: (assistantId: string, documentId: string, refresh = false) =>
+    api
+      .post<DocumentAnalysis>(`/assistants/${assistantId}/kb/documents/${documentId}/analyze`, undefined, {
+        params: refresh ? { refresh: true } : undefined,
+      })
       .then((r) => r.data),
 };
 

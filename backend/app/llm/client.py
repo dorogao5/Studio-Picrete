@@ -148,6 +148,51 @@ async def chat(
 
 
 
+# \t,\r,\n,\b,\f — валидные JSON-эскейпы, которыми модели нечаянно начинают LaTeX-команды
+# (\times, \rho, \nabla, \beta, \frac). Различаем по продолжению: управляющий символ перед
+# буквами команды не пишет ни один автор — значит, это LaTeX и бэкслеш надо экранировать.
+_LATEX_T_RE = re.compile(r"t(?:imes|ext|frac|heta|herefore|ilde|riangle|au(?![a-zA-Z])|anh?(?![a-zA-Z])|o(?![a-zA-Z]))")
+_LATEX_R_RE = re.compile(r"r(?:ho(?![a-zA-Z])|ight|angle|ceil|floor)")
+_LATEX_N_RE = re.compile(r"n(?:abla|otin|eq(?![a-zA-Z]))")
+_LATEX_BF_RE = re.compile(r"[bf][a-zA-Z]")
+_UNICODE_ESC_RE = re.compile(r"u[0-9a-fA-F]{4}")
+
+
+def _fix_latex_escapes(raw: str) -> str:
+    out: list[str] = []
+    i, n = 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        j = i
+        while j < n and raw[j] == "\\":
+            j += 1
+        run = j - i
+        out.append("\\" * (run - run % 2))  # пары \\ уже экранированы корректно
+        i = j
+        if run % 2 == 0:
+            continue
+        rest = raw[j : j + 12]
+        nxt = rest[:1]
+        if nxt in '"/\\' or (nxt == "u" and _UNICODE_ESC_RE.match(rest)):
+            keep = True
+        elif nxt in "bfnrt":
+            latex = (
+                (nxt in "bf" and _LATEX_BF_RE.match(rest))
+                or (nxt == "t" and _LATEX_T_RE.match(rest))
+                or (nxt == "r" and _LATEX_R_RE.match(rest))
+                or (nxt == "n" and _LATEX_N_RE.match(rest))
+            )
+            keep = not latex
+        else:
+            keep = False  # невалидный JSON-эскейп (\alpha, \sigma, \Gamma...) — это LaTeX
+        out.append("\\" if keep else "\\\\")
+    return "".join(out)
+
+
 def extract_json(text: str) -> dict:
     candidate = text.strip()
     fence = re.search(r"```(?:json)?\s*(.+?)```", candidate, re.DOTALL)
@@ -160,9 +205,12 @@ def extract_json(text: str) -> dict:
             raise LlmError(f"В ответе модели не найден JSON: {text[:300]}")
         candidate = candidate[start : end + 1]
     try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError as err:
-        raise LlmError(f"Невалидный JSON в ответе модели: {err}") from err
+        parsed = json.loads(_fix_latex_escapes(candidate))
+    except json.JSONDecodeError:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as err:
+            raise LlmError(f"Невалидный JSON в ответе модели: {err}") from err
     if not isinstance(parsed, dict):
         raise LlmError("Модель вернула JSON, но это не объект")
     return parsed

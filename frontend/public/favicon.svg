@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#5B3FA8"/>
+  <!-- колба Эрленмейера -->
+  <path d="M27 14 h10 v3 h-2 v12 l11.5 18.5 a4 4 0 0 1 -3.4 6.1 h-22.2 a4 4 0 0 1 -3.4 -6.1 L29 29 V17 h-2 z"
+        fill="none" stroke="#F7F4EC" stroke-width="3.4" stroke-linejoin="round"/>
+  <!-- жидкость -->
+  <path d="M24.6 36 h14.8 l7 11.3 a2.2 2.2 0 0 1 -1.9 3.4 h-25 a2.2 2.2 0 0 1 -1.9 -3.4 z" fill="#F7F4EC"/>
+  <!-- пузырьки -->
+  <circle cx="30" cy="30" r="1.8" fill="#F7F4EC"/>
+  <circle cx="34.5" cy="25" r="1.3" fill="#F7F4EC"/>
+</svg>

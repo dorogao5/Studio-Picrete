@@ -8,7 +8,7 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
   const [name, setName] = useState(assistant.name);
   const [description, setDescription] = useState(assistant.description);
   const [audience, setAudience] = useState(assistant.audience);
-  const [topics, setTopics] = useState(assistant.topics.join(", "));
+  const [topics, setTopics] = useState(assistant.topics.join("\n"));
   const [criteria, setCriteria] = useState<Criterion[]>(assistant.criteria);
   const [nuances, setNuances] = useState<string[]>(assistant.nuances);
   const [newNuance, setNewNuance] = useState("");
@@ -24,7 +24,7 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
         name,
         description,
         audience,
-        topics: topics.split(",").map((t) => t.trim()).filter(Boolean),
+        topics: topics.split("\n").map((t) => t.trim().replace(/^[•\-–]\s*/, "")).filter(Boolean),
         criteria: criteria.filter((c) => c.name.trim()),
         nuances: nuances.filter(Boolean),
       });
@@ -52,12 +52,12 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
         <Field label="Описание курса" hint="Учебник, уровень группы, особенности программы — всё это попадёт в системный промпт">
           <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
-        <Field label="Темы курса (через запятую)">
+        <Field label="Темы курса" hint="Одна тема на строку. Заполняются автоматически при разборе документов на шаге «Материалы»">
           <Textarea
-            rows={2}
+            rows={Math.min(12, Math.max(3, topics.split("\n").length + 1))}
             value={topics}
             onChange={(e) => setTopics(e.target.value)}
-            placeholder="Строение атома, Химическая связь, Растворы, ОВР..."
+            placeholder={"Строение атома\nХимическая связь\nРастворы\nОкислительно-восстановительные реакции"}
           />
         </Field>
       </Card>

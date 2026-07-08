@@ -1,7 +1,11 @@
 import re
 
+import snowballstemmer
+
 from app.llm import client as llm
 from app.models import ModelEntry, Provider
+
+_ru_stemmer = snowballstemmer.stemmer("russian")
 
 SOLVER_SYSTEM_PROMPT = """Вы — независимый решатель учебных задач по естественнонаучным дисциплинам.
 Решите задачу самостоятельно, с нуля. Используйте ТОЛЬКО справочные данные, приведённые в сообщении;
@@ -92,10 +96,19 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
         return result
     ref_norm = " ".join(ref_text.casefold().split())
     solver_norm = " ".join(solver_text.casefold().split())
+    if ref_norm == solver_norm:
+        result["verdict"] = "match"
+        return result
     if not ref_numbers and not solver_numbers:
-        result["verdict"] = "match" if ref_norm == solver_norm else "mismatch"
+        # Текстовые ответы решатель формулирует своими словами — сравниваем по смысловым стемам,
+        # иначе каждая корректная теоретическая задача улетает в «требует внимания».
+        ref_stems = set(_ru_stemmer.stemWords(re.findall(r"\w+", ref_text.lower())))
+        solver_stems = set(_ru_stemmer.stemWords(re.findall(r"\w+", solver_text.lower())))
+        similarity = len(ref_stems & solver_stems) / len(ref_stems | solver_stems) if ref_stems and solver_stems else 0.0
+        result["similarity"] = round(similarity, 2)
+        result["verdict"] = "match" if similarity >= 0.4 else ("mismatch" if similarity < 0.12 else "uncertain")
     else:
-        result["verdict"] = "match" if ref_norm == solver_norm else "uncertain"
+        result["verdict"] = "uncertain"
     return result
 
 

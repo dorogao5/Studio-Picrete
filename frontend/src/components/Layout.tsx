@@ -3,18 +3,19 @@ import {
   Bot,
   Check,
   ChevronsUpDown,
-  FileText,
   FlaskConical,
   GraduationCap,
   KeyRound,
   LayoutGrid,
   ListChecks,
   LogOut,
+  Menu,
   Plug,
   Plus,
   Library,
   Users,
   Workflow,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -29,33 +30,72 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [pwOpen, setPwOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   if (!token) return <Navigate to="/login" replace />;
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner /></div>;
 
   const tabLink = (tab: string) => (selected ? `/disciplines/${selected.id}?tab=${tab}` : "#");
-  const currentTab = new URLSearchParams(location.search).get("tab") ?? "profile";
+  const rawTab = new URLSearchParams(location.search).get("tab") ?? "materials";
+  // Совместимость со старыми ссылками: профиль/промпты → «Ассистент», пайплайн → «Проверка».
+  const currentTab =
+    rawTab === "profile" || rawTab === "prompts" ? "assistant" : rawTab === "pipeline" ? "review" : rawTab;
   const onDiscipline = location.pathname.startsWith("/disciplines/") && selected;
 
   const scopedNav = [
-    { tab: "profile", label: "Профиль и критерии", icon: FileText },
-    { tab: "materials", label: "Материалы курса", icon: Library },
-    { tab: "prompts", label: "Промпты", icon: Bot },
-    { tab: "tasks", label: "Задания", icon: ListChecks },
-    { tab: "pipeline", label: "Пайплайн проверки", icon: Workflow },
+    { tab: "materials", label: "1 · Материалы", icon: Library },
+    { tab: "assistant", label: "2 · Ассистент", icon: Bot },
+    { tab: "tasks", label: "3 · Задания", icon: ListChecks },
+    { tab: "review", label: "4 · Проверка", icon: Workflow },
     { tab: "courses", label: "Курсы", icon: GraduationCap },
   ];
 
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-60 shrink-0 border-r border-border bg-card flex flex-col">
-        <div className="px-4 py-3.5 border-b border-border">
-          <p className="font-semibold tracking-tight text-sm">Picrete Studio</p>
-          <p className="text-[11px] text-muted-foreground">общий воркспейс преподавателей</p>
+    <div className="min-h-screen lg:flex">
+      {/* Мобильная шапка */}
+      <header className="lg:hidden sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-card px-3 py-2.5">
+        <button
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+          aria-label="Открыть меню"
+          onClick={() => setNavOpen(true)}
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="font-semibold text-sm tracking-tight">Picrete Studio</span>
+        {selected && (
+          <span className="min-w-0 truncate text-xs text-muted-foreground">· {selected.name}</span>
+        )}
+      </header>
+
+      {navOpen && (
+        <div className="fixed inset-0 z-40 bg-foreground/40 lg:hidden" onClick={() => setNavOpen(false)} />
+      )}
+      <aside
+        className={clsx(
+          "w-60 shrink-0 border-r border-border bg-card flex flex-col",
+          "fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0 lg:transition-none",
+          navOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("a")) setNavOpen(false);
+        }}
+      >
+        <div className="flex items-center justify-between px-4 py-3.5 border-b border-border">
+          <div>
+            <p className="font-semibold tracking-tight text-sm">Picrete Studio</p>
+            <p className="text-[11px] text-muted-foreground">общий воркспейс преподавателей</p>
+          </div>
+          <button
+            className="lg:hidden rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+            aria-label="Закрыть меню"
+            onClick={() => setNavOpen(false)}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         <div className="p-2 border-b border-border">
-          <DisciplineSwitcher onNavigate={(id) => navigate(`/disciplines/${id}?tab=profile`)} />
+          <DisciplineSwitcher onNavigate={(id) => navigate(`/disciplines/${id}?tab=materials`)} />
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2 space-y-4">
@@ -135,7 +175,7 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0 p-6 lg:p-8 overflow-x-hidden">
+      <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-x-hidden">
         <Outlet />
       </main>
 

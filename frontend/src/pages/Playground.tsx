@@ -25,6 +25,7 @@ import type {
   TutorRun,
 } from "../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Tabs, Textarea } from "../components/ui";
+import MathText from "../components/MathText";
 import { modelOptions } from "./assistant/PromptsTab";
 
 export default function Playground() {
@@ -419,7 +420,7 @@ function ResultCard({
           {output.feedback && (
             <details className="text-xs">
               <summary className="cursor-pointer font-medium text-muted-foreground">Фидбек студенту</summary>
-              <p className="mt-1 whitespace-pre-wrap">{output.feedback}</p>
+              <MathText className="mt-1">{output.feedback}</MathText>
             </details>
           )}
         </>
@@ -678,7 +679,9 @@ function StepOutput({ step }: { step: PipelineRun["steps_log"][number] }) {
             {String(result.total_score)} / {String(result.max_score)}
           </span>
         </p>
-        {typeof result.feedback === "string" && <p className="text-muted-foreground line-clamp-3">{result.feedback}</p>}
+        {typeof result.feedback === "string" && (
+          <MathText inline className="text-muted-foreground line-clamp-3 block">{result.feedback}</MathText>
+        )}
       </div>
     );
   }
@@ -916,7 +919,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
                     m.role === "user" ? "bg-accent/10" : "bg-card border border-border"
                   }`}
                 >
-                  <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+                  <MathText className="text-sm">{m.content}</MathText>
                 </div>
               </div>
             ))}

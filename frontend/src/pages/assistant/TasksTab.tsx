@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  Loader2,
   Pencil,
   Plus,
   RefreshCw,
@@ -27,6 +28,7 @@ import type {
   TaskValidation,
 } from "../../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
+import MathText from "../../components/MathText";
 import { modelOptions } from "./PromptsTab";
 
 type Tone = "default" | "success" | "warning" | "destructive" | "info" | "accent";
@@ -239,13 +241,14 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Партии генерации</h2>
-          <Button variant="accent" onClick={() => setBatchModal({ open: true, templateId: "" })}>
-            <Sparkles className="h-4 w-4" /> Сгенерировать партию
+          <Button variant="ghost" className="text-xs" onClick={() => setBatchModal({ open: true, templateId: "" })}>
+            <Sparkles className="h-3.5 w-3.5" /> Генерация по теме, без блюпринта
           </Button>
         </div>
         {batches.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            Партия — фоновая генерация с автопроверкой: независимый решатель, сверка чисел со справочниками, дедуп.
+            Здесь появится история генераций. Запустите партию с карточки блюпринта — задачи пройдут автопроверку
+            (независимый решатель, сверка данных, дедуп) и попадут в банк.
           </p>
         ) : (
           <div className="space-y-2">
@@ -389,18 +392,12 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
     <div className="space-y-2">
       <div className="flex items-center gap-1.5 flex-wrap">
         {v.solver?.status === "match" && <Badge tone="success">Решатель: совпал ✓</Badge>}
-        {v.solver?.status === "mismatch" && (
-          <Badge tone="destructive">
-            Решатель: расходится ({task.answer || "—"} vs {v.solver.answer || "—"})
-          </Badge>
-        )}
+        {v.solver?.status === "mismatch" && <Badge tone="destructive">Решатель: расходится</Badge>}
         {v.solver?.status === "uncertain" && <Badge tone="warning">Решатель: не уверен</Badge>}
         {v.solver?.status === "error" && <Badge tone="destructive">Решатель: ошибка</Badge>}
         {v.solver?.status === "skipped" && <Badge>Решатель: пропущен</Badge>}
         {v.data?.status === "ok" && <Badge tone="success">Данные: ок</Badge>}
-        {v.data?.status === "warn" && (
-          <Badge tone="warning">неизвестные числа: {(v.data.unknown_numbers ?? []).join("; ")}</Badge>
-        )}
+        {v.data?.status === "warn" && <Badge tone="warning">Данные: есть числа не из справочников</Badge>}
         {v.data?.status === "skipped" && <Badge>Данные: пропущено</Badge>}
         {v.sanity && ((v.sanity.issues?.length ?? 0) === 0 ? <Badge tone="success">Sanity: ок</Badge> : <Badge tone="warning">Sanity: есть замечания</Badge>)}
         {v.dedup?.duplicate && <Badge tone="warning">Дубликат</Badge>}
@@ -408,8 +405,8 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
       {(v.reasons?.length ?? 0) > 0 && (
         <ul className="list-disc pl-4 space-y-0.5">
           {v.reasons!.map((reason, i) => (
-            <li key={i} className="text-xs text-muted-foreground">
-              {reason}
+            <li key={i} className="text-xs text-muted-foreground break-words">
+              <MathText inline>{reason}</MathText>
             </li>
           ))}
         </ul>
@@ -462,19 +459,21 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
         ) : (
           <ChevronRight className="h-4 w-4 shrink-0 mt-0.5" />
         )}
-        <span className={`text-sm whitespace-pre-wrap ${expanded ? "" : "line-clamp-3"}`}>{task.statement}</span>
+        <span className={`text-sm ${expanded ? "" : "line-clamp-3"}`}>
+          <MathText inline>{task.statement}</MathText>
+        </span>
       </button>
 
       {expanded && (
         <div className="mt-3 ml-6 space-y-3 text-sm">
           <div>
             <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Эталонное решение</p>
-            <p className="whitespace-pre-wrap text-muted-foreground">{task.reference_solution || "—"}</p>
+            <MathText className="text-muted-foreground">{task.reference_solution || "—"}</MathText>
           </div>
           <div>
             <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Ответ</p>
             <span className="inline-block rounded bg-success/10 border border-success/30 px-2 py-0.5 font-medium text-success">
-              {task.answer || "—"}
+              <MathText inline>{task.answer || "—"}</MathText>
             </span>
           </div>
           {task.rubric.length > 0 && (
@@ -485,9 +484,13 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
                   <tbody>
                     {task.rubric.map((r, i) => (
                       <tr key={i} className="border-t border-border">
-                        <td className="py-1 pr-3 font-medium">{r.criterion_name}</td>
-                        <td className="py-1 pr-3 text-muted-foreground">{r.description ?? ""}</td>
-                        <td className="py-1 text-right whitespace-nowrap">{r.max_score} б.</td>
+                        <td className="py-1 pr-3 font-medium align-top">
+                          <MathText inline>{r.criterion_name}</MathText>
+                        </td>
+                        <td className="py-1 pr-3 text-muted-foreground align-top">
+                          <MathText inline>{r.description ?? ""}</MathText>
+                        </td>
+                        <td className="py-1 text-right whitespace-nowrap align-top">{r.max_score} б.</td>
                       </tr>
                     ))}
                   </tbody>
@@ -509,37 +512,57 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
       )}
 
       <ErrorNote message={error} />
-      <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-        {task.status !== "approved" && (
+      <div className="mt-3 flex items-center gap-1 flex-wrap">
+        {task.status !== "approved" ? (
           <Button variant="secondary" onClick={() => setStatus("approved")}>
             <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить
           </Button>
-        )}
-        {task.status !== "rejected" && (
-          <Button variant="ghost" onClick={() => setStatus("rejected")}>
-            <XCircle className="h-3.5 w-3.5" /> Отклонить
+        ) : (
+          <Button variant="ghost" onClick={() => setStatus("draft")}>
+            <RefreshCw className="h-3.5 w-3.5" /> Вернуть в черновики
           </Button>
         )}
-        <Button variant="ghost" onClick={revalidate} loading={revalidating}>
-          {!revalidating && <RefreshCw className="h-3.5 w-3.5" />} Перепроверить
-        </Button>
-        <Button variant="ghost" onClick={() => setEditOpen(true)}>
-          <Pencil className="h-3.5 w-3.5" /> Редактировать
-        </Button>
-        <Button
-          variant="destructive"
-          onClick={async () => {
-            if (!confirm(`Удалить задачу?`)) return;
-            try {
-              await tasksApi.remove(assistantId, task.id);
-              onChanged();
-            } catch (err) {
-              setError(apiErrorMessage(err));
-            }
-          }}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+        <div className="ml-auto flex items-center gap-0.5">
+          {task.status !== "rejected" && (
+            <button
+              className="p-1.5 text-muted-foreground hover:text-foreground"
+              title="Отклонить"
+              onClick={() => setStatus("rejected")}
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+            title="Перепроверить автопроверкой"
+            disabled={revalidating}
+            onClick={revalidate}
+          >
+            {revalidating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          </button>
+          <button
+            className="p-1.5 text-muted-foreground hover:text-foreground"
+            title="Редактировать"
+            onClick={() => setEditOpen(true)}
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            className="p-1.5 text-muted-foreground hover:text-destructive"
+            title="Удалить"
+            onClick={async () => {
+              if (!confirm(`Удалить задачу?`)) return;
+              try {
+                await tasksApi.remove(assistantId, task.id);
+                onChanged();
+              } catch (err) {
+                setError(apiErrorMessage(err));
+              }
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {editOpen && (

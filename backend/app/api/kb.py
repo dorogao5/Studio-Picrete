@@ -13,6 +13,7 @@ from app.db import get_db
 from app.llm import client as llm
 from app.models import KnowledgeChunk, KnowledgeDocument, ReferenceSheet, User
 from app.schemas import (
+    DocumentAnalysisResponse,
     KnowledgeChunkOut,
     KnowledgeDocumentDetailOut,
     KnowledgeDocumentOut,
@@ -24,7 +25,7 @@ from app.schemas import (
     SyllabusExtractResponse,
 )
 from app.security import get_current_user
-from app.services import kb
+from app.services import kb, storage
 
 router = APIRouter(tags=["kb"], dependencies=[Depends(get_current_user)])
 
@@ -175,6 +176,11 @@ async def delete_document(assistant_id: str, document_id: str, db: AsyncSession 
     await kb.deindex_document(db, document_id)
     if document.file_path:
         Path(document.file_path).unlink(missing_ok=True)
+    if document.s3_key and storage.s3_enabled():
+        try:
+            await storage.delete_object(document.s3_key)
+        except Exception:
+            pass  # осиротевший объект приберёт ночной бэкап-скрипт
     await db.delete(document)
     await db.commit()
     return {"ok": True}
@@ -202,6 +208,29 @@ async def extract_syllabus(
     except llm.LlmError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
     return SyllabusExtractResponse(topics=topics)
+
+
+@router.post("/assistants/{assistant_id}/kb/documents/{document_id}/analyze", response_model=DocumentAnalysisResponse)
+async def analyze_document(
+    assistant_id: str, document_id: str, refresh: bool = False, db: AsyncSession = Depends(get_db)
+) -> DocumentAnalysisResponse:
+    await get_assistant_or_404(assistant_id, db)
+    document = await _get_document_or_404(db, assistant_id, document_id)
+    if document.status != "parsed" or not document.markdown.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Текст ещё не извлечён — дождитесь статуса «готов»")
+    # Авто-разбор уже отработал в фоне — отдаём сохранённый результат мгновенно.
+    if not refresh and document.analysis_status == "ready" and document.analysis:
+        return DocumentAnalysisResponse(**document.analysis)
+    provider, model = await resolve_architect(db)
+    try:
+        analysis = await kb.analyze_document(db, document, provider, model)
+    except llm.LlmError as err:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
+    document.analysis = analysis
+    document.analysis_status = "ready"
+    document.analysis_error = ""
+    await db.commit()
+    return DocumentAnalysisResponse(**analysis)
 
 
 # ---------------------------------------------------------------- sheets

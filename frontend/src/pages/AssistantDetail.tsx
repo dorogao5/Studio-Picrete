@@ -1,7 +1,7 @@
-import { FlaskConical, User as UserIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, FlaskConical, GraduationCap, User as UserIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Badge, Button, ErrorNote, Spinner, Tabs } from "../components/ui";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Badge, Button, ErrorNote, Spinner } from "../components/ui";
 import { apiErrorMessage, assistantsApi, providersApi } from "../lib/api";
 import { useApp } from "../lib/context";
 import type { Assistant, Provider } from "../lib/types";
@@ -12,25 +12,43 @@ import ProfileTab from "./assistant/ProfileTab";
 import PromptsTab from "./assistant/PromptsTab";
 import TasksTab from "./assistant/TasksTab";
 
-const TABS = [
-  { key: "profile", label: "Профиль и критерии" },
-  { key: "materials", label: "Материалы курса" },
-  { key: "prompts", label: "Промпты" },
-  { key: "tasks", label: "Задания" },
-  { key: "pipeline", label: "Пайплайн проверки" },
-  { key: "courses", label: "Курсы" },
-];
+const STEPS = [
+  {
+    key: "materials",
+    label: "Материалы",
+    hint: "Загрузите РПД, конспекты и задачники. Из них извлекутся темы, справочные данные и нотация курса — их не нужно вбивать вручную.",
+  },
+  {
+    key: "assistant",
+    label: "Ассистент",
+    hint: "Профиль дисциплины, критерии оценивания и системные промпты для генерации задач, проверки работ и разбора со студентом.",
+  },
+  {
+    key: "tasks",
+    label: "Задания",
+    hint: "Сгенерируйте задачи в нотации курса, проверьте их автопроверкой (независимый решатель, сверка данных) и одобрите лучшие.",
+  },
+  {
+    key: "review",
+    label: "Проверка",
+    hint: "Проверьте ассистента в деле: разбор со студентом и пайплайн оценивания работ.",
+  },
+] as const;
+
+type StepKey = (typeof STEPS)[number]["key"];
 
 export default function AssistantDetail() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { setSelectedId, reloadDisciplines } = useApp();
   const [assistant, setAssistant] = useState<Assistant | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [error, setError] = useState("");
 
-  const tab = params.get("tab") ?? "profile";
+  const rawTab = params.get("tab") ?? "materials";
+  // Совместимость со старыми ссылками (?tab=profile|prompts|pipeline|courses)
+  const tab: string = rawTab === "profile" || rawTab === "prompts" ? "assistant" : rawTab === "pipeline" ? "review" : rawTab;
+
   const setTab = (key: string) => {
     const next = new URLSearchParams(params);
     next.set("tab", key);
@@ -59,59 +77,116 @@ export default function AssistantDetail() {
   return (
     <div className="max-w-5xl space-y-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold truncate">{assistant.name}</h1>
-            <Badge tone="accent">{assistant.discipline}</Badge>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold">{assistant.name}</h1>
+            {assistant.discipline !== assistant.name && (
+              <Badge tone="accent" className="shrink-0">
+                {assistant.discipline}
+              </Badge>
+            )}
           </div>
           {assistant.created_by_name && (
-            <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <p className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px] text-muted-foreground">
               <UserIcon className="h-3 w-3" />
               создал {assistant.created_by_name}
               {assistant.updated_by_name && assistant.updated_at && (
-                <span>· последнее изменение {assistant.updated_by_name}, {new Date(assistant.updated_at).toLocaleString("ru-RU")}</span>
+                <span>· изменение {assistant.updated_by_name}, {new Date(assistant.updated_at).toLocaleString("ru-RU")}</span>
               )}
             </p>
           )}
         </div>
-        <Link to="/playground">
-          <Button variant="accent">
-            <FlaskConical className="h-4 w-4" /> Playground
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="ghost" onClick={() => setTab("courses")} title="Привязка к курсам Picrete">
+            <GraduationCap className="h-4 w-4" /> Курсы
           </Button>
-        </Link>
+          <Link to="/playground">
+            <Button variant="accent">
+              <FlaskConical className="h-4 w-4" /> Playground
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      <Tabs tabs={TABS} active={tab} onChange={setTab} />
+      {tab === "courses" ? (
+        <div className="space-y-4">
+          <button className="text-sm text-accent hover:underline" onClick={() => setTab("materials")}>
+            ← вернуться к пайплайну
+          </button>
+          <CoursesTab assistant={assistant} />
+        </div>
+      ) : (
+        <>
+          <StepBanner activeKey={tab} />
 
-      {tab === "profile" && (
-        <ProfileTab
-          assistant={assistant}
-          onSaved={async () => {
-            await reload();
-            await reloadDisciplines();
-          }}
-        />
+          <div className="pt-1">
+            {tab === "materials" && <MaterialsTab assistant={assistant} providers={providers} onProfileChanged={reload} />}
+            {tab === "assistant" && (
+              <div className="space-y-8">
+                <ProfileTab
+                  assistant={assistant}
+                  onSaved={async () => {
+                    await reload();
+                    await reloadDisciplines();
+                  }}
+                />
+                <div className="border-t border-border pt-6">
+                  <PromptsTab assistant={assistant} providers={providers} />
+                </div>
+              </div>
+            )}
+            {tab === "tasks" && <TasksTab assistant={assistant} providers={providers} />}
+            {tab === "review" && <PipelinesTab assistant={assistant} providers={providers} />}
+          </div>
+
+          <StepFooter activeKey={tab} onGo={setTab} />
+        </>
       )}
-      {tab === "materials" && <MaterialsTab assistant={assistant} providers={providers} onProfileChanged={reload} />}
-      {tab === "prompts" && <PromptsTab assistant={assistant} providers={providers} />}
-      {tab === "tasks" && <TasksTab assistant={assistant} providers={providers} />}
-      {tab === "pipeline" && <PipelinesTab assistant={assistant} providers={providers} />}
-      {tab === "courses" && <CoursesTab assistant={assistant} />}
 
-      <div className="pt-6">
-        <Button
-          variant="destructive"
-          onClick={async () => {
-            if (confirm(`Удалить дисциплину «${assistant.name}» со всеми промптами, задачами и пайплайнами?`)) {
-              await assistantsApi.remove(assistant.id);
-              await reloadDisciplines();
-              navigate("/disciplines");
-            }
-          }}
-        >
-          Удалить дисциплину
-        </Button>
+    </div>
+  );
+}
+
+function StepBanner({ activeKey }: { activeKey: string }) {
+  const index = STEPS.findIndex((s) => s.key === activeKey);
+  const step = STEPS[index] ?? STEPS[0];
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-4 shadow-soft">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+        {index + 1}
+      </span>
+      <div className="min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Шаг {index + 1} из {STEPS.length}
+          </span>
+          <h2 className="text-sm font-semibold">{step.label}</h2>
+        </div>
+        <p className="mt-0.5 text-sm text-muted-foreground leading-relaxed">{step.hint}</p>
       </div>
+    </div>
+  );
+}
+
+function StepFooter({ activeKey, onGo }: { activeKey: string; onGo: (key: StepKey) => void }) {
+  const index = STEPS.findIndex((s) => s.key === activeKey);
+  const prev = index > 0 ? STEPS[index - 1] : null;
+  const next = index >= 0 && index < STEPS.length - 1 ? STEPS[index + 1] : null;
+  if (!prev && !next) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+      {prev ? (
+        <Button variant="ghost" onClick={() => onGo(prev.key)}>
+          <ArrowLeft className="h-4 w-4" /> {prev.label}
+        </Button>
+      ) : (
+        <span />
+      )}
+      {next && (
+        <Button variant="secondary" onClick={() => onGo(next.key)}>
+          Далее: {next.label} <ArrowRight className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }

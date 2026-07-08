@@ -31,6 +31,13 @@ export interface Provider {
   models: ModelEntry[];
 }
 
+export interface ProviderBalance {
+  supported: boolean;
+  ok: boolean;
+  balance: string;
+  message: string;
+}
+
 export interface ProviderPreset {
   kind: string;
   title: string;
@@ -190,9 +197,26 @@ export interface KnowledgeDocument {
   size_bytes: number;
   status: "uploaded" | "parsing" | "parsed" | "failed";
   page_count: number;
+  extract_method: "" | "text" | "ocr";
+  analysis_status: "none" | "running" | "ready" | "failed";
+  analysis_error: string;
   error: string;
   created_at: string;
   chunk_count: number;
+}
+
+export interface AnalyzeSheetProposal {
+  title: string;
+  kind: ReferenceSheetKind;
+  description: string;
+  content_markdown: string;
+}
+
+export interface DocumentAnalysis {
+  summary: string;
+  topics: string[];
+  sheets: AnalyzeSheetProposal[];
+  notation_notes: string;
 }
 
 export interface KnowledgeDocumentDetail extends KnowledgeDocument {

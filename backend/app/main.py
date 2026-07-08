@@ -95,6 +95,13 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
         "validation": "JSON DEFAULT '{}'",
         "grounding": "JSON DEFAULT '{}'",
     },
+    "knowledge_documents": {
+        "extract_method": "VARCHAR(16) DEFAULT ''",
+        "analysis_status": "VARCHAR(16) DEFAULT 'none'",
+        "analysis": "JSON DEFAULT '{}'",
+        "analysis_error": "TEXT DEFAULT ''",
+        "s3_key": "VARCHAR(1024) DEFAULT ''",
+    },
 }
 
 
@@ -127,6 +134,11 @@ async def reconcile_interrupted_work() -> None:
             .values(status="failed", error="Прервано перезапуском сервера — нажмите «Переразобрать»")
         )
         await db.execute(
+            update(KnowledgeDocument)
+            .where(KnowledgeDocument.analysis_status == "running")
+            .values(analysis_status="failed", analysis_error="Прервано перезапуском сервера — нажмите «Разобрать»")
+        )
+        await db.execute(
             update(GeneratedTask)
             .where(GeneratedTask.approved.is_(True), GeneratedTask.status == "draft")
             .values(status="approved")
@@ -142,7 +154,13 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         if conn.dialect.name == "sqlite":
             await ensure_sqlite_columns(conn)
-            await ensure_fts(conn)
+        if conn.dialect.name == "postgresql":
+            # pgvector — задел под эмбеддинг-поиск; без superuser может не взлететь, это не фатально.
+            try:
+                await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
+            except Exception:
+                pass
+        await ensure_fts(conn)
     await bootstrap_admin()
     await seed_architect()
     await reconcile_interrupted_work()

@@ -6,17 +6,19 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.llm import client as llm
 from app.llm.presets import PROVIDER_PRESETS
-from app.models import ModelEntry, Provider, User
+from app.models import ModelEntry, Provider
 from app.schemas import (
     ModelEntryCreate,
     ModelEntryOut,
     ModelEntryUpdate,
+    ProviderBalanceOut,
     ProviderCreate,
     ProviderOut,
     ProviderTestResponse,
     ProviderUpdate,
 )
 from app.security import encrypt_secret, get_current_user
+from app.services.balance import fetch_balance
 
 router = APIRouter(prefix="/providers", tags=["providers"], dependencies=[Depends(get_current_user)])
 
@@ -119,6 +121,12 @@ async def test_provider(provider_id: str, db: AsyncSession = Depends(get_db)) ->
         message=f"Модель {model.model_id} ответила: {result.text[:100]}",
         duration_ms=result.duration_ms,
     )
+
+
+@router.get("/{provider_id}/balance", response_model=ProviderBalanceOut)
+async def provider_balance(provider_id: str, db: AsyncSession = Depends(get_db)) -> ProviderBalanceOut:
+    provider = await _get_provider(db, provider_id)
+    return ProviderBalanceOut(**await fetch_balance(provider))
 
 
 @router.post("/{provider_id}/models", response_model=ModelEntryOut)

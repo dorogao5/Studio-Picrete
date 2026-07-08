@@ -1,9 +1,11 @@
-import { Eye, FilePlus2, ListChecks, Loader2, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Eye, FileText, Loader2, Pencil, Plus, RefreshCw, ScanLine, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
+import MathText from "../../components/MathText";
 import { apiErrorMessage, assistantsApi, kbApi, sheetsApi } from "../../lib/api";
 import type {
   Assistant,
+  DocumentAnalysis,
   KnowledgeChunk,
   KnowledgeDocType,
   KnowledgeDocument,
@@ -46,11 +48,38 @@ function normTopic(topic: string): string {
   return topic.trim().toLowerCase();
 }
 
+const ACCEPTED = ".pdf,.md,.txt,.jpg,.jpeg,.png,.webp";
+
+function detectDocType(filename: string): KnowledgeDocType {
+  const f = filename.toLowerCase();
+  if (/рпд|rpd|рабочая[\s_]*программа/.test(f)) return "rpd";
+  if (/лекци|конспект|lektsi|lecture/.test(f)) return "notes";
+  if (/задачник|сборник|билет|практикум|задани|тест|exam/.test(f)) return "problem_book";
+  if (/учебник|textbook|пособие/.test(f)) return "textbook";
+  if (/справоч|таблиц|констант/.test(f)) return "reference";
+  if (/метод/.test(f)) return "methodical";
+  return "other";
+}
+
+function cleanTitle(filename: string): string {
+  return filename
+    .replace(/\.[^.]+$/, "")
+    .replace(/^\[\d+\]\s*/, "")
+    .replace(/^\d{4,}[_\s-]*/, "")
+    .replace(/_+/g, " ")
+    .trim();
+}
+
 export default function MaterialsTab({ assistant, onProfileChanged }: Props) {
+  const [sheetsRefresh, setSheetsRefresh] = useState(0);
   return (
     <div className="space-y-8">
-      <DocumentsSection assistant={assistant} onProfileChanged={onProfileChanged} />
-      <SheetsSection assistant={assistant} />
+      <DocumentsSection
+        assistant={assistant}
+        onProfileChanged={onProfileChanged}
+        onSheetsChanged={() => setSheetsRefresh((k) => k + 1)}
+      />
+      <SheetsSection assistant={assistant} refreshKey={sheetsRefresh} />
     </div>
   );
 }
@@ -58,20 +87,23 @@ export default function MaterialsTab({ assistant, onProfileChanged }: Props) {
 function DocumentsSection({
   assistant,
   onProfileChanged,
+  onSheetsChanged,
 }: {
   assistant: Assistant;
   onProfileChanged: () => Promise<void> | void;
+  onSheetsChanged: () => void;
 }) {
   const [docs, setDocs] = useState<KnowledgeDocument[] | null>(null);
   const [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [fileKey, setFileKey] = useState(0);
   const [title, setTitle] = useState("");
   const [docType, setDocType] = useState<KnowledgeDocType>("other");
   const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [viewDocId, setViewDocId] = useState<string | null>(null);
-  const [syllabusDocId, setSyllabusDocId] = useState<string | null>(null);
+  const [analyzeDoc, setAnalyzeDoc] = useState<KnowledgeDocument | null>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
     try {
@@ -87,7 +119,10 @@ function DocumentsSection({
   }, [assistant.id]);
 
   const processing = useMemo(
-    () => (docs ?? []).some((d) => d.status === "uploaded" || d.status === "parsing"),
+    () =>
+      (docs ?? []).some(
+        (d) => d.status === "uploaded" || d.status === "parsing" || d.analysis_status === "running",
+      ),
     [docs],
   );
 
@@ -98,6 +133,14 @@ function DocumentsSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processing, assistant.id]);
 
+  const pickFile = (next: File | null) => {
+    setFile(next);
+    if (next) {
+      setTitle(cleanTitle(next.name));
+      setDocType(detectDocType(next.name));
+    }
+  };
+
   const upload = async () => {
     if (!file) return;
     setUploading(true);
@@ -106,7 +149,7 @@ function DocumentsSection({
       await kbApi.upload(assistant.id, file, title.trim() || file.name, docType);
       setFile(null);
       setTitle("");
-      setFileKey((k) => k + 1);
+      if (pickerRef.current) pickerRef.current.value = "";
       await reload();
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -142,53 +185,96 @@ function DocumentsSection({
   return (
     <section className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold">Документы курса</h2>
+        <h2 className="text-sm font-semibold">Материалы курса</h2>
         <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-          РПД, конспекты, учебники и задачники превращаются в базу знаний: текст распознаётся, режется на фрагменты
-          и используется для заземления генерации, проверки и разбора.
+          Загрузите РПД, конспекты, учебники, задачники — Studio извлечёт текст, сама разберёт документ и предложит
+          темы, справочные данные и нотацию курса. Останется просмотреть и применить.
         </p>
       </div>
 
-      <Card className="p-4">
-        <div className="grid gap-3 items-end sm:grid-cols-2 lg:grid-cols-[1fr_1fr_170px_auto]">
-          <Field label="Файл" hint="PDF, Markdown, TXT или фото страниц">
+      <input
+        ref={pickerRef}
+        type="file"
+        accept={ACCEPTED}
+        className="hidden"
+        onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+      />
+      {!file ? (
+        <button
+          className={`w-full rounded-lg border-2 border-dashed px-6 py-8 text-center transition-colors ${
+            dragOver ? "border-accent bg-accent/5" : "border-border bg-card hover:border-accent/50 hover:bg-muted/30"
+          }`}
+          onClick={() => pickerRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            pickFile(e.dataTransfer.files?.[0] ?? null);
+          }}
+        >
+          <UploadCloud className="mx-auto h-7 w-7 text-muted-foreground" />
+          <p className="mt-2 text-sm font-medium">Перетащите файл сюда или нажмите, чтобы выбрать</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            PDF, Markdown, TXT или фото страниц — название и тип определятся автоматически
+          </p>
+        </button>
+      ) : (
+        <Card className="p-3.5">
+          <div className="flex items-center gap-3 flex-wrap">
+            <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground shrink-0">
+              {file.name} · {formatSize(file.size)}
+            </span>
             <Input
-              key={fileKey}
-              type="file"
-              accept=".pdf,.md,.txt,.jpg,.jpeg,.png,.webp"
-              onChange={(e) => {
-                const next = e.target.files?.[0] ?? null;
-                setFile(next);
-                if (next) setTitle(next.name);
-              }}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="flex-1 min-w-[14rem]"
+              placeholder="Название документа"
             />
-          </Field>
-          <Field label="Название">
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="напр. РПД Неорганическая химия" />
-          </Field>
-          <Field label="Тип документа">
-            <Select value={docType} onChange={(e) => setDocType(e.target.value as KnowledgeDocType)}>
+            <Select
+              value={docType}
+              onChange={(e) => setDocType(e.target.value as KnowledgeDocType)}
+              className="w-44 shrink-0"
+            >
               {Object.entries(DOC_TYPE_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
               ))}
             </Select>
-          </Field>
-          <Button onClick={upload} loading={uploading} disabled={!file} className="mb-[26px] sm:mb-0">
-            <Upload className="h-4 w-4" /> Загрузить
-          </Button>
-        </div>
-      </Card>
+            <Button onClick={upload} loading={uploading} disabled={!title.trim()}>
+              <UploadCloud className="h-4 w-4" /> Загрузить
+            </Button>
+            <button
+              className="p-1.5 text-muted-foreground hover:text-foreground"
+              title="Отменить"
+              onClick={() => {
+                setFile(null);
+                if (pickerRef.current) pickerRef.current.value = "";
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </Card>
+      )}
 
       <ErrorNote message={error} />
       {docs === null ? (
         <Spinner />
       ) : docs.length === 0 ? (
-        <EmptyState
-          title="Документов пока нет"
-          hint="Загрузите РПД, конспект или задачник — они станут базой знаний ассистента"
-        />
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          <p className="text-sm font-medium">Как это работает</p>
+          <ol className="mt-2 space-y-1.5 text-xs text-muted-foreground list-decimal pl-4">
+            <li>Загрузите документы курса — текст извлечётся автоматически (OCR только для сканов).</li>
+            <li>Studio сама разберёт каждый документ: темы, справочные таблицы, обозначения, формулы.</li>
+            <li>Нажмите «Разбор готов» и примените — профиль и справочники заполнятся в один клик.</li>
+          </ol>
+        </div>
       ) : (
         <div className="space-y-2">
           {docs.map((doc) => (
@@ -199,39 +285,74 @@ function DocumentsSection({
                     <p className="text-sm font-medium truncate">{doc.title}</p>
                     <Badge tone="info">{DOC_TYPE_LABELS[doc.doc_type]}</Badge>
                     <DocStatusBadge doc={doc} />
+                    {doc.status === "parsed" && doc.extract_method === "ocr" && (
+                      <span title="Текстового слоя не было — распознавали через OCR">
+                        <Badge tone="warning">
+                          <ScanLine className="h-3 w-3 mr-1" /> OCR
+                        </Badge>
+                      </span>
+                    )}
+                    {doc.status === "parsed" && doc.extract_method === "text" && (
+                      <span title="Извлечён текстовый слой — без дорогого распознавания">
+                        <Badge>
+                          <FileText className="h-3 w-3 mr-1" /> текст
+                        </Badge>
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {formatSize(doc.size_bytes)} · {new Date(doc.created_at).toLocaleDateString("ru-RU")}
+                    {doc.page_count > 0 && ` · ${doc.page_count} стр.`}
                     {doc.status === "parsed" && ` · ${doc.chunk_count} фрагментов`}
                   </p>
                   {doc.status === "failed" && doc.error && (
                     <p className="text-xs text-destructive mt-1 whitespace-pre-wrap">{doc.error}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                  <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setViewDocId(doc.id)}>
-                    <Eye className="h-3.5 w-3.5" /> Открыть
-                  </Button>
-                  {doc.status === "parsed" && (
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setSyllabusDocId(doc.id)}>
-                      <ListChecks className="h-3.5 w-3.5" /> Извлечь темы
+                <div className="flex items-center gap-1 shrink-0 justify-end">
+                  {doc.status === "parsed" && doc.analysis_status === "ready" && (
+                    <Button variant="accent" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
+                      <Sparkles className="h-3.5 w-3.5" /> Разбор готов — применить
                     </Button>
                   )}
-                  <Button
-                    variant="ghost"
-                    className="px-2 py-1 text-xs"
-                    loading={busyDocId === doc.id}
-                    disabled={doc.status === "parsing" || doc.status === "uploaded"}
+                  {doc.status === "parsed" && doc.analysis_status === "running" && (
+                    <span className="flex items-center gap-1.5 px-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Анализируем…
+                    </span>
+                  )}
+                  {doc.status === "parsed" &&
+                    (doc.analysis_status === "none" || doc.analysis_status === "failed") && (
+                      <span title={doc.analysis_error || undefined}>
+                        <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
+                          <Sparkles className="h-3.5 w-3.5" /> Разобрать
+                        </Button>
+                      </span>
+                    )}
+                  <button
+                    className="p-1.5 text-muted-foreground hover:text-foreground"
+                    title="Открыть текст"
+                    onClick={() => setViewDocId(doc.id)}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    title="Переразобрать файл"
+                    disabled={doc.status === "parsing" || doc.status === "uploaded" || busyDocId === doc.id}
                     onClick={() => reparse(doc)}
                   >
-                    <RefreshCw className="h-3.5 w-3.5" /> Переразобрать
-                  </Button>
+                    {busyDocId === doc.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                  </button>
                   <button
-                    className="p-1 text-muted-foreground hover:text-destructive"
+                    className="p-1.5 text-muted-foreground hover:text-destructive"
                     title="Удалить"
                     onClick={() => removeDoc(doc)}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -241,12 +362,13 @@ function DocumentsSection({
       )}
 
       {viewDocId && <DocViewModal assistantId={assistant.id} documentId={viewDocId} onClose={() => setViewDocId(null)} />}
-      {syllabusDocId && (
-        <SyllabusModal
+      {analyzeDoc && (
+        <AnalyzeModal
           assistant={assistant}
-          documentId={syllabusDocId}
-          onClose={() => setSyllabusDocId(null)}
+          document={analyzeDoc}
+          onClose={() => setAnalyzeDoc(null)}
           onProfileChanged={onProfileChanged}
+          onSheetsChanged={onSheetsChanged}
         />
       )}
     </section>
@@ -306,109 +428,259 @@ function DocViewModal({
   );
 }
 
-function SyllabusModal({
+function AnalyzeModal({
   assistant,
-  documentId,
+  document,
   onClose,
   onProfileChanged,
+  onSheetsChanged,
 }: {
   assistant: Assistant;
-  documentId: string;
+  document: KnowledgeDocument;
   onClose: () => void;
   onProfileChanged: () => Promise<void> | void;
+  onSheetsChanged: () => void;
 }) {
-  const [topics, setTopics] = useState<string[] | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [data, setData] = useState<DocumentAnalysis | null>(null);
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [topicSel, setTopicSel] = useState<Set<string>>(new Set());
+  const [sheetSel, setSheetSel] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [addNotation, setAddNotation] = useState(true);
+  const [useDescription, setUseDescription] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   const existing = useMemo(() => new Set(assistant.topics.map(normTopic)), [assistant.topics]);
 
-  useEffect(() => {
+  const load = (refresh: boolean) => {
+    setData(null);
+    setError("");
     kbApi
-      .extractSyllabus(assistant.id, documentId)
+      .analyze(assistant.id, document.id, refresh)
       .then((res) => {
-        setTopics(res.topics);
-        setSelected(new Set(res.topics.filter((t) => !existing.has(normTopic(t)))));
+        setData(res);
+        setTopicSel(new Set(res.topics.filter((t) => !existing.has(normTopic(t)))));
+        setSheetSel(new Set(res.sheets.map((_, i) => i)));
+        setUseDescription(!assistant.description.trim() && Boolean(res.summary.trim()));
       })
       .catch((err) => setError(apiErrorMessage(err)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistant.id, documentId]);
-
-  const toggle = (topic: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(topic)) {
-        next.delete(topic);
-      } else {
-        next.add(topic);
-      }
-      return next;
-    });
   };
 
-  const newSelected = (topics ?? []).filter((t) => selected.has(t) && !existing.has(normTopic(t)));
+  useEffect(() => {
+    load(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistant.id, document.id]);
 
-  const save = async () => {
-    setSaving(true);
+  const toggleTopic = (topic: string) =>
+    setTopicSel((prev) => {
+      const next = new Set(prev);
+      next.has(topic) ? next.delete(topic) : next.add(topic);
+      return next;
+    });
+  const toggleSheet = (i: number) =>
+    setSheetSel((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  const toggleExpand = (i: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+
+  const newTopics = (data?.topics ?? []).filter((t) => topicSel.has(t) && !existing.has(normTopic(t)));
+  const selectedSheets = (data?.sheets ?? []).filter((_, i) => sheetSel.has(i));
+  const totalToApply =
+    newTopics.length +
+    selectedSheets.length +
+    (addNotation && data?.notation_notes ? 1 : 0) +
+    (useDescription && data?.summary ? 1 : 0);
+
+  const apply = async () => {
+    if (!data) return;
+    setApplying(true);
     setError("");
     try {
-      const merged = [...assistant.topics];
-      const seen = new Set(assistant.topics.map(normTopic));
-      for (const topic of newSelected) {
-        if (!seen.has(normTopic(topic))) {
-          merged.push(topic);
-          seen.add(normTopic(topic));
+      const patch: Record<string, unknown> = {};
+      if (newTopics.length > 0) {
+        const merged = [...assistant.topics];
+        const seen = new Set(assistant.topics.map(normTopic));
+        for (const topic of newTopics) {
+          if (!seen.has(normTopic(topic))) {
+            merged.push(topic);
+            seen.add(normTopic(topic));
+          }
         }
+        patch.topics = merged;
       }
-      await assistantsApi.update(assistant.id, { topics: merged });
+      if (addNotation && data.notation_notes.trim()) {
+        const nuances = [...assistant.nuances];
+        if (!nuances.includes(data.notation_notes.trim())) nuances.push(data.notation_notes.trim());
+        patch.nuances = nuances;
+      }
+      if (useDescription && data.summary.trim()) patch.description = data.summary.trim();
+      if (Object.keys(patch).length > 0) await assistantsApi.update(assistant.id, patch);
+
+      for (const sheet of selectedSheets) {
+        await sheetsApi.create(assistant.id, {
+          title: sheet.title,
+          kind: sheet.kind,
+          description: sheet.description,
+          content_markdown: sheet.content_markdown,
+          is_canonical: true,
+        });
+      }
+      if (selectedSheets.length > 0) onSheetsChanged();
       await onProfileChanged();
       onClose();
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
-      setSaving(false);
+      setApplying(false);
     }
   };
 
   return (
-    <Modal title="Темы из документа" open onClose={onClose}>
-      <div className="space-y-4">
+    <Modal title={`Разбор: ${document.title}`} open onClose={onClose} wide>
+      <div className="space-y-5">
         <ErrorNote message={error} />
-        {topics === null && !error && <Spinner label="Извлекаем темы из документа — это может занять минуту..." />}
-        {topics && topics.length === 0 && (
-          <EmptyState title="Темы не найдены" hint="Модель не смогла выделить разделы курса из этого документа" />
+        {data === null && !error && (
+          <Spinner label="Анализируем документ — извлекаем темы, справочные данные и нотацию курса. Для больших файлов это может занять несколько минут…" />
         )}
-        {topics && topics.length > 0 && (
+        {data && (
           <>
-            <p className="text-xs text-muted-foreground">
-              Отметьте темы, которые нужно добавить в профиль дисциплины.
-            </p>
-            <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
-              {topics.map((topic, i) => {
-                const inProfile = existing.has(normTopic(topic));
-                return (
-                  <label key={i} className="flex items-start gap-2 text-sm">
+            {data.summary && (
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">О курсе</p>
+                <MathText>{data.summary}</MathText>
+                {!assistant.description.trim() && (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
-                      className="mt-1"
-                      checked={inProfile || selected.has(topic)}
-                      disabled={inProfile}
-                      onChange={() => toggle(topic)}
+                      checked={useDescription}
+                      onChange={(e) => setUseDescription(e.target.checked)}
+                      className="h-4 w-4 accent-accent"
                     />
-                    <span className={inProfile ? "text-muted-foreground" : ""}>{topic}</span>
-                    {inProfile && <Badge className="shrink-0">уже в профиле</Badge>}
+                    Использовать как описание дисциплины
                   </label>
-                );
-              })}
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>
-                Отмена
+                )}
+              </div>
+            )}
+
+            <section className="space-y-2">
+              <p className="text-sm font-semibold">
+                Темы курса{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  · выбрано {newTopics.length} из {(data.topics ?? []).filter((t) => !existing.has(normTopic(t))).length} новых
+                </span>
+              </p>
+              {data.topics.length === 0 ? (
+                <p className="text-xs text-muted-foreground">В этом документе не нашлось явной программы тем.</p>
+              ) : (
+                <div className="space-y-1 max-h-52 overflow-y-auto rounded-md border border-border p-2">
+                  {data.topics.map((topic, i) => {
+                    const inProfile = existing.has(normTopic(topic));
+                    return (
+                      <label key={i} className="flex items-start gap-2 text-sm py-0.5">
+                        <input
+                          type="checkbox"
+                          className="mt-1 accent-accent"
+                          checked={inProfile || topicSel.has(topic)}
+                          disabled={inProfile}
+                          onChange={() => toggleTopic(topic)}
+                        />
+                        <span className={inProfile ? "text-muted-foreground" : ""}>{topic}</span>
+                        {inProfile && <Badge className="shrink-0">уже есть</Badge>}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <p className="text-sm font-semibold">
+                Справочные материалы{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  · данные, обозначения и формулы из документа — ассистент будет использовать именно их
+                </span>
+              </p>
+              {data.sheets.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Справочных данных в документе не обнаружено.</p>
+              ) : (
+                <div className="space-y-2">
+                  {data.sheets.map((sheet, i) => (
+                    <div key={i} className="rounded-md border border-border">
+                      <div className="flex items-start gap-2 p-2.5">
+                        <input
+                          type="checkbox"
+                          className="mt-1 accent-accent"
+                          checked={sheetSel.has(i)}
+                          onChange={() => toggleSheet(i)}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium">{sheet.title}</span>
+                            <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind] ?? sheet.kind}</Badge>
+                          </div>
+                          {sheet.description && (
+                            <p className="text-xs text-muted-foreground mt-0.5">{sheet.description}</p>
+                          )}
+                          <button
+                            className="mt-1 text-xs text-accent hover:underline"
+                            onClick={() => toggleExpand(i)}
+                          >
+                            {expanded.has(i) ? "свернуть" : "показать содержимое"}
+                          </button>
+                          {expanded.has(i) && (
+                            <div className="mt-2 max-h-64 overflow-y-auto rounded border border-border bg-muted/20 p-2 text-sm">
+                              <MathText>{sheet.content_markdown}</MathText>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {data.notation_notes.trim() && (
+              <section className="space-y-1.5">
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={addNotation}
+                    onChange={(e) => setAddNotation(e.target.checked)}
+                    className="h-4 w-4 accent-accent"
+                  />
+                  Нотация и терминология курса → в нюансы ассистента
+                </label>
+                <div className="rounded-md border border-border bg-muted/20 p-2 text-sm text-muted-foreground">
+                  <MathText>{data.notation_notes}</MathText>
+                </div>
+              </section>
+            )}
+
+            <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+              <Button
+                variant="ghost"
+                className="text-xs"
+                title="Запустить разбор заново (несколько минут)"
+                onClick={() => load(true)}
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Обновить разбор
               </Button>
-              <Button onClick={save} loading={saving} disabled={newSelected.length === 0}>
-                Добавить в профиль ({newSelected.length})
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={onClose}>
+                  Отмена
+                </Button>
+                <Button onClick={apply} loading={applying} disabled={totalToApply === 0}>
+                  Применить ({totalToApply})
+                </Button>
+              </div>
             </div>
           </>
         )}
@@ -417,7 +689,7 @@ function SyllabusModal({
   );
 }
 
-function SheetsSection({ assistant }: { assistant: Assistant }) {
+function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refreshKey: number }) {
   const [sheets, setSheets] = useState<ReferenceSheet[] | null>(null);
   const [error, setError] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -435,7 +707,7 @@ function SheetsSection({ assistant }: { assistant: Assistant }) {
   useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistant.id]);
+  }, [assistant.id, refreshKey]);
 
   const removeSheet = async (sheet: ReferenceSheet) => {
     if (!confirm(`Удалить справочник «${sheet.title}»?`)) return;
@@ -450,17 +722,17 @@ function SheetsSection({ assistant }: { assistant: Assistant }) {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-[16rem] flex-1">
           <h2 className="text-sm font-semibold">Справочные материалы курса</h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-            ИИ обязан использовать эти данные вместо общесправочных — значения констант, обозначения и терминология
-            берутся отсюда.
+            Заполняются автоматически кнопкой «Разобрать». Ассистент обязан использовать именно эти значения констант,
+            обозначения и терминологию вместо общесправочных. При необходимости поправьте или добавьте вручную.
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
-          <Button variant="secondary" onClick={() => setFromDocOpen(true)}>
-            <FilePlus2 className="h-4 w-4" /> Из документа
+          <Button variant="ghost" onClick={() => setFromDocOpen(true)}>
+            <Plus className="h-4 w-4" /> Из фрагментов
           </Button>
           <Button
             onClick={() => {

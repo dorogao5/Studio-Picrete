@@ -354,6 +354,9 @@ class KnowledgeDocumentOut(ORMModel):
     size_bytes: int
     status: str
     page_count: int
+    extract_method: str = ""
+    analysis_status: str = "none"
+    analysis_error: str = ""
     error: str
     created_at: datetime
     chunk_count: int = 0
@@ -380,6 +383,20 @@ class SyllabusExtractRequest(BaseModel):
 
 class SyllabusExtractResponse(BaseModel):
     topics: list[str]
+
+
+class AnalyzeSheetProposal(BaseModel):
+    title: str
+    kind: str
+    description: str = ""
+    content_markdown: str
+
+
+class DocumentAnalysisResponse(BaseModel):
+    summary: str = ""
+    topics: list[str] = Field(default_factory=list)
+    sheets: list[AnalyzeSheetProposal] = Field(default_factory=list)
+    notation_notes: str = ""
 
 
 class ReferenceSheetOut(ORMModel):
@@ -576,3 +593,10 @@ class ProviderTestResponse(BaseModel):
     ok: bool
     message: str
     duration_ms: int | None = None
+
+
+class ProviderBalanceOut(BaseModel):
+    supported: bool
+    ok: bool
+    balance: str = ""
+    message: str = ""

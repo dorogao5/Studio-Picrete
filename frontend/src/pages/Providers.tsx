@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Plus, RefreshCw, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Plus, RefreshCw, Trash2, Wallet, XCircle } from "lucide-react";
 import { apiErrorMessage, providersApi } from "../lib/api";
-import type { Provider, ProviderPreset } from "../lib/types";
+import type { Provider, ProviderBalance, ProviderPreset } from "../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner } from "../components/ui";
 
 const FAMILIES = ["deepseek", "qwen", "yandexgpt", "alice", "gpt", "generic"];
@@ -13,10 +13,28 @@ export default function Providers() {
   const [addOpen, setAddOpen] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
   const [testing, setTesting] = useState<string | null>(null);
+  const [balances, setBalances] = useState<Record<string, ProviderBalance | null>>({});
+
+  const loadBalances = (list: Provider[]) => {
+    for (const p of list) {
+      setBalances((prev) => ({ ...prev, [p.id]: prev[p.id] ?? null }));
+      providersApi
+        .balance(p.id)
+        .then((b) => setBalances((prev) => ({ ...prev, [p.id]: b })))
+        .catch(() =>
+          setBalances((prev) => ({
+            ...prev,
+            [p.id]: { supported: false, ok: false, balance: "", message: "не удалось запросить" },
+          })),
+        );
+    }
+  };
 
   const reload = async () => {
     try {
-      setProviders(await providersApi.list());
+      const list = await providersApi.list();
+      setProviders(list);
+      loadBalances(list);
     } catch (err) {
       setError(apiErrorMessage(err));
     }
@@ -25,6 +43,7 @@ export default function Providers() {
   useEffect(() => {
     void reload();
     providersApi.presets().then(setPresets).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runTest = async (id: string) => {
@@ -68,6 +87,7 @@ export default function Providers() {
               onTest={() => runTest(provider.id)}
               testing={testing === provider.id}
               testResult={testResults[provider.id]}
+              balance={balances[provider.id]}
             />
           ))}
         </div>
@@ -78,18 +98,48 @@ export default function Providers() {
   );
 }
 
+function BalanceChip({ balance }: { balance: ProviderBalance | null | undefined }) {
+  if (balance === null || balance === undefined) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+        <Wallet className="h-3 w-3" /> …
+      </span>
+    );
+  }
+  if (balance.ok) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
+        title="Баланс аккаунта у провайдера"
+      >
+        <Wallet className="h-3 w-3" /> {balance.balance}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground cursor-help"
+      title={balance.message || "Баланс недоступен"}
+    >
+      <Wallet className="h-3 w-3" /> —
+    </span>
+  );
+}
+
 function ProviderCard({
   provider,
   onChanged,
   onTest,
   testing,
   testResult,
+  balance,
 }: {
   provider: Provider;
   onChanged: () => void;
   onTest: () => void;
   testing: boolean;
   testResult?: { ok: boolean; message: string };
+  balance?: ProviderBalance | null;
 }) {
   const [newModelId, setNewModelId] = useState("");
   const [newFamily, setNewFamily] = useState("generic");
@@ -130,6 +180,7 @@ function ProviderCard({
               <Badge tone="info">production</Badge>
             )}
             {provider.has_api_key ? <Badge tone="success">ключ задан</Badge> : <Badge tone="warning">нет ключа</Badge>}
+            <BalanceChip balance={balance} />
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1">{provider.base_url}</p>
         </div>

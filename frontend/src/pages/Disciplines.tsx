@@ -1,14 +1,33 @@
-import { Plus, User as UserIcon } from "lucide-react";
+import { Plus, Trash2, User as UserIcon } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CreateDisciplineModal from "../components/CreateDisciplineModal";
-import { Badge, Button, Card, EmptyState, Spinner } from "../components/ui";
+import { Badge, Button, Card, EmptyState, ErrorNote, Spinner } from "../components/ui";
+import { apiErrorMessage, assistantsApi } from "../lib/api";
 import { useApp } from "../lib/context";
 
 export default function Disciplines() {
   const { disciplines, loading, reloadDisciplines, setSelectedId } = useApp();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const removeDiscipline = async (id: string, name: string) => {
+    if (!confirm(`Удалить дисциплину «${name}» со всеми материалами, промптами и задачами? Это действие необратимо.`)) {
+      return;
+    }
+    setError("");
+    setDeletingId(id);
+    try {
+      await assistantsApi.remove(id);
+      await reloadDisciplines();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="max-w-5xl space-y-5">
@@ -24,6 +43,7 @@ export default function Disciplines() {
         </Button>
       </div>
 
+      <ErrorNote message={error} />
       {loading ? (
         <Spinner />
       ) : disciplines.length === 0 ? (
@@ -36,13 +56,24 @@ export default function Disciplines() {
           {disciplines.map((d) => (
             <Card
               key={d.id}
-              className="p-5 h-full hover:shadow-md transition-shadow cursor-pointer"
+              className="relative p-5 h-full hover:shadow-md transition-shadow cursor-pointer"
               onClick={() => {
                 setSelectedId(d.id);
                 navigate(`/disciplines/${d.id}?tab=profile`);
               }}
             >
-              <h2 className="font-semibold">{d.name}</h2>
+              <button
+                className="absolute right-3 top-3 rounded p-1.5 text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                title="Удалить дисциплину (только автор или администратор)"
+                disabled={deletingId === d.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void removeDiscipline(d.id, d.name);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+              <h2 className="font-semibold pr-8">{d.name}</h2>
               <Badge tone="accent" className="mt-2">
                 {d.discipline}
               </Badge>

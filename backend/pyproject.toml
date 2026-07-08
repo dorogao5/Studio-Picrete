@@ -17,6 +17,8 @@ dependencies = [
     "cryptography>=43.0",
     "python-multipart>=0.0.9",
     "snowballstemmer>=2.2",
+    "pymupdf>=1.26",
+    "boto3>=1.34",
 ]
 
 [tool.ruff]

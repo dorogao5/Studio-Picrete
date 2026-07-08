@@ -11,8 +11,10 @@
   "dependencies": {
     "@fontsource/golos-text": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
+    "@types/katex": "^0.16.8",
     "axios": "^1.12.2",
     "clsx": "^2.1.1",
+    "katex": "^0.17.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

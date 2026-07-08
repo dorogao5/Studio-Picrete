@@ -39,3 +39,26 @@
 .markdown-body :is(p, ul, ol) {
   margin-bottom: 0.5rem;
 }
+
+/* Рендер формул и текста ассистента */
+.math-text {
+  overflow-wrap: anywhere;
+}
+.math-text > :first-child {
+  margin-top: 0;
+}
+.math-text > :last-child {
+  margin-bottom: 0;
+}
+.math-text .katex {
+  font-size: 1.02em;
+}
+.math-text .katex-display {
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+}
+.math-text table {
+  display: table;
+}

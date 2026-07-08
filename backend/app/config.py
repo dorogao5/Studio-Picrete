@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 300.0
     data_dir: Path = Path("./data")
 
+    # S3 (Yandex Object Storage). Пустой endpoint = выключено, всё живёт на локальном диске.
+    s3_endpoint: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = ""
+    s3_region: str = "ru-central1"
+    s3_prefix: str = "studio/"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

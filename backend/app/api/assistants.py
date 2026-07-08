@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.db import get_db
 from app.services import kb as kb_service
+from app.services import storage
 from app.llm import client as llm
 from app.models import KnowledgeDocument, Assistant, Course, ModelEntry, PromptVersion, Provider, User
 from app.schemas import (
@@ -156,15 +157,26 @@ async def add_nuance(
 
 @router.delete("/{assistant_id}")
 async def delete_assistant(
-    assistant_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
+    assistant_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ) -> dict:
     assistant = await get_assistant_or_404(assistant_id, db)
+    if user.role != "admin" and assistant.created_by != user.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "У вас нет прав для удаления этой дисциплины: её создал другой преподаватель. "
+            "Удалить может только автор или администратор.",
+        )
     documents = (
         await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.assistant_id == assistant_id))
     ).scalars().all()
     for document in documents:
         if document.file_path:
             Path(document.file_path).unlink(missing_ok=True)
+        if document.s3_key and storage.s3_enabled():
+            try:
+                await storage.delete_object(document.s3_key)
+            except Exception:
+                pass
     await kb_service.deindex_assistant(db, assistant_id)
     await db.delete(assistant)
     await db.commit()

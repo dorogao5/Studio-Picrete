@@ -69,12 +69,20 @@ async def tutor_chat(
         if task is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
 
-    query_source = (
-        task.statement
-        if task
-        else " ".join(part for part in (body.student_work, body.messages[-1].content) if part)
+    # Для поиска по базе знаний якоримся на задачу и начало диалога: последняя реплика
+    # («понял, а дальше?») сама по себе — мусорный запрос.
+    first_user = next((m.content for m in body.messages if m.role == "user"), "")
+    query_source = " ".join(
+        part
+        for part in (
+            task.statement if task else "",
+            body.student_work,
+            first_user,
+            body.messages[-1].content,
+        )
+        if part
     )
-    query = query_source[:200]
+    query = query_source[:300]
     grounding = await build_grounding_block(db, assistant.id, query=query)
     context = build_tutor_context(task, body.student_work, grounding)
     user_message = flatten_dialog([m.model_dump() for m in body.messages], context)
