@@ -89,6 +89,20 @@ export interface Course {
   created_at: string;
 }
 
+export interface PicreteCourseOption {
+  id: string;
+  title: string;
+  organization: string | null;
+}
+
+export interface CoursePublishResult {
+  ok: boolean;
+  version: string;
+  published_at: string;
+  assistant_name: string;
+  course_id: string;
+}
+
 export type PromptRole = "grader" | "generator" | "tutor";
 
 export interface PromptVersion {

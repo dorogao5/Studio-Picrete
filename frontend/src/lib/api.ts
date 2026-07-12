@@ -2,6 +2,7 @@ import axios from "axios";
 import type {
   Assistant,
   Course,
+  CoursePublishResult,
   DocumentAnalysis,
   GeneratedTask,
   GenerationBatch,
@@ -9,6 +10,7 @@ import type {
   KnowledgeDocument,
   KnowledgeDocumentDetail,
   Pipeline,
+  PicreteCourseOption,
   PipelineRun,
   PipelineStep,
   PlaygroundResult,
@@ -81,6 +83,9 @@ export const coursesApi = {
   update: (assistantId: string, courseId: string, body: Partial<Course>) =>
     api.patch<Course>(`/assistants/${assistantId}/courses/${courseId}`, body).then((r) => r.data),
   remove: (assistantId: string, courseId: string) => api.delete(`/assistants/${assistantId}/courses/${courseId}`),
+  picreteOptions: () => api.get<PicreteCourseOption[]>("/integration/picrete/courses").then((r) => r.data),
+  publish: (assistantId: string, courseId: string) =>
+    api.post<CoursePublishResult>(`/assistants/${assistantId}/courses/${courseId}/publish`).then((r) => r.data),
 };
 
 export const providersApi = {

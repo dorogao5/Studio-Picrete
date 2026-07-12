@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 300.0
     data_dir: Path = Path("./data")
 
+    # Server-to-server publication into the stable Picrete runtime.
+    picrete_api_url: str = ""
+    picrete_integration_token: str = ""
+
     # S3 (Yandex Object Storage). Пустой endpoint = выключено, всё живёт на локальном диске.
     s3_endpoint: str = ""
     s3_access_key: str = ""

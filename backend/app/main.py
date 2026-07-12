@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.api import assistants, auth, kb, pipelines, playground, preview, providers, tasks, tutor
+from app.api import assistants, auth, integration, kb, pipelines, playground, preview, providers, tasks, tutor
 from app.config import get_settings
 from app.db import SessionLocal, engine
 from app.models import Base, ModelEntry, Provider, User
@@ -193,5 +193,6 @@ for router in (
     kb.router,
     tutor.router,
     preview.router,
+    integration.router,
 ):
     app.include_router(router, prefix="/api")

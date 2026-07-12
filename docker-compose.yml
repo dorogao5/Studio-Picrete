@@ -15,6 +15,8 @@ services:
       - STUDIO_DATALAB_API_KEY=${STUDIO_DATALAB_API_KEY}
       - STUDIO_DATALAB_BASE_URL=${STUDIO_DATALAB_BASE_URL:-https://www.datalab.to/api/v1}
       - STUDIO_DATALAB_MODE=${STUDIO_DATALAB_MODE:-accurate}
+      - STUDIO_PICRETE_API_URL=${STUDIO_PICRETE_API_URL}
+      - STUDIO_PICRETE_INTEGRATION_TOKEN=${STUDIO_PICRETE_INTEGRATION_TOKEN}
     restart: always
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8100/healthz')"]
