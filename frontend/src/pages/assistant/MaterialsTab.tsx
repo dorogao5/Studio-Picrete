@@ -399,12 +399,20 @@ function DocumentsSection({
                 </div>
                 <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1 border-t border-border pt-2 sm:w-auto sm:border-0 sm:pt-0">
                   {doc.status === "parsed" && doc.analysis_status === "ready" && (
-                    <Button variant="accent" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
+                    <Button
+                      variant="accent"
+                      className="min-h-11 px-2.5 py-1 text-xs sm:min-h-0"
+                      onClick={() => setAnalyzeDoc(doc)}
+                    >
                       <Sparkles className="h-3.5 w-3.5" /> Разбор готов — применить
                     </Button>
                   )}
                   {doc.status === "parsed" && doc.analysis_status === "applied" && (
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
+                    <Button
+                      variant="secondary"
+                      className="min-h-11 px-2.5 py-1 text-xs sm:min-h-0"
+                      onClick={() => setAnalyzeDoc(doc)}
+                    >
                       <Sparkles className="h-3.5 w-3.5" /> Разбор применён
                     </Button>
                   )}
@@ -416,7 +424,11 @@ function DocumentsSection({
                   {doc.status === "parsed" &&
                     (doc.analysis_status === "none" || doc.analysis_status === "failed") && (
                       <span title={doc.analysis_error || undefined}>
-                        <Button variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
+                        <Button
+                          variant="ghost"
+                          className="min-h-11 px-2.5 py-1 text-xs sm:min-h-0"
+                          onClick={() => setAnalyzeDoc(doc)}
+                        >
                           <Sparkles className="h-3.5 w-3.5" /> Разобрать
                         </Button>
                       </span>
