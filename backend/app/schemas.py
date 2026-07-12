@@ -418,6 +418,7 @@ class ReferenceSheetCreate(BaseModel):
     kind: str = Field(default="data_table", pattern="^(data_table|glossary|conventions|formulas|other)$")
     description: str = ""
     content_markdown: str = ""
+    source_document_id: str | None = None
     is_canonical: bool = True
     ord: int = 0
 

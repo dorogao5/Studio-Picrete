@@ -219,7 +219,7 @@ async def analyze_document(
     if document.status != "parsed" or not document.markdown.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Текст ещё не извлечён — дождитесь статуса «готов»")
     # Авто-разбор уже отработал в фоне — отдаём сохранённый результат мгновенно.
-    if not refresh and document.analysis_status == "ready" and document.analysis:
+    if not refresh and document.analysis_status in {"ready", "applied"} and document.analysis:
         return DocumentAnalysisResponse(**document.analysis)
     provider, model = await resolve_architect(db)
     try:
@@ -231,6 +231,22 @@ async def analyze_document(
     document.analysis_error = ""
     await db.commit()
     return DocumentAnalysisResponse(**analysis)
+
+
+@router.post(
+    "/assistants/{assistant_id}/kb/documents/{document_id}/analysis-applied",
+    response_model=KnowledgeDocumentOut,
+)
+async def mark_document_analysis_applied(
+    assistant_id: str, document_id: str, db: AsyncSession = Depends(get_db)
+) -> KnowledgeDocument:
+    document = await _get_document_or_404(db, assistant_id, document_id)
+    if document.analysis_status not in {"ready", "applied"} or not document.analysis:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Сначала дождитесь готового разбора документа")
+    document.analysis_status = "applied"
+    await db.commit()
+    await db.refresh(document)
+    return (await _attach_chunk_counts(db, [document]))[0]
 
 
 # ---------------------------------------------------------------- sheets
@@ -258,7 +274,38 @@ async def create_sheet(
     user: User = Depends(get_current_user),
 ) -> ReferenceSheet:
     await get_assistant_or_404(assistant_id, db)
-    sheet = ReferenceSheet(assistant_id=assistant_id, created_by=user.id, **body.model_dump())
+    if body.source_document_id:
+        await _get_document_or_404(db, assistant_id, body.source_document_id)
+
+    title = body.title.strip()
+    content = body.content_markdown.strip()
+    existing = (
+        await db.execute(
+            select(ReferenceSheet).where(
+                ReferenceSheet.assistant_id == assistant_id,
+                ReferenceSheet.kind == body.kind,
+                ReferenceSheet.title == title,
+                ReferenceSheet.content_markdown == content,
+            )
+        )
+    ).scalars().first()
+    if existing is not None:
+        existing.description = body.description
+        existing.is_canonical = body.is_canonical
+        existing.ord = body.ord
+        if body.source_document_id:
+            existing.source_document_id = body.source_document_id
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    sheet = ReferenceSheet(
+        assistant_id=assistant_id,
+        created_by=user.id,
+        **body.model_dump(exclude={"title", "content_markdown"}),
+        title=title,
+        content_markdown=content,
+    )
     db.add(sheet)
     await db.commit()
     await db.refresh(sheet)

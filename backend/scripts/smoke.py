@@ -92,6 +92,12 @@ def main() -> None:
     check("create sheet", r.status_code == 200, r.text[:200])
     sheet_id = r.json()["id"]
 
+    r = client.post(
+        f"/api/assistants/{aid}/sheets",
+        json={"title": "ΔG°f (Приложение 1)", "kind": "data_table", "content_markdown": "| CO2 | −394,4 |"},
+    )
+    check("sheet create is idempotent", r.status_code == 200 and r.json()["id"] == sheet_id, r.text[:200])
+
     if table_chunks:
         r = client.post(
             f"/api/assistants/{aid}/sheets/from-chunks",

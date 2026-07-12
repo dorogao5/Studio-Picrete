@@ -204,6 +204,10 @@ export const kbApi = {
         params: refresh ? { refresh: true } : undefined,
       })
       .then((r) => r.data),
+  markAnalysisApplied: (assistantId: string, documentId: string) =>
+    api
+      .post<KnowledgeDocument>(`/assistants/${assistantId}/kb/documents/${documentId}/analysis-applied`)
+      .then((r) => r.data),
 };
 
 export const sheetsApi = {

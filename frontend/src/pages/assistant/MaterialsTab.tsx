@@ -315,6 +315,11 @@ function DocumentsSection({
                       <Sparkles className="h-3.5 w-3.5" /> Разбор готов — применить
                     </Button>
                   )}
+                  {doc.status === "parsed" && doc.analysis_status === "applied" && (
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
+                      <Sparkles className="h-3.5 w-3.5" /> Разбор применён
+                    </Button>
+                  )}
                   {doc.status === "parsed" && doc.analysis_status === "running" && (
                     <span className="flex items-center gap-1.5 px-2 text-xs text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" /> Анализируем…
@@ -369,6 +374,7 @@ function DocumentsSection({
           onClose={() => setAnalyzeDoc(null)}
           onProfileChanged={onProfileChanged}
           onSheetsChanged={onSheetsChanged}
+          onApplied={reload}
         />
       )}
     </section>
@@ -434,12 +440,14 @@ function AnalyzeModal({
   onClose,
   onProfileChanged,
   onSheetsChanged,
+  onApplied,
 }: {
   assistant: Assistant;
   document: KnowledgeDocument;
   onClose: () => void;
   onProfileChanged: () => Promise<void> | void;
   onSheetsChanged: () => void;
+  onApplied: () => Promise<void> | void;
 }) {
   const [data, setData] = useState<DocumentAnalysis | null>(null);
   const [error, setError] = useState("");
@@ -529,11 +537,14 @@ function AnalyzeModal({
           kind: sheet.kind,
           description: sheet.description,
           content_markdown: sheet.content_markdown,
+          source_document_id: document.id,
           is_canonical: true,
         });
       }
       if (selectedSheets.length > 0) onSheetsChanged();
+      await kbApi.markAnalysisApplied(assistant.id, document.id);
       await onProfileChanged();
+      await onApplied();
       onClose();
     } catch (err) {
       setError(apiErrorMessage(err));

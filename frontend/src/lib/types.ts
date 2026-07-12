@@ -198,7 +198,7 @@ export interface KnowledgeDocument {
   status: "uploaded" | "parsing" | "parsed" | "failed";
   page_count: number;
   extract_method: "" | "text" | "ocr";
-  analysis_status: "none" | "running" | "ready" | "failed";
+  analysis_status: "none" | "running" | "ready" | "applied" | "failed";
   analysis_error: string;
   error: string;
   created_at: string;
