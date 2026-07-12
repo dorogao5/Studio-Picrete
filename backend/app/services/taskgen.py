@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,7 @@ from app.models import (
     TaskTemplate,
     utcnow,
 )
+from app.services.assistant_profile import with_assistant_profile
 from app.services.contracts import GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE
 from app.services.grounding import KB_HEADER, build_grounding_block
 from app.services.validation import run_validation
@@ -36,6 +39,9 @@ FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподавател�
 
 # Задачи с объёмным LaTeX-решением не помещаются по несколько в один JSON — генерируем порциями.
 GENERATION_CHUNK = 2
+# Дополнительные запросы сверх минимально необходимого числа порций. Они восполняют
+# недостающие/невалидные элементы, но не дают фоновой задаче зациклиться на плохом ответе модели.
+MAX_REFILL_ATTEMPTS = 3
 
 TASK_KIND_LABELS = {
     "calculation": "расчётная задача",
@@ -129,6 +135,7 @@ async def generate_tasks(
     prompt = system_prompt or FALLBACK_GENERATOR_PROMPT.format(
         discipline=assistant.discipline, contract=GENERATION_JSON_CONTRACT
     )
+    prompt = with_assistant_profile(prompt, assistant)
     user_message = build_generation_user_message(
         topic=topic,
         difficulty=difficulty,
@@ -163,9 +170,7 @@ def _coerce_tasks(parsed: dict) -> list | None:
     return None
 
 
-def merge_template_params(
-    template: TaskTemplate | None, *, topic: str, difficulty: str, instructions: str
-) -> dict:
+def merge_template_params(template: TaskTemplate | None, *, topic: str, difficulty: str, instructions: str) -> dict:
     if template is None:
         return {
             "topic": topic,
@@ -211,16 +216,20 @@ async def resolve_generator_prompt(db: AsyncSession, assistant_id: str, prompt_v
             raise GenerationError("Версия промпта не найдена")
         return prompt.system_prompt
     active = (
-        await db.execute(
-            select(PromptVersion)
-            .where(
-                PromptVersion.assistant_id == assistant_id,
-                PromptVersion.role == "generator",
-                PromptVersion.status == "active",
+        (
+            await db.execute(
+                select(PromptVersion)
+                .where(
+                    PromptVersion.assistant_id == assistant_id,
+                    PromptVersion.role == "generator",
+                    PromptVersion.status == "active",
+                )
+                .order_by(PromptVersion.version.desc())
             )
-            .order_by(PromptVersion.version.desc())
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     return active.system_prompt if active else None
 
 
@@ -307,6 +316,87 @@ async def _set_progress(db: AsyncSession, batch: GenerationBatch, stage: str, do
     await db.commit()
 
 
+async def _generate_batch_items(
+    provider: Provider,
+    model: ModelEntry,
+    assistant: Assistant,
+    system_prompt: str | None,
+    *,
+    merged: dict,
+    params: dict,
+    count: int,
+    grounding_text: str,
+    existing_statements: list[str],
+    on_progress: Callable[[int], Awaitable[None]] | None = None,
+) -> tuple[list[dict], list[str]]:
+    items: list[dict] = []
+    seen_statements = list(existing_statements)
+    errors: list[str] = []
+    minimum_calls = (count + GENERATION_CHUNK - 1) // GENERATION_CHUNK
+    max_calls = minimum_calls + MAX_REFILL_ATTEMPTS
+
+    for _attempt in range(max_calls):
+        missing = count - len(items)
+        if missing <= 0:
+            break
+        take = min(GENERATION_CHUNK, missing)
+        try:
+            chunk = await generate_tasks(
+                provider,
+                model,
+                assistant,
+                system_prompt,
+                topic=merged["topic"],
+                difficulty=merged["difficulty"],
+                count=take,
+                task_kind=merged["task_kind"],
+                answer_format=merged["answer_format"],
+                instructions=merged["instructions"],
+                grounding=grounding_text,
+                example_tasks=merged["example_tasks"],
+                existing_statements=seen_statements,
+                temperature=float(params.get("temperature") or 0.7),
+            )
+        except llm.LlmError as err:
+            errors.append(str(err))
+            continue
+
+        usable = [item for item in chunk if isinstance(item, dict) and str(item.get("statement") or "").strip()]
+        usable = usable[:missing]
+        if not usable:
+            errors.append("Модель вернула порцию без валидных условий задач")
+            continue
+        items.extend(usable)
+        seen_statements.extend(str(item["statement"]) for item in usable)
+        if on_progress is not None:
+            await on_progress(len(items))
+
+    return items, errors
+
+
+def _mark_batch_finished(
+    batch: GenerationBatch, *, requested_count: int, generated_count: int, generation_errors: list[str]
+) -> None:
+    batch.finished_at = utcnow()
+    if generated_count >= requested_count:
+        batch.status = "completed"
+        batch.error = ""
+        batch.progress = {"stage": "Готово", "done": requested_count, "total": requested_count}
+        return
+
+    batch.status = "failed"
+    detail = generation_errors[-1][:400] if generation_errors else "модель вернула меньше валидных задач"
+    batch.error = (
+        f"Неполная партия: сохранено {generated_count} из {requested_count} задач после "
+        f"{MAX_REFILL_ATTEMPTS} попыток восполнения. Последняя причина: {detail}"
+    )
+    batch.progress = {
+        "stage": "Неполная партия",
+        "done": generated_count,
+        "total": requested_count,
+    }
+
+
 async def _validate_batch(
     db: AsyncSession,
     batch: GenerationBatch,
@@ -318,16 +408,20 @@ async def _validate_batch(
     sheets_text: str,
 ) -> None:
     prior = (
-        await db.execute(
-            select(GeneratedTask.statement)
-            .where(
-                GeneratedTask.assistant_id == batch.assistant_id,
-                or_(GeneratedTask.batch_id.is_(None), GeneratedTask.batch_id != batch.id),
+        (
+            await db.execute(
+                select(GeneratedTask.statement)
+                .where(
+                    GeneratedTask.assistant_id == batch.assistant_id,
+                    or_(GeneratedTask.batch_id.is_(None), GeneratedTask.batch_id != batch.id),
+                )
+                .order_by(GeneratedTask.created_at.desc())
+                .limit(50)
             )
-            .order_by(GeneratedTask.created_at.desc())
-            .limit(50)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     total = len(created)
     stage_name = "Проверка решателем" if merged["validation_solver"] else "Проверка задач"
     for index, task in enumerate(created, start=1):
@@ -359,9 +453,7 @@ async def _validate_batch(
 async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     params = batch.params or {}
     count = int(params.get("count") or batch.requested_count or 5)
-    assistant = (
-        await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))
-    ).scalar_one_or_none()
+    assistant = (await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))).scalar_one_or_none()
     if assistant is None:
         raise GenerationError("Дисциплина не найдена")
     provider, model = await _resolve_batch_model(db, str(params.get("model_entry_id") or ""))
@@ -394,56 +486,38 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     )
 
     existing = (
-        await db.execute(
-            select(GeneratedTask.statement)
-            .where(GeneratedTask.assistant_id == batch.assistant_id)
-            .order_by(GeneratedTask.created_at.desc())
-            .limit(8)
+        (
+            await db.execute(
+                select(GeneratedTask.statement)
+                .where(GeneratedTask.assistant_id == batch.assistant_id)
+                .order_by(GeneratedTask.created_at.desc())
+                .limit(8)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     await _set_progress(db, batch, "Генерация условий", 0, count)
+
     # Генерируем небольшими порциями: задачи с тяжёлым LaTeX-решением в решении не помещаются
-    # в один JSON-ответ (обрыв строки). Порция ≤2 гарантированно влезает; сбой одной порции
-    # не рушит всю партию — что удалось, то сохраняем.
-    items: list[dict] = []
-    seen_statements = list(existing)
-    gen_errors: list[str] = []
-    remaining = count
-    while remaining > 0:
-        take = min(GENERATION_CHUNK, remaining)
-        chunk: list[dict] | None = None
-        # Модель может разово вернуть JSON не той формы — одна повторная попытка спасает партию.
-        for _attempt in range(2):
-            try:
-                chunk = await generate_tasks(
-                    provider,
-                    model,
-                    assistant,
-                    system_prompt,
-                    topic=merged["topic"],
-                    difficulty=merged["difficulty"],
-                    count=take,
-                    task_kind=merged["task_kind"],
-                    answer_format=merged["answer_format"],
-                    instructions=merged["instructions"],
-                    grounding=grounding_text,
-                    example_tasks=merged["example_tasks"],
-                    existing_statements=seen_statements,
-                    temperature=float(params.get("temperature") or 0.7),
-                )
-                break
-            except llm.LlmError as err:
-                gen_errors.append(str(err))
-        if chunk is None:
-            remaining -= take
-            continue
-        items.extend(chunk)
-        seen_statements = seen_statements + [
-            str(i.get("statement") or "") for i in chunk if isinstance(i, dict) and i.get("statement")
-        ]
-        remaining -= take
-        await _set_progress(db, batch, "Генерация условий", len(items), count)
+    # в один JSON-ответ. Если модель недодала элементы или вернула элемент без условия,
+    # ограниченное число дополнительных запросов восполняет недостающее количество.
+    async def update_generation_progress(done: int) -> None:
+        await _set_progress(db, batch, "Генерация условий", done, count)
+
+    items, gen_errors = await _generate_batch_items(
+        provider,
+        model,
+        assistant,
+        system_prompt,
+        merged=merged,
+        params=params,
+        count=count,
+        grounding_text=grounding_text,
+        existing_statements=list(existing),
+        on_progress=update_generation_progress,
+    )
     if not items and gen_errors:
         raise llm.LlmError(" || ".join(gen_errors[:3]))
 
@@ -477,17 +551,18 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         )
 
     total = len(created)
-    batch.status = "completed"
-    batch.finished_at = utcnow()
-    batch.progress = {"stage": "Готово", "done": total, "total": total}
+    _mark_batch_finished(
+        batch,
+        requested_count=count,
+        generated_count=total,
+        generation_errors=gen_errors,
+    )
     await db.commit()
 
 
 async def run_batch(batch_id: str) -> None:
     async with SessionLocal() as db:
-        batch = (
-            await db.execute(select(GenerationBatch).where(GenerationBatch.id == batch_id))
-        ).scalar_one_or_none()
+        batch = (await db.execute(select(GenerationBatch).where(GenerationBatch.id == batch_id))).scalar_one_or_none()
         if batch is None:
             return
         try:

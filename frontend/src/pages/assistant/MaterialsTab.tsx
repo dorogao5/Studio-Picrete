@@ -64,12 +64,13 @@ function normTopic(topic: string): string {
   return topic.trim().toLowerCase();
 }
 
-const ACCEPTED = ".pdf,.md,.txt,.jpg,.jpeg,.png,.webp";
+const ACCEPTED = ".pdf,.md,.txt,.json,.jpg,.jpeg,.png,.webp";
 
 function detectDocType(filename: string): KnowledgeDocType {
   const f = filename.toLowerCase();
   if (/рпд|rpd|рабочая[\s_]*программа/.test(f)) return "rpd";
   if (/лекци|конспект|lektsi|lecture/.test(f)) return "notes";
+  if (/lab[_\s-]*practice|лабораторн.*практикум/.test(f)) return "methodical";
   if (/задачник|сборник|билет|практикум|задани|тест|exam/.test(f)) return "problem_book";
   if (/учебник|textbook|пособие/.test(f)) return "textbook";
   if (/справоч|таблиц|констант/.test(f)) return "reference";
@@ -222,8 +223,8 @@ function DocumentsSection({
       <div>
         <h2 className="text-sm font-semibold">Материалы курса</h2>
         <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-          Загрузите РПД, конспекты, учебники, задачники — Studio извлечёт текст, сама разберёт документ и предложит
-          темы, справочные данные и нотацию курса. Останется просмотреть и применить.
+          Загрузите РПД, конспекты, учебники, задачники или индекс ChemRAG — Studio извлечёт текст, сама разберёт
+          документ и предложит темы, справочные данные и нотацию курса. Останется просмотреть и применить.
         </p>
       </div>
 

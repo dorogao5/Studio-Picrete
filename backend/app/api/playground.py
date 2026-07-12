@@ -164,6 +164,7 @@ async def compare(
             body.ocr_text,
             grounding=grounding,
             temperature=body.temperature,
+            assistant=assistant,
         )
 
     outcomes = await asyncio.gather(*(grade_one(p, m) for p, m in resolved))

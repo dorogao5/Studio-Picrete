@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from pathlib import Path
 
@@ -16,10 +17,11 @@ from app.services import storage
 from app.services.ocr import run_datalab_ocr
 
 TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
+CHEMRAG_EXTENSIONS = {".json"}
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 OCR_EXTENSIONS = PDF_EXTENSIONS | IMAGE_EXTENSIONS
-ALLOWED_EXTENSIONS = TEXT_EXTENSIONS | OCR_EXTENSIONS
+ALLOWED_EXTENSIONS = TEXT_EXTENSIONS | CHEMRAG_EXTENSIONS | OCR_EXTENSIONS
 
 # Ниже этого среднего числа символов на страницу считаем, что текстового слоя нет
 # (скан) и нужен дорогой OCR. Обычный PDF с текстом даёт 800–3000 символов/стр.
@@ -37,6 +39,70 @@ _PAGE_NUMBER_RE = re.compile(r"^\d{1,4}$")
 _HYPHEN_BREAK_RE = re.compile(r"([а-яёa-z])[­‐‑-]\n\s*([а-яёa-z])", re.IGNORECASE)
 
 _stemmer = snowballstemmer.stemmer("russian")
+
+
+def _chemrag_index_to_markdown(source: bytes) -> tuple[str, int]:
+    """Convert a ChemRAG enriched page index into searchable Markdown.
+
+    The import keeps the OCR text as the primary source. AI figure descriptions
+    are preserved with an explicit warning so they remain useful to text-only
+    models without being mistaken for verified wording from the manual.
+    """
+    try:
+        payload = json.loads(source.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as err:
+        raise ValueError("JSON не удалось прочитать как индекс ChemRAG") from err
+    pages = payload.get("pages") if isinstance(payload, dict) else payload
+    if not isinstance(pages, list) or not pages:
+        raise ValueError("В индексе ChemRAG ожидается непустой массив страниц")
+    if len(pages) > 2000:
+        raise ValueError("В индексе ChemRAG больше 2000 страниц")
+
+    parsed: list[tuple[int, str, list[str]]] = []
+    total_chars = 0
+    for fallback_page, item in enumerate(pages, start=1):
+        if not isinstance(item, dict):
+            continue
+        raw_markdown = item.get("markdown")
+        if not isinstance(raw_markdown, str) or not raw_markdown.strip():
+            continue
+        try:
+            page = int(item.get("page") or item.get("page_num") or fallback_page)
+        except (TypeError, ValueError):
+            page = fallback_page
+        markdown = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", raw_markdown)
+        markdown = _clean_pdf_text(markdown)
+        total_chars += len(markdown)
+        if total_chars > 10_000_000:
+            raise ValueError("Текст индекса ChemRAG больше 10 млн символов")
+
+        descriptions: list[str] = []
+        figures = item.get("figure_metadata") or []
+        if isinstance(figures, list):
+            for figure in figures:
+                if not isinstance(figure, dict):
+                    continue
+                description = str(figure.get("ai_description") or "").strip()
+                if description and description not in descriptions:
+                    descriptions.append(re.sub(r"\s+", " ", description)[:2000])
+        parsed.append((page, markdown, descriptions))
+    if not parsed:
+        raise ValueError("В индексе ChemRAG нет страниц с распознанным текстом")
+
+    parts: list[str] = []
+    for page, markdown, descriptions in sorted(parsed, key=lambda item: item[0]):
+        section = [f"# Страница {page}", "", markdown]
+        if descriptions:
+            section.extend(
+                [
+                    "",
+                    "## Иллюстрации страницы",
+                    "Автоматические описания ниже требуют сверки с оригиналом:",
+                    *(f"- {description}" for description in descriptions),
+                ]
+            )
+        parts.append("\n".join(section).strip())
+    return "\n\n".join(parts), len(parsed)
 
 
 def _clean_pdf_text(raw: str) -> str:
@@ -410,6 +476,11 @@ async def _extract_markdown(document: KnowledgeDocument) -> tuple[str, str, int]
     if suffix in TEXT_EXTENSIONS:
         content = await asyncio.to_thread(source.read_bytes) if isinstance(source, Path) else source
         return content.decode("utf-8", errors="replace"), "text", 0
+
+    if suffix in CHEMRAG_EXTENSIONS:
+        content = await asyncio.to_thread(source.read_bytes) if isinstance(source, Path) else source
+        markdown, page_count = await asyncio.to_thread(_chemrag_index_to_markdown, content)
+        return markdown, "text", page_count
 
     if suffix in PDF_EXTENSIONS:
         # Сначала пробуем достать текстовый слой (быстро и бесплатно). OCR включаем,

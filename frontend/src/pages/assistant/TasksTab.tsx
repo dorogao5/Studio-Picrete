@@ -974,7 +974,10 @@ function BatchLaunchModal({
             ))}
           </Select>
         </Field>
-        <Field label="Решатель" hint="Лучше проверять другой моделью — так расхождения заметнее">
+        <Field
+          label="Решатель"
+          hint="DeepSeek Pro решает задачу дважды независимо. Flash — только предварительная проверка и не даёт зелёный статус."
+        >
           <Select value={solverId} onChange={(e) => setSolverId(e.target.value)}>
             <option value="">— та же модель —</option>
             {production.map((m) => (

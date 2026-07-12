@@ -39,14 +39,15 @@ export default function PipelinesTab({ assistant, providers }: { assistant: Assi
 
   const createDefault = async () => {
     const production = modelOptions(providers, true);
-    const defaultModel = production[0]?.id ?? "";
+    const defaultModel = production.some((model) => model.id === assistant.default_grader_model_id)
+      ? assistant.default_grader_model_id!
+      : (production[0]?.id ?? "");
     await pipelinesApi.create(assistant.id, {
       name: "Основной пайплайн",
-      description: "OCR → проверка → консенсус",
+      description: "OCR → проверка DeepSeek Pro → решение преподавателя",
       steps: [
         { type: "ocr", config: {} },
         { type: "grade", config: { model_entry_id: defaultModel } },
-        { type: "consensus", config: { disagreement_threshold_pct: 20 } },
       ],
     });
     await reload();
@@ -113,6 +114,9 @@ function PipelineEditor({
   onChanged: () => void;
 }) {
   const production = useMemo(() => modelOptions(providers, true), [providers]);
+  const preferredGraderId = production.some((model) => model.id === assistant.default_grader_model_id)
+    ? assistant.default_grader_model_id!
+    : (production[0]?.id ?? "");
   const [name, setName] = useState(pipeline.name);
   const [steps, setSteps] = useState<PipelineStep[]>(pipeline.steps);
   const [error, setError] = useState("");
@@ -244,11 +248,15 @@ function PipelineEditor({
         </Button>
         <Button
           variant="secondary"
-          onClick={() => setSteps([...steps, { type: "grade", config: { model_entry_id: production[0]?.id ?? "" } }])}
+          onClick={() => setSteps([...steps, { type: "grade", config: { model_entry_id: preferredGraderId } }])}
         >
           <Plus className="h-3.5 w-3.5" /> Проверка LLM
         </Button>
-        <Button variant="secondary" onClick={() => setSteps([...steps, { type: "consensus", config: { disagreement_threshold_pct: 20 } }])}>
+        <Button
+          variant="secondary"
+          title="Для консенсуса нужны минимум две проверки LLM"
+          onClick={() => setSteps([...steps, { type: "consensus", config: { disagreement_threshold_pct: 20 } }])}
+        >
           <Plus className="h-3.5 w-3.5" /> Консенсус
         </Button>
       </div>

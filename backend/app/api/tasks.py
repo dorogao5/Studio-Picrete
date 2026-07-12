@@ -187,8 +187,11 @@ async def generate(
         if task is not None:
             db.add(task)
             created.append(task)
-    if not created:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Модель не вернула ни одной валидной задачи")
+    if len(created) != body.count:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Модель вернула {len(created)} из {body.count} валидных задач. Неполный набор не сохранён — повторите генерацию.",
+        )
     await db.commit()
     for task in created:
         await db.refresh(task)
@@ -280,16 +283,11 @@ async def revalidate_task(
         ).scalar_one_or_none()
     merged = merge_template_params(template, topic=task.topic, difficulty=task.difficulty, instructions="")
 
-    solver_entry_id = body.solver_model_entry_id
-    if not solver_entry_id and task.batch_id:
-        batch = (
-            await db.execute(select(GenerationBatch).where(GenerationBatch.id == task.batch_id))
-        ).scalar_one_or_none()
-        if batch is not None:
-            params = batch.params or {}
-            solver_entry_id = params.get("solver_model_entry_id") or params.get("model_entry_id")
-    if not solver_entry_id:
-        solver_entry_id = assistant.default_generator_model_id
+    solver_entry_id = (
+        body.solver_model_entry_id
+        or assistant.default_grader_model_id
+        or assistant.default_generator_model_id
+    )
 
     solver_provider = solver_model = None
     if merged["validation_solver"]:

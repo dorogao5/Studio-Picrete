@@ -13,12 +13,47 @@ router = APIRouter(tags=["pipelines"])
 
 
 def _validate_steps(steps: list) -> None:
-    for step in steps:
+    grade_count = 0
+    ocr_count = 0
+    consensus_seen = False
+    for index, step in enumerate(steps):
         if not isinstance(step, dict) or step.get("type") not in STEP_TYPES:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 f"Каждый шаг должен иметь type из {STEP_TYPES}",
             )
+        step_type = step["type"]
+        if consensus_seen:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "После консенсуса нельзя добавлять другие шаги",
+            )
+        if step_type == "ocr":
+            ocr_count += 1
+            if ocr_count > 1 or grade_count > 0:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "Шаг OCR может быть только один и должен идти до проверок",
+                )
+        elif step_type == "grade":
+            grade_count += 1
+        elif step_type == "consensus":
+            if grade_count < 2:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "Для консенсуса добавьте минимум две проверки LLM",
+                )
+            if index != len(steps) - 1:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "Консенсус должен быть последним шагом",
+                )
+            consensus_seen = True
+    if steps and grade_count == 0:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "В пайплайне должен быть хотя бы один шаг проверки LLM",
+        )
 
 
 @router.get("/assistants/{assistant_id}/pipelines", response_model=list[PipelineOut])

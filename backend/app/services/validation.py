@@ -10,7 +10,16 @@ _ru_stemmer = snowballstemmer.stemmer("russian")
 SOLVER_SYSTEM_PROMPT = """Вы — независимый решатель учебных задач по естественнонаучным дисциплинам.
 Решите задачу самостоятельно, с нуля. Используйте ТОЛЬКО справочные данные, приведённые в сообщении;
 если каких-то данных не хватает — явно отметьте это в решении, но не подставляйте значения из общих знаний.
-Ответ — строго JSON: {"solution": "решение по шагам", "answer": "краткий финальный ответ"}. Никакого текста вне JSON."""
+В поле answer перечислите ВСЕ величины и выводы, которые требует условие, с названиями, знаками и единицами.
+Ответ — строго JSON: {"solution": "решение по шагам", "answer": "полный финальный ответ"}. Никакого текста вне JSON."""
+
+SOLVER_VERIFIER_SYSTEM_PROMPT = """Вы — второй независимый аудитор учебной задачи.
+Решите задачу заново, не доверяя предполагаемому ответу и не пытаясь угадать решение первой модели.
+Проверьте полноту данных, размерности, знаки, химический и зарядовый баланс. В поле answer перечислите ВСЕ
+запрошенные величины и выводы с единицами. Используйте только данные условия и приложенного контекста.
+Ответ — строго JSON: {"solution": "независимая проверка по шагам", "answer": "полный финальный ответ"}."""
+
+VALIDATION_POLICY_VERSION = "dual-independent-solver-v2"
 
 ANSWER_FORMAT_HINTS = {
     "numeric": "число с единицами измерения",
@@ -25,6 +34,67 @@ _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+
 _NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?", re.IGNORECASE)
 _INTEGER_RE = re.compile(r"[-+]?\d+")
 _WORD_RE = re.compile(r"\w+")
+_UNIT_ALIASES = {
+    "дм3": "л",
+    "дм^3": "л",
+    "см3": "мл",
+    "см^3": "мл",
+    "моль/дм3": "моль/л",
+    "моль/дм^3": "моль/л",
+}
+_KNOWN_UNITS = {
+    "%",
+    "°c",
+    "атм",
+    "бар",
+    "в",
+    "г",
+    "г/л",
+    "дм3",
+    "дм^3",
+    "дж",
+    "дж/моль",
+    "к",
+    "кг",
+    "кдж",
+    "кдж/моль",
+    "км",
+    "кпа",
+    "л",
+    "м",
+    "м3",
+    "м^3",
+    "мв",
+    "мг",
+    "мг/л",
+    "мкг",
+    "мкг/л",
+    "мкл",
+    "мкм",
+    "мкмоль",
+    "мл",
+    "мм",
+    "ммоль",
+    "ммоль/л",
+    "моль",
+    "моль/дм3",
+    "моль/дм^3",
+    "моль/кг",
+    "моль/л",
+    "мпа",
+    "нм",
+    "па",
+    "с",
+    "см",
+    "см3",
+    "см^3",
+    "ч",
+    "эв",
+}
+_UNIT_RE = re.compile(
+    r"(?<![a-zа-яё])(" + "|".join(re.escape(unit) for unit in sorted(_KNOWN_UNITS, key=len, reverse=True)) + r")(?![a-zа-яё])",
+    re.IGNORECASE,
+)
 
 
 def normalize_numeric_text(text: str) -> str:
@@ -51,7 +121,12 @@ def normalize_numeric_text(text: str) -> str:
 
 
 def _number_tokens(text: str) -> list[str]:
-    return _NUMBER_RE.findall(normalize_numeric_text(text))
+    normalized = normalize_numeric_text(text)
+    return [
+        match.group(0)
+        for match in _NUMBER_RE.finditer(normalized)
+        if match.start() == 0 or normalized[match.start() - 1] != "^"
+    ]
 
 
 def extract_numbers(text: str) -> list[float]:
@@ -62,6 +137,15 @@ def extract_numbers(text: str) -> list[float]:
         except ValueError:
             continue
     return values
+
+
+def extract_units(text: str) -> set[str]:
+    normalized = normalize_numeric_text(text).casefold()
+    normalized = re.sub(r"\^\s*\{?\s*([+-]?\d+)\s*\}?", r"^\1", normalized)
+    normalized = re.sub(r"\s*/\s*", "/", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    units = {_UNIT_ALIASES.get(match.group(1), match.group(1)) for match in _UNIT_RE.finditer(normalized)}
+    return units
 
 
 def _close(a: float, b: float, rel: float) -> bool:
@@ -88,11 +172,44 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
         solver_filtered = _drop_context_numbers(solver_numbers, context_values)
         if not ref_filtered or not solver_filtered:
             ref_filtered, solver_filtered = ref_numbers, solver_numbers
-        result["reference_number"] = ref_filtered[-1]
-        result["solver_number"] = solver_filtered[-1]
-        result["verdict"] = (
-            "match" if any(_close(a, b, rel) for a in ref_filtered for b in solver_filtered) else "mismatch"
+        unmatched_solver = set(range(len(solver_filtered)))
+        matched: list[tuple[float, float]] = []
+        missing: list[float] = []
+        for reference_value in ref_filtered:
+            match_index = next(
+                (
+                    index
+                    for index in unmatched_solver
+                    if _close(reference_value, solver_filtered[index], rel)
+                ),
+                None,
+            )
+            if match_index is None:
+                missing.append(reference_value)
+                continue
+            unmatched_solver.remove(match_index)
+            matched.append((reference_value, solver_filtered[match_index]))
+        result.update(
+            reference_number=ref_filtered[-1],
+            solver_number=solver_filtered[-1],
+            reference_numbers=ref_filtered,
+            solver_numbers=solver_filtered,
+            matched_count=len(matched),
+            required_count=len(ref_filtered),
+            missing_reference_numbers=missing,
         )
+        reference_units = extract_units(ref_text)
+        solver_units = extract_units(solver_text)
+        missing_units = sorted(reference_units - solver_units)
+        result.update(
+            reference_units=sorted(reference_units),
+            solver_units=sorted(solver_units),
+            missing_reference_units=missing_units,
+        )
+        if missing_units:
+            result["verdict"] = "incomplete" if matched else "mismatch"
+        else:
+            result["verdict"] = "match" if not missing else ("incomplete" if matched else "mismatch")
         return result
     ref_norm = " ".join(ref_text.casefold().split())
     solver_norm = " ".join(solver_text.casefold().split())
@@ -100,13 +217,14 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
         result["verdict"] = "match"
         return result
     if not ref_numbers and not solver_numbers:
-        # Текстовые ответы решатель формулирует своими словами — сравниваем по смысловым стемам,
-        # иначе каждая корректная теоретическая задача улетает в «требует внимания».
+        # Лексическое пересечение полезно как диагностический сигнал, но не доказывает
+        # смысловую эквивалентность. Теоретический ответ утверждает преподаватель:
+        # одинаковые термины встречаются и в химически противоположных утверждениях.
         ref_stems = set(_ru_stemmer.stemWords(re.findall(r"\w+", ref_text.lower())))
         solver_stems = set(_ru_stemmer.stemWords(re.findall(r"\w+", solver_text.lower())))
         similarity = len(ref_stems & solver_stems) / len(ref_stems | solver_stems) if ref_stems and solver_stems else 0.0
         result["similarity"] = round(similarity, 2)
-        result["verdict"] = "match" if similarity >= 0.4 else ("mismatch" if similarity < 0.12 else "uncertain")
+        result["verdict"] = "mismatch" if similarity < 0.12 else "uncertain"
     else:
         result["verdict"] = "uncertain"
     return result
@@ -248,7 +366,12 @@ def dedup_check(statement: str, existing_statements: list[str]) -> dict:
 
 
 async def solver_check(
-    provider: Provider, model: ModelEntry, statement: str, grounding: str, answer_format: str
+    provider: Provider,
+    model: ModelEntry,
+    statement: str,
+    grounding: str,
+    answer_format: str,
+    system_prompt: str = SOLVER_SYSTEM_PROMPT,
 ) -> dict:
     hint = ANSWER_FORMAT_HINTS.get(answer_format, ANSWER_FORMAT_HINTS["text"])
     parts = [f"Задача:\n{statement}"]
@@ -257,17 +380,62 @@ async def solver_check(
     parts.append(f'Поле "answer" — {hint}. Ответ строго JSON {{"solution": "...", "answer": "..."}}.')
     try:
         result = await llm.chat(
-            provider, model, SOLVER_SYSTEM_PROMPT, "\n\n".join(parts), temperature=0.0, json_mode=True
+            provider, model, system_prompt, "\n\n".join(parts), temperature=0.0, json_mode=True
         )
         parsed = llm.extract_json(result.text)
     except llm.LlmError as err:
-        return {"status": "error", "solution": "", "answer": "", "error": str(err)}
+        return {
+            "status": "error",
+            "solution": "",
+            "answer": "",
+            "error": str(err),
+            "duration_ms": 0,
+            "tokens_total": None,
+        }
     return {
         "status": "ok",
         "solution": str(parsed.get("solution") or ""),
         "answer": str(parsed.get("answer") or ""),
         "error": "",
+        "duration_ms": result.duration_ms,
+        "tokens_total": result.tokens_total,
     }
+
+
+def _solver_report(solved: dict, reference_answer: str, model_name: str, comparison: dict | None = None) -> dict:
+    return {
+        "status": solved["status"] if comparison is None else comparison["verdict"],
+        "answer": solved["answer"],
+        "solution": solved["solution"][:4000],
+        "reference_answer": reference_answer,
+        "model": model_name,
+        "error": solved["error"],
+        "duration_ms": solved.get("duration_ms", 0),
+        "tokens_total": solved.get("tokens_total"),
+        "comparison": comparison or {},
+    }
+
+
+def _append_solver_reason(reasons: list[str], label: str, report: dict) -> None:
+    status = report["status"]
+    if status == "error":
+        reasons.append(f"{label} не смог решить задачу: {report['error']}")
+    elif status == "mismatch":
+        reasons.append(
+            f"{label} получил другой ответ: {report['answer'] or '(пусто)'} vs "
+            f"{report['reference_answer'] or '(пусто)'}"
+        )
+    elif status == "incomplete":
+        comparison = report.get("comparison") or {}
+        reasons.append(
+            f"{label} вернул не все величины: совпало {comparison.get('matched_count', 0)} "
+            f"из {comparison.get('required_count', 0)}"
+        )
+    elif status == "uncertain":
+        reasons.append(
+            f"Не удалось однозначно сравнить ответ ({label.lower()}): "
+            f"{report['answer'] or '(пусто)'} vs {report['reference_answer'] or '(пусто)'}"
+        )
 
 
 async def run_validation(
@@ -288,32 +456,6 @@ async def run_validation(
     run_data: bool = True,
 ) -> dict:
     reasons: list[str] = []
-
-    solver: dict = {"status": "skipped"}
-    if run_solver and solver_provider is not None and solver_model is not None:
-        solved = await solver_check(solver_provider, solver_model, statement, grounding, answer_format)
-        solver = {
-            "status": solved["status"],
-            "answer": solved["answer"],
-            "solution": solved["solution"][:4000],
-            "reference_answer": reference_answer,
-            "model": f"{solver_provider.name}/{solver_model.model_id}",
-            "error": solved["error"],
-        }
-        if solved["status"] == "error":
-            reasons.append(f"Решатель не смог решить задачу: {solved['error']}")
-        else:
-            compared = compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
-            solver["status"] = compared["verdict"]
-            if compared["verdict"] == "mismatch":
-                reasons.append(
-                    f"Решатель получил другой ответ: {solved['answer'] or '(пусто)'} vs {reference_answer or '(пусто)'}"
-                )
-            elif compared["verdict"] == "uncertain":
-                reasons.append(
-                    f"Не удалось однозначно сравнить ответы: {solved['answer'] or '(пусто)'} "
-                    f"vs {reference_answer or '(пусто)'}"
-                )
 
     data: dict = {"status": "skipped", "unknown_numbers": [], "unknown_sources": []}
     if run_data:
@@ -338,15 +480,58 @@ async def run_validation(
     if dedup["duplicate"]:
         reasons.append(f"Похожа на уже существующую задачу (сходство {round(dedup['similarity'] * 100)}%)")
 
+    hard_fail = bool(data["unknown_numbers"] or data["unknown_sources"] or sanity["issues"] or dedup["duplicate"])
+    solver: dict = {"status": "skipped"}
+    verifier: dict = {"status": "skipped"}
+    preview_only = False
+    if run_solver and not hard_fail:
+        if solver_provider is None or solver_model is None:
+            solver = {"status": "error", "error": "Модель-решатель не настроена"}
+            reasons.append("Модель-решатель не настроена")
+        else:
+            model_name = f"{solver_provider.name}/{solver_model.model_id}"
+            preview_only = "flash" in solver_model.model_id.casefold()
+            solved = await solver_check(solver_provider, solver_model, statement, grounding, answer_format)
+            compared = (
+                compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
+                if solved["status"] != "error"
+                else None
+            )
+            solver = _solver_report(solved, reference_answer, model_name, compared)
+            _append_solver_reason(reasons, "Основной решатель", solver)
+
+            if preview_only:
+                reasons.append("Flash используется только для предварительной проверки и не подтверждает задачу")
+            else:
+                verified = await solver_check(
+                    solver_provider,
+                    solver_model,
+                    statement,
+                    grounding,
+                    answer_format,
+                    system_prompt=SOLVER_VERIFIER_SYSTEM_PROMPT,
+                )
+                verified_comparison = (
+                    compare_answers(reference_answer, verified["answer"], tolerance_pct, context=statement)
+                    if verified["status"] != "error"
+                    else None
+                )
+                verifier = _solver_report(verified, reference_answer, model_name, verified_comparison)
+                _append_solver_reason(reasons, "Независимый аудитор", verifier)
+
     needs_review = (
-        solver["status"] in ("mismatch", "uncertain", "error")
+        solver["status"] in ("mismatch", "incomplete", "uncertain", "error")
+        or verifier["status"] in ("mismatch", "incomplete", "uncertain", "error")
+        or preview_only
         or bool(data["unknown_numbers"])
         or bool(data["unknown_sources"])
         or bool(sanity["issues"])
         or dedup["duplicate"]
     )
     return {
+        "policy_version": VALIDATION_POLICY_VERSION,
         "solver": solver,
+        "verifier": verifier,
         "data": data,
         "sanity": sanity,
         "dedup": dedup,

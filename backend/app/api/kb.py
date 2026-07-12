@@ -105,7 +105,7 @@ async def upload_document(
     if suffix not in kb.ALLOWED_EXTENSIONS:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Поддерживаются PDF, изображения (JPG/PNG/WebP) и текст (.md/.txt)",
+            "Поддерживаются PDF, изображения (JPG/PNG/WebP), текст (.md/.txt) и индекс ChemRAG (.json)",
         )
     settings = get_settings()
     path = settings.kb_dir / f"{uuid.uuid4().hex}{suffix}"

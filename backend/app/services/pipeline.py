@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import ModelEntry, Pipeline, PipelineRun, PromptVersion, Provider, utcnow
+from app.models import Assistant, ModelEntry, Pipeline, PipelineRun, PromptVersion, Provider, utcnow
 from app.services import grading, ocr
 from app.services.grounding import build_grounding_block
 
@@ -117,6 +117,11 @@ async def execute_pipeline(db: AsyncSession, pipeline: Pipeline, run: PipelineRu
     grounding: str | None = None
 
     try:
+        assistant = (
+            await db.execute(select(Assistant).where(Assistant.id == pipeline.assistant_id))
+        ).scalar_one_or_none()
+        if assistant is None:
+            raise PipelineError("Дисциплина пайплайна не найдена")
         for index, step in enumerate(pipeline.steps):
             step_type = step.get("type")
             config = step.get("config") or {}
@@ -147,6 +152,7 @@ async def execute_pipeline(db: AsyncSession, pipeline: Pipeline, run: PipelineRu
                     ocr_text,
                     grounding=grounding,
                     temperature=float(config.get("temperature", 0.1)),
+                    assistant=assistant,
                 )
                 if outcome.error:
                     entry["status"] = "failed"

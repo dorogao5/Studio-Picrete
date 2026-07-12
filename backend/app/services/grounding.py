@@ -1,8 +1,10 @@
+import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KnowledgeDocument, ReferenceSheet
-from app.services.kb import search_chunks
+from app.services.kb import normalize_ru, search_chunks
 
 SHEET_KIND_LABELS = {
     "data_table": "Таблица данных",
@@ -26,6 +28,116 @@ AUTHORITY_LABELS = {
     "unverified": "непроверенный источник",
 }
 
+_TOKEN_RE = re.compile(r"[0-9a-zа-яё]+", re.IGNORECASE)
+_QUERY_STOPWORDS = {
+    "а",
+    "без",
+    "бы",
+    "в",
+    "вам",
+    "ваш",
+    "где",
+    "для",
+    "до",
+    "его",
+    "ее",
+    "если",
+    "еще",
+    "же",
+    "за",
+    "и",
+    "из",
+    "или",
+    "как",
+    "когда",
+    "ли",
+    "мне",
+    "можно",
+    "мой",
+    "мы",
+    "на",
+    "над",
+    "не",
+    "но",
+    "о",
+    "об",
+    "он",
+    "она",
+    "они",
+    "от",
+    "по",
+    "под",
+    "почему",
+    "при",
+    "про",
+    "с",
+    "так",
+    "такое",
+    "то",
+    "у",
+    "уже",
+    "что",
+    "это",
+    "я",
+}
+
+
+def _token_pairs(text: str) -> list[tuple[str, str]]:
+    tokens = _TOKEN_RE.findall(text.casefold().replace("ё", "е"))
+    stems = normalize_ru(" ".join(tokens)).split()
+    return list(zip(tokens, stems, strict=True))
+
+
+def _query_terms(query: str) -> list[tuple[str, str]]:
+    terms: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for token, stem in _token_pairs(query):
+        if token in _QUERY_STOPWORDS or (len(token) < 2 and not token.isdigit()):
+            continue
+        pair = (token, stem)
+        if pair not in seen:
+            seen.add(pair)
+            terms.append(pair)
+    return terms
+
+
+def _field_score(text: str, terms: list[tuple[str, str]], weight: int) -> int:
+    pairs = _token_pairs(text)
+    tokens = {token for token, _ in pairs}
+    stems = {stem for _, stem in pairs}
+    matches = 0
+    for token, stem in terms:
+        # Exact token matching is important for short course abbreviations: «ИК»
+        # is a token in «ИК-спектроскопия», but must not match inside «аналитики».
+        if token in tokens or (len(stem) >= 3 and stem in stems):
+            matches += 1
+    return matches * weight
+
+
+def _rank_sheets_for_query(sheets: list[ReferenceSheet], query: str) -> list[ReferenceSheet]:
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    ranked: list[tuple[int, int, int, ReferenceSheet]] = []
+    for position, sheet in enumerate(sheets):
+        score = (
+            _field_score(sheet.title or "", terms, 12)
+            + _field_score(sheet.description or "", terms, 4)
+            + _field_score(sheet.content_markdown or "", terms, 1)
+        )
+        if score > 0:
+            ranked.append((-score, int(sheet.ord or 0), position, sheet))
+    ranked.sort(key=lambda item: item[:3])
+    return [sheet for _, _, _, sheet in ranked]
+
+
+def _select_sheets(
+    sheets: list[ReferenceSheet], *, query: str, query_aware: bool
+) -> list[ReferenceSheet]:
+    if not query_aware or not query.strip():
+        return sheets
+    return _rank_sheets_for_query(sheets, query)
+
 
 async def build_grounding_block(
     db: AsyncSession,
@@ -47,6 +159,7 @@ async def build_grounding_block(
     sheets = (
         await db.execute(stmt.order_by(ReferenceSheet.ord, ReferenceSheet.created_at))
     ).scalars().all()
+    sheets = _select_sheets(list(sheets), query=query, query_aware=sheet_ids is None)
 
     source_meta: dict[str, tuple[str, str]] = {}
     source_ids = {sheet.source_document_id for sheet in sheets if sheet.source_document_id}

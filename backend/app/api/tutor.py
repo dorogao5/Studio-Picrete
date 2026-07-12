@@ -88,7 +88,7 @@ async def tutor_chat(
     user_message = flatten_dialog([m.model_dump() for m in body.messages], context)
 
     try:
-        result = await run_tutor_reply(provider, model, system_prompt, user_message)
+        result = await run_tutor_reply(provider, model, system_prompt, user_message, assistant=assistant)
     except llm.LlmError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
 

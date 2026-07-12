@@ -1,5 +1,6 @@
 from app.llm import client as llm
-from app.models import GeneratedTask, ModelEntry, Provider
+from app.models import Assistant, GeneratedTask, ModelEntry, Provider
+from app.services.assistant_profile import with_assistant_profile
 
 FALLBACK_TUTOR_PROMPT = """Вы — методичный и доброжелательный преподаватель дисциплины «{discipline}».
 Вы разбираете решение или вопрос студента ПОШАГОВО, при необходимости спускаясь до самых основ,
@@ -49,5 +50,13 @@ async def run_tutor_reply(
     system_prompt: str,
     user_message: str,
     temperature: float = 0.4,
+    assistant: Assistant | None = None,
 ) -> llm.LlmResult:
-    return await llm.chat(provider, model, system_prompt, user_message, temperature=temperature, json_mode=False)
+    return await llm.chat(
+        provider,
+        model,
+        with_assistant_profile(system_prompt, assistant),
+        user_message,
+        temperature=temperature,
+        json_mode=False,
+    )

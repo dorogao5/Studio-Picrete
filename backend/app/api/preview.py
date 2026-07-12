@@ -9,6 +9,7 @@ from app.models import Assistant, GeneratedTask, PromptVersion, TaskTemplate, Us
 from app.schemas import PromptPreviewRequest, PromptPreviewResponse
 from app.security import get_current_user
 from app.services import taskgen
+from app.services.assistant_profile import with_assistant_profile
 from app.services.contracts import GENERATION_JSON_CONTRACT
 from app.services.grading import build_grading_user_message
 from app.services.grounding import build_grounding_block
@@ -82,6 +83,7 @@ async def prompt_preview(
 ) -> PromptPreviewResponse:
     assistant = await get_assistant_or_404(assistant_id, db)
     system_prompt = await _resolve_system_prompt(db, assistant, body.role, body.prompt_version_id)
+    system_prompt = with_assistant_profile(system_prompt, assistant)
 
     task = None
     if body.task_id:

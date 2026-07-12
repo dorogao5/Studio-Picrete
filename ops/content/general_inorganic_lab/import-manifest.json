@@ -1,0 +1,376 @@
+{
+  "schema_version": "picrete-content-manifest-v1",
+  "content_version": "LAB-CURATED-2026-07",
+  "assistant_scope": "general-inorganic-chemistry-first-year",
+  "course_scope": "infochem-29",
+  "source": {
+    "title": "Введение в лабораторный практикум по неорганической химии",
+    "authors": [
+      "В. В. Свиридов",
+      "Г. А. Попкович",
+      "Е. И. Василевская",
+      "Н. В. Логинова"
+    ],
+    "publisher": "БГУ",
+    "year": 2000,
+    "effective_version": "BGU-2000-ocr-2025-12",
+    "ocr_index": "/Users/doroga/Downloads/ChemRAG/data/Lab_practice.index.enriched.json",
+    "page_images": "/Users/doroga/Downloads/ChemRAG/ocr_output/Lab_practice",
+    "authority": "unverified",
+    "visibility": "quarantine",
+    "quality_notes": [
+      "OCR scan 3 / printed pages 4–5 is mojibake and must not be used.",
+      "OCR scan 42 omits safety-test questions 1–6 on printed page 83.",
+      "OCR scan 47 / printed page 93 contains recognition garbage.",
+      "Formulas, indices, units, tables and AI figure descriptions require visual verification."
+    ]
+  },
+  "exclusions": [
+    {
+      "printed_pages": "front matter and 93",
+      "scans": [1, 47],
+      "disposition": "exclude",
+      "reason": "Library metadata, inventory marks and unusable OCR are not course content."
+    },
+    {
+      "printed_pages": "4–5",
+      "scans": [3],
+      "disposition": "quarantine",
+      "reason": "Mojibake; recover only by a new visual transcription."
+    },
+    {
+      "printed_pages": "83–92",
+      "scans": [42, 43, 44, 45, 46],
+      "disposition": "quarantine",
+      "reason": "Safety test is incomplete, has no verified key and contains historical rules that must not be treated as current policy."
+    },
+    {
+      "printed_pages": "11–14, 52–54, 64–80 and other procedural fragments",
+      "scans": [6, 7, 23, 24, 25, 26, 32, 33, 34, 37, 38, 39, 40, 41],
+      "disposition": "retain_only_inside_quarantined_raw_source",
+      "reason": "Selected fragments contain concrete cleaning, heating, vacuum, gas, toxic-reagent or other procedures that require a current approved SOP. They must not enter generation grounding. The report form on printed page 81 is extracted separately into LAB-01."
+    }
+  ],
+  "document_upload": {
+    "file": "grounding.md",
+    "title": "Лабораторный модуль: общая и неорганическая химия, первый курс",
+    "doc_type": "methodical",
+    "authority": "course_lecture",
+    "visibility": "student",
+    "course_scope": "infochem-29",
+    "effective_version": "LAB-CURATED-2026-07",
+    "analyze": false
+  },
+  "reference_sheet_proposals": [
+    {
+      "slug": "lab-00-boundaries",
+      "title": "LAB-00 · Границы помощи и допуск",
+      "kind": "conventions",
+      "description": "Иерархия действующих документов, карточка допуска и запрет на импровизацию процедуры.",
+      "content_anchor": "LAB-00",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 100
+    },
+    {
+      "slug": "lab-01-report",
+      "title": "LAB-01 · Журнал, наблюдение и вывод",
+      "kind": "conventions",
+      "description": "Структура отчёта и статусы НАБЛЮДАЛОСЬ/ДАНО/РАССЧИТАНО/ОЖИДАЕТСЯ/ВЫВОД.",
+      "content_anchor": "LAB-01",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 101
+    },
+    {
+      "slug": "lab-02-measurements",
+      "title": "LAB-02 · Измерения и погрешности",
+      "kind": "formulas",
+      "description": "Типы ошибок, абсолютное и относительное отклонение, среднее и правила округления.",
+      "content_anchor": "LAB-02",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 102
+    },
+    {
+      "slug": "lab-03-equipment",
+      "title": "LAB-03 · Посуда и чтение схем",
+      "kind": "conventions",
+      "description": "Функции элементов и проверка утверждённой схемы без проектирования установки.",
+      "content_anchor": "LAB-03",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 103
+    },
+    {
+      "slug": "lab-04-solutions",
+      "title": "LAB-04 · Расчёты для растворов",
+      "kind": "formulas",
+      "description": "Состав раствора, разведение, единицы, размерность и обратная проверка.",
+      "content_anchor": "LAB-04",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 104
+    },
+    {
+      "slug": "lab-05-recrystallization",
+      "title": "LAB-05 · Перекристаллизация и материальный баланс",
+      "kind": "formulas",
+      "description": "Теоретическая модель извлечения, выход и компромисс чистоты без процедуры.",
+      "content_anchor": "LAB-05",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 105
+    },
+    {
+      "slug": "lab-06-sublimation",
+      "title": "LAB-06 · Сублимация",
+      "kind": "glossary",
+      "description": "Фазовая модель, доказательства и оформление результата без аппаратурных указаний.",
+      "content_anchor": "LAB-06",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 106
+    },
+    {
+      "slug": "lab-07-separation",
+      "title": "LAB-07 · Принципы разделения смесей",
+      "kind": "conventions",
+      "description": "Выбор принципа по различию свойств и материальный баланс потоков.",
+      "content_anchor": "LAB-07",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 107
+    },
+    {
+      "slug": "lab-08-water",
+      "title": "LAB-08 · Очистка воды и доказательства качества",
+      "kind": "conventions",
+      "description": "Область применимости методов и узкие выводы по разрешённым показателям.",
+      "content_anchor": "LAB-08",
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 108
+    }
+  ],
+  "assistant_profile_patch": {
+    "topics_to_add": [
+      "Лабораторный журнал и доказательный вывод",
+      "Измерения, погрешности и значащие цифры",
+      "Расчёты для растворов",
+      "Перекристаллизация и материальный баланс",
+      "Сублимация как фазовый процесс",
+      "Принципы разделения смесей",
+      "Очистка воды и границы доказательства качества"
+    ],
+    "nuances_to_add": [
+      "Ассистент не разрешает работу и не создаёт или изменяет лабораторную процедуру без действующего СОП и допуска преподавателя.",
+      "Наблюдения, показания и подпись преподавателя никогда не генерируются; ожидаемый эффект явно отделяется от фактического.",
+      "Пособие 2000 года используется как исторический учебный источник, но не как действующая норма безопасности, первая помощь или утилизация.",
+      "Формулы из OCR и автоматические описания рисунков требуют сверки с оригинальным сканом."
+    ]
+  },
+  "task_templates": [
+    {
+      "slug": "lab-preflight-gap-check",
+      "reference_sheet_slugs": ["lab-00-boundaries"],
+      "payload": {
+        "name": "Лабораторный допуск · поиск недостающих данных",
+        "topic": "Допуск к лабораторной работе",
+        "difficulty": "medium",
+        "instructions": "Сгенерируй кейс с карточкой допуска к уже утверждённой работе. Не описывай саму процедуру, вещества или опасные операции. В карточке должны отсутствовать 2–3 обязательных поля. Студент должен определить пробелы, объяснить, почему нельзя начинать работу, и сформулировать вопросы преподавателю. Эталон не должен достраивать отсутствующие данные.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-00 карточка допуска утверждённый протокол границы помощи",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Найдены все пробелы", "max_score": 4, "description": "Перечислены отсутствующие обязательные поля без домыслов."},
+        {"criterion_name": "Обоснована остановка", "max_score": 2, "description": "Показано, почему данных недостаточно для допуска."},
+        {"criterion_name": "Вопросы преподавателю", "max_score": 2, "description": "Сформулированы конкретные вопросы по каждому пробелу."},
+        {"criterion_name": "Нет импровизации", "max_score": 2, "description": "Ответ не предлагает процедуру, замену или неподтверждённые меры."}
+      ]
+    },
+    {
+      "slug": "lab-observation-equation-conclusion",
+      "reference_sheet_slugs": ["lab-01-report"],
+      "payload": {
+        "name": "Наблюдение → уравнение → вывод",
+        "topic": "Лабораторный журнал и доказательный вывод",
+        "difficulty": "medium",
+        "instructions": "Дай студенту только явно зафиксированные наблюдения и необходимые исходные сведения о безопасной учебной реакции на бумаге. Попроси отделить факт, интерпретацию, сбалансированное уравнение и узкий вывод. Не добавляй ожидаемых эффектов в список фактических наблюдений. У задачи должен быть однозначно проверяемый химический смысл.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-01 наблюдение интерпретация уравнение вывод отчёт",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Факты отделены от интерпретации", "max_score": 3, "description": "Не добавлены вымышленные наблюдения."},
+        {"criterion_name": "Уравнение", "max_score": 3, "description": "Формулы, коэффициенты, заряды и состояния согласованы с условием."},
+        {"criterion_name": "Логика вывода", "max_score": 3, "description": "Вывод следует из данных и не шире доказательства."},
+        {"criterion_name": "Ясность записи", "max_score": 1, "description": "Использованы понятные статусы утверждений."}
+      ]
+    },
+    {
+      "slug": "lab-measurement-quality",
+      "reference_sheet_slugs": ["lab-02-measurements"],
+      "payload": {
+        "name": "Серия измерений · качество результата",
+        "topic": "Измерения, погрешности и значащие цифры",
+        "difficulty": "medium",
+        "instructions": "Сгенерируй небольшой набор повторных измерений одной величины в одинаковых единицах и опорное значение. Попроси выявить явно заданный промах, обосновать его исключение, вычислить среднее оставшихся результатов, абсолютное и относительное отклонение. Все требуемые числовые ответы и единицы должны быть перечислены отдельно. Не маскируй неоднозначный выброс статистической догадкой.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-02 погрешность среднее значащие цифры",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Работа с исходными данными", "max_score": 2, "description": "Единицы согласованы, исключение промаха обосновано условием."},
+        {"criterion_name": "Среднее значение", "max_score": 2, "description": "Формула, подстановка и округление корректны."},
+        {"criterion_name": "Отклонения", "max_score": 4, "description": "Верно рассчитаны абсолютное и относительное отклонения."},
+        {"criterion_name": "Единицы и значащие цифры", "max_score": 2, "description": "Все ответы подписаны и не содержат ложной точности."}
+      ]
+    },
+    {
+      "slug": "lab-solution-calculation",
+      "reference_sheet_slugs": ["lab-04-solutions"],
+      "payload": {
+        "name": "Растворы · расчёт без процедурных указаний",
+        "topic": "Расчёты для растворов",
+        "difficulty": "medium",
+        "instructions": "Генерируй только расчётную задачу на массовую долю, молярную концентрацию или разбавление. Все справочные данные должны быть даны в условии или взяты из канонической карточки. Попроси показать формулу, перевод единиц, размерность, числовой ответ и обратную проверку. Не описывай порядок приготовления, смешивания или обращения с конкретным веществом.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 1,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-04 массовая доля молярная концентрация разбавление размерность",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Физическая модель", "max_score": 2, "description": "Выбрано подходящее определение концентрации и выписаны допущения."},
+        {"criterion_name": "Формула и единицы", "max_score": 3, "description": "Формула приведена до подстановки, единицы согласованы."},
+        {"criterion_name": "Числовой результат", "max_score": 3, "description": "Все запрошенные величины вычислены корректно."},
+        {"criterion_name": "Проверка", "max_score": 2, "description": "Есть размерностная и обратная или порядковая проверка."}
+      ]
+    },
+    {
+      "slug": "lab-read-approved-scheme",
+      "reference_sheet_slugs": ["lab-03-equipment", "lab-00-boundaries"],
+      "payload": {
+        "name": "Чтение утверждённой схемы установки",
+        "topic": "Посуда, оборудование и схема установки",
+        "difficulty": "easy",
+        "instructions": "Используй уже данную в условии абстрактную схему с метками A–D и явно заданными функциями. Попроси сопоставить элементы, направление потока и контролируемую величину, а также найти одно внутреннее противоречие. Не проси собирать установку и не предлагай замену элемента или рабочие режимы.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-03 функция элемента направление потока утверждённая схема",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Функции элементов", "max_score": 4, "description": "Все метки сопоставлены только по данным условия."},
+        {"criterion_name": "Потоки и измерение", "max_score": 2, "description": "Направление и контролируемая величина определены верно."},
+        {"criterion_name": "Противоречие", "max_score": 2, "description": "Найдена и объяснена заданная несогласованность."},
+        {"criterion_name": "Границы ответа", "max_score": 2, "description": "Нет новых инструкций по сборке, режимам или замене."}
+      ]
+    },
+    {
+      "slug": "lab-crystallization-balance",
+      "reference_sheet_slugs": ["lab-05-recrystallization", "lab-02-measurements"],
+      "payload": {
+        "name": "Перекристаллизация · материальный баланс",
+        "topic": "Перекристаллизация и материальный баланс",
+        "difficulty": "hard",
+        "instructions": "Сгенерируй теоретическую задачу с условным веществом X. Дай исходную массу смеси, массовую долю X, расчётную растворимость или прямо заданные потери и фактическую сухую массу продукта. Попроси найти теоретическую массу, извлечение и недостающий поток баланса, затем объяснить, почему выход не доказывает чистоту. Не задавай реальный растворитель, температуру, аппаратуру или процедуру.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 1,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-05 перекристаллизация извлечение материальный баланс чистота",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Исходный баланс", "max_score": 2, "description": "Масса целевого компонента отделена от массы смеси."},
+        {"criterion_name": "Все числовые ответы", "max_score": 4, "description": "Теоретическая масса, извлечение и недостающий поток рассчитаны."},
+        {"criterion_name": "Проверка баланса", "max_score": 2, "description": "Сумма потоков сопоставлена с подачей."},
+        {"criterion_name": "Вывод о чистоте", "max_score": 2, "description": "Не сделан неподтверждённый вывод о чистоте по одному выходу."}
+      ]
+    },
+    {
+      "slug": "lab-separation-principle",
+      "reference_sheet_slugs": ["lab-07-separation"],
+      "payload": {
+        "name": "Разделение смеси · выбор принципа",
+        "topic": "Принципы разделения смесей",
+        "difficulty": "medium",
+        "instructions": "Дай таблицу свойств двух или трёх условных компонентов без опасных веществ. Попроси выбрать принцип разделения, указать различающее свойство, проследить целевой компонент по потокам и записать общий материальный баланс. Ответ должен оставаться на уровне принципа: без реагентов, аппаратуры, последовательности операций и режимов.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-07 разделение смесей различие свойств потоки материальный баланс",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Различающее свойство", "max_score": 2, "description": "Названо свойство, данное в условии."},
+        {"criterion_name": "Принцип разделения", "max_score": 3, "description": "Принцип логически следует из различия свойств."},
+        {"criterion_name": "Маршрут компонента", "max_score": 2, "description": "Целевой компонент прослежен по всем потокам."},
+        {"criterion_name": "Материальный баланс", "max_score": 2, "description": "Все заданные потоки учтены."},
+        {"criterion_name": "Нет процедурной импровизации", "max_score": 1, "description": "Ответ не вводит условия и операции сверх задачи."}
+      ]
+    },
+    {
+      "slug": "lab-report-evidence-audit",
+      "reference_sheet_slugs": ["lab-01-report", "lab-06-sublimation", "lab-08-water"],
+      "payload": {
+        "name": "Аудит лабораторного отчёта",
+        "topic": "Лабораторный журнал и доказательный вывод",
+        "difficulty": "medium",
+        "instructions": "Сгенерируй короткий фрагмент отчёта с 5–7 утверждениями. Включи заданное наблюдение, расчёт, ожидаемый эффект, один неподтверждённый широкий вывод и один пропуск данных. Попроси присвоить каждому утверждению статус, найти логические разрывы и переписать вывод в допустимых границах. Не используй реальные опасные процедуры.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-01 статусы утверждений наблюдение расчёт ожидается вывод неизвестно",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Классификация утверждений", "max_score": 3, "description": "Статусы назначены по происхождению данных."},
+        {"criterion_name": "Логические разрывы", "max_score": 3, "description": "Найдены широкий вывод и недостающие данные."},
+        {"criterion_name": "Исправленный вывод", "max_score": 3, "description": "Новый вывод не шире имеющегося доказательства."},
+        {"criterion_name": "Нет вымышленных данных", "max_score": 1, "description": "Пропуски сохранены как неизвестные."}
+      ]
+    }
+  ]
+}

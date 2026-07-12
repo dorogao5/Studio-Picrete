@@ -2,7 +2,9 @@ import json
 from dataclasses import dataclass
 
 from app.llm import client as llm
-from app.models import ModelEntry, Provider
+from app.models import Assistant, ModelEntry, Provider
+from app.services.assistant_profile import with_assistant_profile
+from app.services.grading_contract import GradingContractError, validate_grading_output
 
 
 @dataclass
@@ -52,12 +54,20 @@ async def run_grading(
     ocr_text: str,
     grounding: str = "",
     temperature: float = 0.1,
+    assistant: Assistant | None = None,
 ) -> GradeOutcome:
     user_message = build_grading_user_message(
         task_text, reference_solution, rubric, max_score, ocr_text, grounding=grounding
     )
     try:
-        result = await llm.chat(provider, model, system_prompt, user_message, temperature=temperature, json_mode=True)
+        result = await llm.chat(
+            provider,
+            model,
+            with_assistant_profile(system_prompt, assistant),
+            user_message,
+            temperature=temperature,
+            json_mode=True,
+        )
     except llm.LlmError as err:
         return GradeOutcome(output=None, raw_text="", duration_ms=0, tokens_total=None, error=str(err))
     try:
@@ -70,8 +80,18 @@ async def run_grading(
             tokens_total=result.tokens_total,
             error=str(err),
         )
+    try:
+        validated = validate_grading_output(parsed, rubric, max_score)
+    except GradingContractError as err:
+        return GradeOutcome(
+            output=parsed if isinstance(parsed, dict) else None,
+            raw_text=result.text,
+            duration_ms=result.duration_ms,
+            tokens_total=result.tokens_total,
+            error=f"Ответ модели не прошёл контракт проверки: {err}",
+        )
     return GradeOutcome(
-        output=parsed,
+        output=validated,
         raw_text=result.text,
         duration_ms=result.duration_ms,
         tokens_total=result.tokens_total,
