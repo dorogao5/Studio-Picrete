@@ -122,6 +122,28 @@ function PipelineEditor({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const gradeCount = steps.filter((step) => step.type === "grade").length;
+  const hasOcr = steps.some((step) => step.type === "ocr");
+  const hasConsensus = steps.some((step) => step.type === "consensus");
+
+  const validDraftOrder = (candidate: PipelineStep[]) => {
+    const ocrIndex = candidate.findIndex((step) => step.type === "ocr");
+    const consensusIndex = candidate.findIndex((step) => step.type === "consensus");
+    return (
+      candidate.filter((step) => step.type === "ocr").length <= 1 &&
+      (ocrIndex === -1 || ocrIndex === 0) &&
+      candidate.filter((step) => step.type === "consensus").length <= 1 &&
+      (consensusIndex === -1 || consensusIndex === candidate.length - 1)
+    );
+  };
+
+  const canMove = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= steps.length) return false;
+    const candidate = [...steps];
+    [candidate[index], candidate[target]] = [candidate[target], candidate[index]];
+    return validDraftOrder(candidate);
+  };
 
   const updateStep = (index: number, patch: Partial<PipelineStep>) => {
     setSteps(steps.map((s, i) => (i === index ? { ...s, ...patch } : s)));
@@ -185,19 +207,28 @@ function PipelineEditor({
                 <p className="text-xs text-muted-foreground">{STEP_META[step.type]?.hint}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <button className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30" onClick={() => move(index, -1)} disabled={index === 0}>
+                <button
+                  className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  onClick={() => move(index, -1)}
+                  disabled={!canMove(index, -1)}
+                  aria-label="Переместить шаг выше"
+                >
                   <ArrowUp className="h-4 w-4" />
                 </button>
                 <button
                   className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
                   onClick={() => move(index, 1)}
-                  disabled={index === steps.length - 1}
+                  disabled={!canMove(index, 1)}
+                  aria-label="Переместить шаг ниже"
                 >
                   <ArrowDown className="h-4 w-4" />
                 </button>
                 <button
-                  className="p-1.5 text-muted-foreground hover:text-destructive"
+                  className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:hover:text-muted-foreground"
                   onClick={() => setSteps(steps.filter((_, i) => i !== index))}
+                  disabled={step.type === "grade" && hasConsensus && gradeCount <= 2}
+                  title={step.type === "grade" && hasConsensus && gradeCount <= 2 ? "Сначала удалите шаг консенсуса" : "Удалить шаг"}
+                  aria-label="Удалить шаг"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -243,18 +274,34 @@ function PipelineEditor({
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <Button variant="secondary" onClick={() => setSteps([{ type: "ocr", config: {} }, ...steps])}>
+        <Button
+          variant="secondary"
+          disabled={hasOcr}
+          title={hasOcr ? "Шаг OCR уже добавлен" : "Добавить OCR первым шагом"}
+          onClick={() => setSteps([{ type: "ocr", config: {} }, ...steps])}
+        >
           <Plus className="h-3.5 w-3.5" /> OCR
         </Button>
         <Button
           variant="secondary"
-          onClick={() => setSteps([...steps, { type: "grade", config: { model_entry_id: preferredGraderId } }])}
+          onClick={() => {
+            const grade = { type: "grade", config: { model_entry_id: preferredGraderId } } as PipelineStep;
+            const consensusIndex = steps.findIndex((step) => step.type === "consensus");
+            setSteps(consensusIndex === -1 ? [...steps, grade] : [...steps.slice(0, consensusIndex), grade, ...steps.slice(consensusIndex)]);
+          }}
         >
           <Plus className="h-3.5 w-3.5" /> Проверка LLM
         </Button>
         <Button
           variant="secondary"
-          title="Для консенсуса нужны минимум две проверки LLM"
+          disabled={gradeCount < 2 || hasConsensus}
+          title={
+            hasConsensus
+              ? "Шаг консенсуса уже добавлен"
+              : gradeCount < 2
+                ? "Для консенсуса нужны минимум две проверки LLM"
+                : "Свести результаты проверяющих моделей"
+          }
           onClick={() => setSteps([...steps, { type: "consensus", config: { disagreement_threshold_pct: 20 } }])}
         >
           <Plus className="h-3.5 w-3.5" /> Консенсус
