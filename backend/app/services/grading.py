@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from app.llm import client as llm
 from app.models import Assistant, ModelEntry, Provider
 from app.services.assistant_profile import with_assistant_profile
-from app.services.grading_contract import GradingContractError, validate_grading_output
+from app.services.grading_contract import GradingContractError, validate_grading_output, validate_grading_request
 
 
 @dataclass
@@ -56,6 +56,16 @@ async def run_grading(
     temperature: float = 0.1,
     assistant: Assistant | None = None,
 ) -> GradeOutcome:
+    try:
+        validate_grading_request(rubric, max_score)
+    except GradingContractError as err:
+        return GradeOutcome(
+            output=None,
+            raw_text="",
+            duration_ms=0,
+            tokens_total=None,
+            error=f"Проверка не запущена: {err}",
+        )
     user_message = build_grading_user_message(
         task_text, reference_solution, rubric, max_score, ocr_text, grounding=grounding
     )

@@ -82,7 +82,7 @@ def test_generation_and_manual_runtimes_send_profile_as_system_instruction(monke
             "Проверяющий",
             "Условие",
             "Решение",
-            [],
+            [{"criterion_name": "Расчёт", "max_score": 4}],
             4,
             "Работа студента",
             assistant=assistant,

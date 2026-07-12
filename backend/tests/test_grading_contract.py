@@ -111,6 +111,33 @@ def test_empty_rubric_never_yields_an_automatic_grade() -> None:
         validate_grading_output(grade_output(), [], 5)
 
 
+def test_empty_rubric_is_rejected_before_model_call(monkeypatch) -> None:
+    called = False
+
+    async def fake_chat(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("model must not be called")
+
+    monkeypatch.setattr(grading.llm, "chat", fake_chat)
+    outcome = asyncio.run(
+        grading.run_grading(
+            Provider(name="test", base_url="https://example.invalid"),
+            ModelEntry(model_id="test-model", provider_id="provider"),
+            "system",
+            "task",
+            "solution",
+            [],
+            5,
+            "student work",
+        )
+    )
+
+    assert called is False
+    assert outcome.tokens_total is None
+    assert "rubric_not_configured" in outcome.error
+
+
 def test_run_grading_never_completes_with_a_contract_violation(monkeypatch) -> None:
     invalid = grade_output()
     invalid["total_score"] = 5

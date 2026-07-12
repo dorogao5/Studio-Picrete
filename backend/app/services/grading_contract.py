@@ -51,20 +51,31 @@ def _expected_criteria(rubric: list) -> list[_ExpectedCriterion]:
     return expected
 
 
-def validate_grading_output(output: Any, rubric: list, max_score: float) -> dict:
-    """Return a safe grade or reject a structurally/arithmeticly invalid one."""
-
-    if not isinstance(output, dict):
-        raise GradingContractError("корень ответа: ожидался JSON-объект")
+def validate_grading_request(rubric: list, max_score: float) -> None:
+    """Reject an unusable teacher rubric before spending a model request."""
     if not isinstance(rubric, list):
         raise GradingContractError("rubric: ожидался список критериев")
-
     expected_max = _number(max_score, "max_score задания")
     if expected_max < 0:
         raise GradingContractError("max_score задания: значение не может быть отрицательным")
     expected = _expected_criteria(rubric)
     if not expected:
         raise GradingContractError("rubric_not_configured: автоматическая оценка без рубрики запрещена")
+    rubric_max = sum(criterion.max_score for criterion in expected)
+    if not _same_score(rubric_max, expected_max):
+        raise GradingContractError(
+            f"исходная рубрика неконсистентна: сумма {rubric_max:g}, max_score {expected_max:g}"
+        )
+
+
+def validate_grading_output(output: Any, rubric: list, max_score: float) -> dict:
+    """Return a safe grade or reject a structurally/arithmeticly invalid one."""
+
+    if not isinstance(output, dict):
+        raise GradingContractError("корень ответа: ожидался JSON-объект")
+    validate_grading_request(rubric, max_score)
+    expected_max = _number(max_score, "max_score задания")
+    expected = _expected_criteria(rubric)
     expected_by_name = {criterion.name: criterion for criterion in expected}
 
     returned_max = _number(output.get("max_score"), "max_score ответа")
@@ -115,12 +126,6 @@ def validate_grading_output(output: Any, rubric: list, max_score: float) -> dict
                     f"максимум критерия «{name}» изменён моделью: "
                     f"{returned_criterion_max:g} вместо {expected_criterion.max_score:g}"
                 )
-
-        rubric_max = sum(criterion.max_score for criterion in expected)
-        if not _same_score(rubric_max, expected_max):
-            raise GradingContractError(
-                f"исходная рубрика неконсистентна: сумма {rubric_max:g}, max_score {expected_max:g}"
-            )
 
     if not _same_score(total_score, criterion_total):
         raise GradingContractError(
