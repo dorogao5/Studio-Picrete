@@ -225,7 +225,11 @@ async def update_course(
     ).scalar_one_or_none()
     if course is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Курс не найден")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    payload = body.model_dump(exclude_unset=True)
+    if "external_course_id" in payload and payload["external_course_id"].strip() != course.external_course_id.strip():
+        course.published_version = ""
+        course.published_at = None
+    for field, value in payload.items():
         setattr(course, field, value)
     await db.commit()
     await db.refresh(course)
