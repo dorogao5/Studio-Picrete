@@ -1,16 +1,17 @@
+import asyncio
 import re
 from pathlib import Path
 
 import pymupdf
 import snowballstemmer
-from sqlalchemy import delete, select
+from sqlalchemy import bindparam, delete, select
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import SessionLocal
 from app.llm import client as llm
-from app.models import KnowledgeChunk, KnowledgeDocument, ModelEntry, Provider
+from app.models import Assistant, KnowledgeChunk, KnowledgeDocument, ModelEntry, Provider
 from app.services import storage
 from app.services.ocr import run_datalab_ocr
 
@@ -80,13 +81,17 @@ def _page_highlights(page: pymupdf.Page) -> list[str]:
     return highlights
 
 
-def _pdf_to_markdown(content: bytes) -> tuple[str, int, float]:
+def _pdf_to_markdown(source: bytes | Path) -> tuple[str, int, float]:
     """(markdown, число_страниц, средн_символов_на_страницу) из текстового слоя PDF.
 
     Движок — PyMuPDF: восстанавливает пробелы по позициям глифов, поэтому вытягивает
     даже PDF с дефектным текстовым слоем (слипшиеся слова), где pypdf/pdfplumber ломаются.
     """
-    doc = pymupdf.open(stream=content, filetype="pdf")
+    doc = (
+        pymupdf.open(stream=source, filetype="pdf")
+        if isinstance(source, bytes)
+        else pymupdf.open(str(source))
+    )
     try:
         page_count = doc.page_count
         total_chars = 0
@@ -295,23 +300,37 @@ async def deindex_assistant(db: AsyncSession, assistant_id: str) -> None:
     await db.execute(sql_text("DELETE FROM kb_fts WHERE assistant_id = :aid"), {"aid": assistant_id})
 
 
-async def search_chunks(db: AsyncSession, assistant_id: str, query: str, limit: int = 8) -> list[KnowledgeChunk]:
+async def search_chunks(
+    db: AsyncSession,
+    assistant_id: str,
+    query: str,
+    limit: int = 8,
+    allowed_visibilities: tuple[str, ...] | None = None,
+) -> list[KnowledgeChunk]:
+    if allowed_visibilities is not None and not allowed_visibilities:
+        return []
     if _is_postgres(db):
         words = re.findall(r"\w+", query.lower().replace("ё", "е"))
         if not words:
             return []
         ts_query = " | ".join(words)
         try:
-            chunk_ids = (
-                await db.execute(
-                    sql_text(
-                        "SELECT id FROM knowledge_chunks "
-                        "WHERE assistant_id = :aid AND search_vector @@ to_tsquery('russian', :q) "
-                        "ORDER BY ts_rank(search_vector, to_tsquery('russian', :q)) DESC LIMIT :n"
-                    ),
-                    {"q": ts_query, "aid": assistant_id, "n": limit},
-                )
-            ).scalars().all()
+            query_text = (
+                "SELECT c.id FROM knowledge_chunks c "
+                "JOIN knowledge_documents d ON d.id = c.document_id "
+                "WHERE c.assistant_id = :aid AND c.search_vector @@ to_tsquery('russian', :q) "
+            )
+            if allowed_visibilities is not None:
+                query_text += "AND d.visibility IN :visibilities "
+            query_text += (
+                "ORDER BY ts_rank(c.search_vector, to_tsquery('russian', :q)) DESC LIMIT :n"
+            )
+            statement = sql_text(query_text)
+            params: dict = {"q": ts_query, "aid": assistant_id, "n": limit}
+            if allowed_visibilities is not None:
+                statement = statement.bindparams(bindparam("visibilities", expanding=True))
+                params["visibilities"] = allowed_visibilities
+            chunk_ids = (await db.execute(statement, params)).scalars().all()
         except Exception:
             return []
     else:
@@ -320,24 +339,33 @@ async def search_chunks(db: AsyncSession, assistant_id: str, query: str, limit: 
             return []
         match_query = " OR ".join(normalized.split())
         try:
-            chunk_ids = (
-                await db.execute(
-                    sql_text(
-                        "SELECT chunk_id FROM kb_fts WHERE kb_fts MATCH :q AND assistant_id = :aid "
-                        "ORDER BY bm25(kb_fts) LIMIT :n"
-                    ),
-                    {"q": match_query, "aid": assistant_id, "n": limit},
-                )
-            ).scalars().all()
+            query_text = (
+                "SELECT f.chunk_id FROM kb_fts f "
+                "JOIN knowledge_chunks c ON c.id = f.chunk_id "
+                "JOIN knowledge_documents d ON d.id = c.document_id "
+                "WHERE kb_fts MATCH :q AND f.assistant_id = :aid "
+            )
+            if allowed_visibilities is not None:
+                query_text += "AND d.visibility IN :visibilities "
+            query_text += "ORDER BY bm25(kb_fts) LIMIT :n"
+            statement = sql_text(query_text)
+            params = {"q": match_query, "aid": assistant_id, "n": limit}
+            if allowed_visibilities is not None:
+                statement = statement.bindparams(bindparam("visibilities", expanding=True))
+                params["visibilities"] = allowed_visibilities
+            chunk_ids = (await db.execute(statement, params)).scalars().all()
         except Exception:
             return []
     if not chunk_ids:
         return []
-    chunks = (
-        await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.id.in_(chunk_ids)))
-    ).scalars().all()
+    stmt = select(KnowledgeChunk).where(KnowledgeChunk.id.in_(chunk_ids))
+    if allowed_visibilities is not None:
+        stmt = stmt.join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id).where(
+            KnowledgeDocument.visibility.in_(allowed_visibilities)
+        )
+    chunks = (await db.execute(stmt)).scalars().all()
     by_id = {chunk.id: chunk for chunk in chunks}
-    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id][:limit]
 
 
 async def _load_document(db: AsyncSession, document_id: str) -> KnowledgeDocument | None:
@@ -346,11 +374,15 @@ async def _load_document(db: AsyncSession, document_id: str) -> KnowledgeDocumen
     ).scalar_one_or_none()
 
 
-async def _load_document_bytes(document: KnowledgeDocument) -> bytes:
-    """Оригинал: локальный файл (свежая загрузка) или S3 (после выгрузки)."""
+async def _load_document_source(document: KnowledgeDocument) -> bytes | Path:
+    """Оригинал как локальный путь либо bytes из S3.
+
+    Для свежих больших PDF возвращаем путь: PyMuPDF сможет открыть файл без
+    дополнительной полной копии в памяти процесса.
+    """
     path = Path(document.file_path)
     if document.file_path and path.exists():
-        return path.read_bytes()
+        return path
     if document.s3_key and storage.s3_enabled():
         return await storage.download_bytes(document.s3_key)
     raise FileNotFoundError(f"Оригинал документа недоступен: {document.file_path or document.s3_key}")
@@ -372,10 +404,11 @@ async def _offload_original(document: KnowledgeDocument) -> None:
 
 async def _extract_markdown(document: KnowledgeDocument) -> tuple[str, str, int]:
     """(markdown, метод['text'|'ocr'], число_страниц). Текст извлекаем дёшево, OCR — только fallback."""
-    content = await _load_document_bytes(document)
+    source = await _load_document_source(document)
     suffix = Path(document.original_filename or document.file_path or "").suffix.lower()
 
     if suffix in TEXT_EXTENSIONS:
+        content = await asyncio.to_thread(source.read_bytes) if isinstance(source, Path) else source
         return content.decode("utf-8", errors="replace"), "text", 0
 
     if suffix in PDF_EXTENSIONS:
@@ -383,12 +416,13 @@ async def _extract_markdown(document: KnowledgeDocument) -> tuple[str, str, int]
         # только если слоя фактически нет — это скан. Так учебник на сотни страниц
         # не гоняется через дорогой DataLab без нужды.
         try:
-            markdown, page_count, avg_chars = _pdf_to_markdown(content)
+            markdown, page_count, avg_chars = await asyncio.to_thread(_pdf_to_markdown, source)
         except Exception:
             markdown, page_count, avg_chars = "", 0, 0.0
         if markdown and avg_chars >= MIN_TEXT_CHARS_PER_PAGE:
             return markdown, "text", page_count
 
+    content = await asyncio.to_thread(source.read_bytes) if isinstance(source, Path) else source
     ocr_markdown = await run_datalab_ocr(
         document.original_filename or f"document{suffix}",
         content,
@@ -398,19 +432,33 @@ async def _extract_markdown(document: KnowledgeDocument) -> tuple[str, str, int]
     return ocr_markdown, "ocr", 0
 
 
-async def _resolve_architect_pair(db: AsyncSession) -> tuple[Provider, ModelEntry] | None:
+async def resolve_analysis_pair(db: AsyncSession, assistant_id: str) -> tuple[Provider, ModelEntry]:
+    """Use the assistant's selected generation model for material analysis.
+
+    This keeps routine curriculum parsing on the provider chosen by the teacher
+    (for the launch courses, DeepSeek). The hidden frontier architect remains a
+    compatibility fallback for assistants that have not selected a model yet.
+    """
+    assistant = await db.get(Assistant, assistant_id)
+    if assistant is not None and assistant.default_generator_model_id:
+        model = await db.get(ModelEntry, assistant.default_generator_model_id)
+        if model is not None and model.enabled:
+            provider = await db.get(Provider, model.provider_id)
+            if provider is not None and provider.enabled:
+                return provider, model
+
     provider = (
         await db.execute(
             select(Provider).where(Provider.purpose == "architect", Provider.enabled.is_(True)).order_by(Provider.created_at)
         )
     ).scalars().first()
     if provider is None:
-        return None
+        raise llm.LlmError("Модель для анализа материалов не настроена")
     model = (
         await db.execute(select(ModelEntry).where(ModelEntry.provider_id == provider.id, ModelEntry.enabled.is_(True)))
     ).scalars().first()
     if model is None:
-        return None
+        raise llm.LlmError("У модели для анализа материалов нет доступной модели")
     return provider, model
 
 
@@ -420,10 +468,11 @@ async def auto_analyze_document(document_id: str) -> None:
         document = await _load_document(db, document_id)
         if document is None or document.status != "parsed":
             return
-        pair = await _resolve_architect_pair(db)
-        if pair is None:
+        try:
+            pair = await resolve_analysis_pair(db, document.assistant_id)
+        except llm.LlmError as err:
             document.analysis_status = "failed"
-            document.analysis_error = "Модель-архитектор не настроена на сервере"
+            document.analysis_error = str(err)
             await db.commit()
             return
         document.analysis_status = "running"
@@ -445,7 +494,7 @@ async def auto_analyze_document(document_id: str) -> None:
             await db.commit()
 
 
-async def ingest_document(document_id: str) -> None:
+async def ingest_document(document_id: str, analyze: bool = True) -> None:
     async with SessionLocal() as db:
         document = await _load_document(db, document_id)
         if document is None:
@@ -493,7 +542,8 @@ async def ingest_document(document_id: str) -> None:
                 document.error = str(err)[:2000]
                 await db.commit()
             return
-    await auto_analyze_document(document_id)
+    if analyze:
+        await auto_analyze_document(document_id)
 
 
 SYLLABUS_SYSTEM_PROMPT = (

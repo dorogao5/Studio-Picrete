@@ -102,6 +102,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [batchModal, setBatchModal] = useState<{ open: boolean; templateId: string }>({ open: false, templateId: "" });
   const [exportOpen, setExportOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   const reloadTasks = async () => {
     try {
@@ -131,7 +132,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   };
 
   useEffect(() => {
-    void reload();
+    setInitialLoading(true);
+    void reload().finally(() => setInitialLoading(false));
   }, [assistant.id]);
 
   useEffect(() => {
@@ -169,6 +171,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     }
   };
 
+  if (initialLoading) return <Spinner label="Загружаем блюпринты, партии и банк задач…" />;
+
   return (
     <div className="space-y-6">
       <ErrorNote message={error} />
@@ -188,7 +192,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
             {templates.map((template) => (
-              <Card key={template.id} className="p-3.5">
+              <Card key={template.id} className="min-w-0 overflow-hidden p-3.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{template.name}</p>
@@ -202,10 +206,11 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex shrink-0 items-center gap-1">
                     <button
                       className="p-1 text-muted-foreground hover:text-foreground"
                       title="Редактировать"
+                      aria-label={`Редактировать блюпринт «${template.name}»`}
                       onClick={() => setTemplateModal({ open: true, template })}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -213,6 +218,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                     <button
                       className="p-1 text-muted-foreground hover:text-destructive"
                       title="Удалить"
+                      aria-label={`Удалить блюпринт «${template.name}»`}
                       onClick={async () => {
                         if (!confirm(`Удалить блюпринт «${template.name}»?`)) return;
                         try {
@@ -228,7 +234,11 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                   </div>
                 </div>
                 <div className="mt-2.5">
-                  <Button variant="accent" onClick={() => setBatchModal({ open: true, templateId: template.id })}>
+                  <Button
+                    variant="accent"
+                    className="w-full sm:w-auto"
+                    onClick={() => setBatchModal({ open: true, templateId: template.id })}
+                  >
                     <Sparkles className="h-3.5 w-3.5" /> Сгенерировать партию
                   </Button>
                 </div>

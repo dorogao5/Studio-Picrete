@@ -351,6 +351,10 @@ class KnowledgeDocumentOut(ORMModel):
     assistant_id: str
     title: str
     doc_type: str
+    authority: str = "reference"
+    visibility: str = "student"
+    course_scope: str = ""
+    effective_version: str = ""
     original_filename: str
     mime_type: str
     size_bytes: int
@@ -409,6 +413,7 @@ class ReferenceSheetOut(ORMModel):
     description: str
     content_markdown: str
     source_document_id: str | None
+    visibility: str = "student"
     is_canonical: bool
     ord: int
     created_at: datetime
@@ -421,6 +426,9 @@ class ReferenceSheetCreate(BaseModel):
     description: str = ""
     content_markdown: str = ""
     source_document_id: str | None = None
+    visibility: str = Field(
+        default="student", pattern="^(student|teacher_only|assessment_private|quarantine)$"
+    )
     is_canonical: bool = True
     ord: int = 0
 
@@ -430,6 +438,9 @@ class ReferenceSheetUpdate(BaseModel):
     kind: str | None = Field(default=None, pattern="^(data_table|glossary|conventions|formulas|other)$")
     description: str | None = None
     content_markdown: str | None = None
+    visibility: str | None = Field(
+        default=None, pattern="^(student|teacher_only|assessment_private|quarantine)$"
+    )
     is_canonical: bool | None = None
     ord: int | None = None
 

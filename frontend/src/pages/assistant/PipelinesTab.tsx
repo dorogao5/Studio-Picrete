@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Save, ScanText, Scale, Trash2, UserCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, FlaskConical, Plus, Save, ScanText, Scale, Trash2, UserCheck } from "lucide-react";
+import { Link } from "react-router-dom";
 import { apiErrorMessage, pipelinesApi } from "../../lib/api";
 import type { Assistant, Pipeline, PipelineStep, Provider } from "../../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Select, Spinner } from "../../components/ui";
@@ -58,6 +59,19 @@ export default function PipelinesTab({ assistant, providers }: { assistant: Assi
   return (
     <div className="space-y-4">
       <ErrorNote message={error} />
+      <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Проверить ассистента на реальной работе</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Запустите OCR, выбранные модели и консенсус в Playground, не создавая контрольную в Picrete.
+          </p>
+        </div>
+        <Link to={`/playground?assistant=${assistant.id}`} className="shrink-0">
+          <Button variant="accent" className="w-full sm:w-auto">
+            <FlaskConical className="h-4 w-4" /> Открыть тестовый запуск
+          </Button>
+        </Link>
+      </Card>
       <div className="flex items-center gap-2 flex-wrap">
         {pipelines.map((p) => (
           <button
@@ -245,7 +259,6 @@ function PipelineEditor({
           <Save className="h-4 w-4" /> Сохранить пайплайн
         </Button>
         {savedAt && <span className="text-xs text-success">Сохранено</span>}
-        <span className="text-xs text-muted-foreground">Запуск пайплайна — на странице Playground, режим «Пайплайн E2E»</span>
       </div>
     </div>
   );

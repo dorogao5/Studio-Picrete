@@ -124,7 +124,12 @@ async def prompt_preview(
         user_message = _build_generation_message(template, grounding, existing_statements)
     elif body.role == "tutor":
         query_source = task.statement if task else (body.student_work or SAMPLE_STUDENT_MESSAGE)
-        grounding = await build_grounding_block(db, assistant.id, query=query_source[:200])
+        grounding = await build_grounding_block(
+            db,
+            assistant.id,
+            query=query_source[:200],
+            allowed_visibilities=("student",),
+        )
         context = build_tutor_context(task, body.student_work, grounding)
         user_message = flatten_dialog([{"role": "user", "content": SAMPLE_STUDENT_MESSAGE}], context)
     else:

@@ -162,6 +162,10 @@ class KnowledgeDocument(Base):
     assistant_id: Mapped[str] = mapped_column(ForeignKey("assistants.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(512))
     doc_type: Mapped[str] = mapped_column(String(32), default="other")
+    authority: Mapped[str] = mapped_column(String(32), default="reference")
+    visibility: Mapped[str] = mapped_column(String(32), default="student")
+    course_scope: Mapped[str] = mapped_column(String(128), default="")
+    effective_version: Mapped[str] = mapped_column(String(128), default="")
     original_filename: Mapped[str] = mapped_column(String(512), default="")
     file_path: Mapped[str] = mapped_column(String(1024), default="")
     # Оригинал выгружается в S3 после парсинга; локальный файл удаляется.
@@ -209,6 +213,7 @@ class ReferenceSheet(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     content_markdown: Mapped[str] = mapped_column(Text, default="")
     source_document_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    visibility: Mapped[str] = mapped_column(String(32), default="student")
     is_canonical: Mapped[bool] = mapped_column(Boolean, default=True)
     ord: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[str] = mapped_column(String(32), default="")

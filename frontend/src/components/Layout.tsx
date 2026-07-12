@@ -17,7 +17,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { apiErrorMessage, authApi } from "../lib/api";
 import { useApp } from "../lib/context";
@@ -31,6 +31,48 @@ export default function Layout() {
   const navigate = useNavigate();
   const [pwOpen, setPwOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const navTitleId = useId();
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => {
+      navRef.current?.querySelector<HTMLElement>("button:not([disabled]), a[href]")?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setNavOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = Array.from(
+        navRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => element.offsetParent !== null);
+      if (controls.length === 0) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      menuButtonRef.current?.focus();
+    };
+  }, [navOpen]);
 
   if (!token) return <Navigate to="/login" replace />;
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner /></div>;
@@ -55,22 +97,27 @@ export default function Layout() {
       {/* Мобильная шапка */}
       <header className="lg:hidden sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-card px-3 py-2.5">
         <button
+          ref={menuButtonRef}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
           aria-label="Открыть меню"
+          aria-expanded={navOpen}
+          aria-controls="studio-navigation"
           onClick={() => setNavOpen(true)}
         >
           <Menu className="h-5 w-5" />
         </button>
         <span className="font-semibold text-sm tracking-tight">Picrete Studio</span>
-        {selected && (
-          <span className="min-w-0 truncate text-xs text-muted-foreground">· {selected.name}</span>
-        )}
       </header>
 
       {navOpen && (
-        <div className="fixed inset-0 z-40 bg-foreground/40 lg:hidden" onClick={() => setNavOpen(false)} />
+        <div aria-hidden="true" className="fixed inset-0 z-40 bg-foreground/40 lg:hidden" onClick={() => setNavOpen(false)} />
       )}
       <aside
+        id="studio-navigation"
+        ref={navRef}
+        role={navOpen ? "dialog" : undefined}
+        aria-modal={navOpen ? "true" : undefined}
+        aria-labelledby={navOpen ? navTitleId : undefined}
         className={clsx(
           "w-60 shrink-0 border-r border-border bg-card flex flex-col",
           "fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0 lg:transition-none",
@@ -82,7 +129,7 @@ export default function Layout() {
       >
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-border">
           <div>
-            <p className="font-semibold tracking-tight text-sm">Picrete Studio</p>
+            <p id={navTitleId} className="font-semibold tracking-tight text-sm">Picrete Studio</p>
             <p className="text-[11px] text-muted-foreground">общий воркспейс преподавателей</p>
           </div>
           <button
@@ -188,6 +235,7 @@ function SideLink({ to, icon: Icon, label }: { to: string; icon: typeof Plug; la
   return (
     <NavLink
       to={to}
+      end={to === "/disciplines"}
       className={({ isActive }) =>
         clsx(
           "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",

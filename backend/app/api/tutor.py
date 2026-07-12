@@ -83,7 +83,7 @@ async def tutor_chat(
         if part
     )
     query = query_source[:300]
-    grounding = await build_grounding_block(db, assistant.id, query=query)
+    grounding = await build_grounding_block(db, assistant.id, query=query, allowed_visibilities=("student",))
     context = build_tutor_context(task, body.student_work, grounding)
     user_message = flatten_dialog([m.model_dump() for m in body.messages], context)
 

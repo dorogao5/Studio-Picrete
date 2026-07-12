@@ -76,7 +76,7 @@ export default function AssistantDetail() {
 
   return (
     <div className="max-w-5xl space-y-5">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold">{assistant.name}</h1>
@@ -96,7 +96,7 @@ export default function AssistantDetail() {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
           <Button variant="ghost" onClick={() => setTab("courses")} title="Привязка к курсам Picrete">
             <GraduationCap className="h-4 w-4" /> Курсы
           </Button>

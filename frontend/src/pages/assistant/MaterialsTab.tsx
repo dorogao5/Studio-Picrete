@@ -10,6 +10,8 @@ import type {
   KnowledgeDocType,
   KnowledgeDocument,
   KnowledgeDocumentDetail,
+  MaterialAuthority,
+  MaterialVisibility,
   Provider,
   ReferenceSheet,
   ReferenceSheetKind,
@@ -29,6 +31,20 @@ const DOC_TYPE_LABELS: Record<KnowledgeDocType, string> = {
   reference: "Справочные данные",
   methodical: "Методичка",
   other: "Другое",
+};
+
+const AUTHORITY_LABELS: Record<MaterialAuthority, string> = {
+  course_policy: "Правила курса",
+  course_lecture: "Материал курса",
+  reference: "Справочный источник",
+  unverified: "Не проверен",
+};
+
+const VISIBILITY_LABELS: Record<MaterialVisibility, string> = {
+  student: "Ассистенту студента",
+  teacher_only: "Только преподавателю",
+  assessment_private: "Закрытый банк",
+  quarantine: "Карантин",
 };
 
 const SHEET_KIND_LABELS: Record<ReferenceSheetKind, string> = {
@@ -59,6 +75,12 @@ function detectDocType(filename: string): KnowledgeDocType {
   if (/справоч|таблиц|констант/.test(f)) return "reference";
   if (/метод/.test(f)) return "methodical";
   return "other";
+}
+
+function defaultAuthority(docType: KnowledgeDocType): MaterialAuthority {
+  if (docType === "rpd" || docType === "methodical") return "course_policy";
+  if (docType === "notes") return "course_lecture";
+  return "reference";
 }
 
 function cleanTitle(filename: string): string {
@@ -98,6 +120,10 @@ function DocumentsSection({
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [docType, setDocType] = useState<KnowledgeDocType>("other");
+  const [autoAnalyze, setAutoAnalyze] = useState(true);
+  const [authority, setAuthority] = useState<MaterialAuthority>("reference");
+  const [visibility, setVisibility] = useState<MaterialVisibility>("student");
+  const [effectiveVersion, setEffectiveVersion] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
@@ -137,7 +163,9 @@ function DocumentsSection({
     setFile(next);
     if (next) {
       setTitle(cleanTitle(next.name));
-      setDocType(detectDocType(next.name));
+      const detectedType = detectDocType(next.name);
+      setDocType(detectedType);
+      setAuthority(defaultAuthority(detectedType));
     }
   };
 
@@ -146,9 +174,16 @@ function DocumentsSection({
     setUploading(true);
     setError("");
     try {
-      await kbApi.upload(assistant.id, file, title.trim() || file.name, docType);
+      await kbApi.upload(assistant.id, file, title.trim() || file.name, docType, {
+        analyze: autoAnalyze,
+        authority,
+        visibility,
+        courseScope: assistant.discipline,
+        effectiveVersion,
+      });
       setFile(null);
       setTitle("");
+      setEffectiveVersion("");
       if (pickerRef.current) pickerRef.current.value = "";
       await reload();
     } catch (err) {
@@ -223,7 +258,7 @@ function DocumentsSection({
           </p>
         </button>
       ) : (
-        <Card className="p-3.5">
+        <Card className="p-3.5 space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
             <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
             <span className="text-xs text-muted-foreground shrink-0">
@@ -260,6 +295,53 @@ function DocumentsSection({
               <X className="h-4 w-4" />
             </button>
           </div>
+          <label className="flex items-start gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={autoAnalyze && visibility !== "quarantine"}
+              disabled={visibility === "quarantine"}
+              onChange={(event) => setAutoAnalyze(event.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+            />
+            <span>
+              <span className="font-medium text-foreground">Предложить темы и справочники после загрузки</span>
+              <span className="mt-0.5 block">
+                {visibility === "quarantine"
+                  ? "Для карантина автоматический разбор отключён. Его можно запустить вручную после проверки источника."
+                  : "Studio использует выбранную модель ассистента. Разбор можно отключить сейчас и запустить позже вручную."}
+              </span>
+            </span>
+          </label>
+          <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-3">
+            <Field label="Статус источника">
+              <Select
+                value={authority}
+                onChange={(event) => {
+                  const next = event.target.value as MaterialAuthority;
+                  setAuthority(next);
+                  if (next === "unverified") setVisibility("quarantine");
+                }}
+              >
+                {Object.entries(AUTHORITY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Кому доступен">
+              <Select value={visibility} onChange={(event) => setVisibility(event.target.value as MaterialVisibility)}>
+                {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Версия / семестр">
+              <Input
+                value={effectiveVersion}
+                onChange={(event) => setEffectiveVersion(event.target.value)}
+                placeholder="напр. осень 2026"
+              />
+            </Field>
+          </div>
         </Card>
       )}
 
@@ -284,6 +366,12 @@ function DocumentsSection({
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-medium truncate">{doc.title}</p>
                     <Badge tone="info">{DOC_TYPE_LABELS[doc.doc_type]}</Badge>
+                    <Badge>{AUTHORITY_LABELS[doc.authority]}</Badge>
+                    {doc.visibility !== "student" && (
+                      <Badge tone={doc.visibility === "quarantine" ? "destructive" : "warning"}>
+                        {VISIBILITY_LABELS[doc.visibility]}
+                      </Badge>
+                    )}
                     <DocStatusBadge doc={doc} />
                     {doc.status === "parsed" && doc.extract_method === "ocr" && (
                       <span title="Текстового слоя не было — распознавали через OCR">
@@ -467,9 +555,13 @@ function AnalyzeModal({
       .analyze(assistant.id, document.id, refresh)
       .then((res) => {
         setData(res);
-        setTopicSel(new Set(res.topics.filter((t) => !existing.has(normTopic(t)))));
-        setSheetSel(new Set(res.sheets.map((_, i) => i)));
-        setUseDescription(!assistant.description.trim() && Boolean(res.summary.trim()));
+        setTopicSel(
+          new Set(document.visibility === "quarantine" ? [] : res.topics.filter((t) => !existing.has(normTopic(t)))),
+        );
+        setSheetSel(new Set(document.visibility === "quarantine" ? [] : res.sheets.map((_, i) => i)));
+        setUseDescription(
+          document.visibility !== "quarantine" && !assistant.description.trim() && Boolean(res.summary.trim()),
+        );
       })
       .catch((err) => setError(apiErrorMessage(err)));
   };
@@ -538,6 +630,7 @@ function AnalyzeModal({
           description: sheet.description,
           content_markdown: sheet.content_markdown,
           source_document_id: document.id,
+          visibility: document.visibility,
           is_canonical: true,
         });
       }
@@ -562,6 +655,11 @@ function AnalyzeModal({
         )}
         {data && (
           <>
+            {document.visibility === "quarantine" && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                Источник находится в карантине. Темы и описание не выбраны автоматически; применяйте только проверенные пункты.
+              </div>
+            )}
             {data.summary && (
               <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
                 <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">О курсе</p>
@@ -826,6 +924,11 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
                       <p className="text-sm font-medium truncate">{sheet.title}</p>
                       <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind]}</Badge>
                       {sheet.is_canonical && <Badge tone="accent">канон</Badge>}
+                      {sheet.visibility !== "student" && (
+                        <Badge tone={sheet.visibility === "quarantine" ? "destructive" : "warning"}>
+                          {VISIBILITY_LABELS[sheet.visibility]}
+                        </Badge>
+                      )}
                     </div>
                     {sheet.description && <p className="text-xs text-muted-foreground mt-1">{sheet.description}</p>}
                     <p className="text-xs text-muted-foreground mt-1">
@@ -899,6 +1002,7 @@ function SheetEditorModal({
   const [description, setDescription] = useState(sheet?.description ?? "");
   const [content, setContent] = useState(sheet?.content_markdown ?? "");
   const [isCanonical, setIsCanonical] = useState(sheet?.is_canonical ?? true);
+  const [visibility, setVisibility] = useState<MaterialVisibility>(sheet?.visibility ?? "student");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -912,6 +1016,7 @@ function SheetEditorModal({
         description,
         content_markdown: content,
         is_canonical: isCanonical,
+        visibility,
       };
       if (sheet) {
         await sheetsApi.update(assistantId, sheet.id, body);
@@ -948,12 +1053,26 @@ function SheetEditorModal({
           </Field>
         </div>
         <Field label="Содержимое (markdown)" hint="Таблицы и значения попадут в промпты дословно — проверьте единицы и обозначения">
-          <Textarea rows={14} value={content} onChange={(e) => setContent(e.target.value)} />
+          <Textarea rows={14} value={content} onChange={(e) => setContent(e.target.value)} className="font-mono" />
         </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={isCanonical} onChange={(e) => setIsCanonical(e.target.checked)} />
-          Канонический источник — включается в промпты генерации, проверки и разбора по умолчанию
-        </label>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_18rem] sm:items-end">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={isCanonical} onChange={(e) => setIsCanonical(e.target.checked)} />
+            Канонический источник — включается в промпты по умолчанию
+          </label>
+          <Field label="Кому доступен справочник">
+            <Select value={visibility} onChange={(event) => setVisibility(event.target.value as MaterialVisibility)}>
+              {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        {visibility !== "student" && (
+          <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            Этот справочник не попадёт в student tutor и публикацию курса в Picrete.
+          </p>
+        )}
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>

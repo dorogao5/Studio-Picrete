@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     datalab_max_poll_attempts: int = 120
     # Документы базы знаний могут быть большими (главы учебников) — ждём дольше.
     datalab_kb_max_poll_attempts: int = 600
-    kb_max_file_mb: int = 60
+    # Large lecture decks and scanned exam compilations routinely exceed 60 MiB.
+    # Uploads are streamed to disk, so accepting them does not reserve the whole
+    # file in the API process memory.
+    kb_max_file_mb: int = 100
 
     # Модель-архитектор промптов — работает в фоне, преподаватели её не видят и не выбирают.
     architect_base_url: str = ""

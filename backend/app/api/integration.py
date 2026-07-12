@@ -92,6 +92,7 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
                 .where(
                     ReferenceSheet.assistant_id == assistant.id,
                     ReferenceSheet.is_canonical.is_(True),
+                    ReferenceSheet.visibility == "student",
                 )
                 .order_by(ReferenceSheet.ord, ReferenceSheet.created_at)
             )

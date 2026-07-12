@@ -202,12 +202,18 @@ export interface GenerationBatch {
 }
 
 export type KnowledgeDocType = "rpd" | "notes" | "textbook" | "problem_book" | "reference" | "methodical" | "other";
+export type MaterialAuthority = "course_policy" | "course_lecture" | "reference" | "unverified";
+export type MaterialVisibility = "student" | "teacher_only" | "assessment_private" | "quarantine";
 
 export interface KnowledgeDocument {
   id: string;
   assistant_id: string;
   title: string;
   doc_type: KnowledgeDocType;
+  authority: MaterialAuthority;
+  visibility: MaterialVisibility;
+  course_scope: string;
+  effective_version: string;
   original_filename: string;
   mime_type: string;
   size_bytes: number;
@@ -260,6 +266,7 @@ export interface ReferenceSheet {
   description: string;
   content_markdown: string;
   source_document_id: string | null;
+  visibility: MaterialVisibility;
   is_canonical: boolean;
   ord: number;
   created_at: string;

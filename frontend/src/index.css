@@ -62,3 +62,17 @@
 .math-text table {
   display: table;
 }
+
+/* Горизонтальные вкладки остаются компактными, но на узком экране явно показывают,
+   что список можно прокрутить. */
+.tabs-scroll {
+  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-width: thin;
+}
+.tabs-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.tabs-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: hsl(var(--border));
+}

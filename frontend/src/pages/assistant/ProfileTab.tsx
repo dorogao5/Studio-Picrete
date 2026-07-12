@@ -70,12 +70,11 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
           </p>
         </div>
         {criteria.map((criterion, index) => (
-          <div key={index} className="flex gap-2 items-start">
+          <div key={index} className="grid grid-cols-[minmax(0,1fr)_5rem_auto] items-start gap-2 sm:grid-cols-[14rem_5rem_minmax(0,1fr)_auto]">
             <Input
               value={criterion.name}
               onChange={(e) => setCriteria(criteria.map((c, i) => (i === index ? { ...c, name: e.target.value } : c)))}
               placeholder="Название критерия"
-              className="w-56"
             />
             <Input
               type="number"
@@ -85,7 +84,6 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
               onChange={(e) =>
                 setCriteria(criteria.map((c, i) => (i === index ? { ...c, max_score: Number(e.target.value) } : c)))
               }
-              className="w-20"
               title="Максимальный балл"
             />
             <Input
@@ -94,9 +92,11 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
                 setCriteria(criteria.map((c, i) => (i === index ? { ...c, description: e.target.value } : c)))
               }
               placeholder="За что начисляются баллы"
+              className="col-span-3 sm:col-span-1"
             />
             <button
-              className="p-2 text-muted-foreground hover:text-destructive"
+              className="col-start-3 row-start-1 p-2 text-muted-foreground hover:text-destructive sm:col-start-auto sm:row-start-auto"
+              aria-label={`Удалить критерий «${criterion.name || index + 1}»`}
               onClick={() => setCriteria(criteria.filter((_, i) => i !== index))}
             >
               <Trash2 className="h-4 w-4" />

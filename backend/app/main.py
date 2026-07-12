@@ -105,6 +105,13 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
         "analysis": "JSON DEFAULT '{}'",
         "analysis_error": "TEXT DEFAULT ''",
         "s3_key": "VARCHAR(1024) DEFAULT ''",
+        "authority": "VARCHAR(32) DEFAULT 'reference'",
+        "visibility": "VARCHAR(32) DEFAULT 'student'",
+        "course_scope": "VARCHAR(128) DEFAULT ''",
+        "effective_version": "VARCHAR(128) DEFAULT ''",
+    },
+    "reference_sheets": {
+        "visibility": "VARCHAR(32) DEFAULT 'student'",
     },
 }
 
@@ -124,6 +131,21 @@ async def ensure_postgres_columns(conn) -> None:
     )
     await conn.exec_driver_sql(
         "ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS authority VARCHAR(32) DEFAULT 'reference'"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS visibility VARCHAR(32) DEFAULT 'student'"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS course_scope VARCHAR(128) DEFAULT ''"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS effective_version VARCHAR(128) DEFAULT ''"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE reference_sheets ADD COLUMN IF NOT EXISTS visibility VARCHAR(32) DEFAULT 'student'"
     )
 
 

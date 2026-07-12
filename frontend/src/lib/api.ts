@@ -184,11 +184,28 @@ export const kbApi = {
     api.get<KnowledgeDocument[]>(`/assistants/${assistantId}/kb/documents`).then((r) => r.data),
   document: (assistantId: string, documentId: string) =>
     api.get<KnowledgeDocumentDetail>(`/assistants/${assistantId}/kb/documents/${documentId}`).then((r) => r.data),
-  upload: (assistantId: string, file: File, title: string, docType: string) => {
+  upload: (
+    assistantId: string,
+    file: File,
+    title: string,
+    docType: string,
+    options: {
+      analyze?: boolean;
+      authority?: string;
+      visibility?: string;
+      courseScope?: string;
+      effectiveVersion?: string;
+    } = {},
+  ) => {
     const form = new FormData();
     form.append("file", file);
     form.append("title", title);
     form.append("doc_type", docType);
+    form.append("analyze", String(options.analyze ?? true));
+    form.append("authority", options.authority ?? "reference");
+    form.append("visibility", options.visibility ?? "student");
+    form.append("course_scope", options.courseScope ?? "");
+    form.append("effective_version", options.effectiveVersion ?? "");
     return api.post<KnowledgeDocument>(`/assistants/${assistantId}/kb/documents`, form).then((r) => r.data);
   },
   reparse: (assistantId: string, documentId: string) =>

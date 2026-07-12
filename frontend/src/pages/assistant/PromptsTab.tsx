@@ -160,9 +160,14 @@ function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion;
   };
 
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between gap-2">
-        <button className="flex items-center gap-2 min-w-0 text-left" onClick={() => setExpanded(!expanded)}>
+    <Card className="min-w-0 overflow-hidden p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-wrap items-center gap-2 text-left"
+          onClick={() => setExpanded(!expanded)}
+        >
           {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
           <span className="font-medium text-sm">v{prompt.version}</span>
           <Badge>{ROLE_BADGES[prompt.role]}</Badge>
@@ -170,18 +175,24 @@ function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion;
           {prompt.status === "draft" && <Badge>черновик</Badge>}
           {prompt.status === "archived" && <Badge>архив</Badge>}
           <Badge tone="info">{prompt.target_family}</Badge>
-          {prompt.source === "generated" && <Badge tone="accent">архитектор: {prompt.architect_model}</Badge>}
+          {prompt.source === "generated" && (
+            <span className="min-w-0 max-w-full" title={prompt.architect_model}>
+              <Badge tone="accent" className="max-w-full truncate">
+                архитектор · {prompt.architect_model.split("/").pop()}
+              </Badge>
+            </span>
+          )}
         </button>
-        <div className="flex gap-1.5 shrink-0">
-          <Button variant="secondary" onClick={() => setPreviewOpen(true)}>
+        <div className="flex w-full flex-wrap gap-1.5 sm:w-auto sm:shrink-0 sm:justify-end">
+          <Button variant="secondary" className="min-w-0 flex-1 sm:flex-none" onClick={() => setPreviewOpen(true)}>
             <Eye className="h-3.5 w-3.5" /> Что видит модель
           </Button>
           {prompt.status !== "active" && (
-            <Button variant="secondary" onClick={activate}>
+            <Button variant="secondary" className="min-w-0 flex-1 sm:flex-none" onClick={activate}>
               <CheckCircle2 className="h-3.5 w-3.5" /> Активировать
             </Button>
           )}
-          <Button variant="destructive" onClick={remove}>
+          <Button variant="destructive" onClick={remove} aria-label={`Удалить версию v${prompt.version}`}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -191,11 +202,18 @@ function PromptCard({ prompt, assistantId, onChanged }: { prompt: PromptVersion;
           <ErrorNote message={error} />
         </div>
       )}
-      {prompt.notes && <p className="text-xs text-muted-foreground mt-2 ml-6">{prompt.notes}</p>}
       {expanded && (
-        <pre className="mt-3 ml-6 whitespace-pre-wrap rounded-md bg-muted p-3 text-xs font-mono max-h-96 overflow-y-auto">
-          {prompt.system_prompt}
-        </pre>
+        <div className="mt-3 space-y-3 sm:ml-6">
+          {prompt.notes && (
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Комментарий к версии</p>
+              <p className="mt-1 text-xs text-muted-foreground">{prompt.notes}</p>
+            </div>
+          )}
+          <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs font-mono">
+            {prompt.system_prompt}
+          </pre>
+        </div>
       )}
       <PreviewModal open={previewOpen} onClose={() => setPreviewOpen(false)} assistantId={assistantId} prompt={prompt} />
     </Card>
@@ -391,7 +409,7 @@ function ManualModal({
           </Select>
         </Field>
         <Field label="Системный промпт">
-          <Textarea rows={14} value={text} onChange={(e) => setText(e.target.value)} />
+          <Textarea rows={14} value={text} onChange={(e) => setText(e.target.value)} className="font-mono" />
         </Field>
         <Field label="Заметка к версии">
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="что изменили и зачем" />

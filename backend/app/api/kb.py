@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.assistants import get_assistant_or_404, resolve_architect
+from app.api.assistants import get_assistant_or_404
 from app.config import get_settings
 from app.db import get_db
 from app.llm import client as llm
@@ -30,6 +30,8 @@ from app.services import kb, storage
 router = APIRouter(tags=["kb"], dependencies=[Depends(get_current_user)])
 
 DOC_TYPES = {"rpd", "notes", "textbook", "problem_book", "reference", "methodical", "other"}
+AUTHORITIES = {"course_policy", "course_lecture", "reference", "unverified"}
+VISIBILITIES = {"student", "teacher_only", "assessment_private", "quarantine"}
 
 
 async def _get_document_or_404(db: AsyncSession, assistant_id: str, document_id: str) -> KnowledgeDocument:
@@ -81,12 +83,23 @@ async def upload_document(
     file: UploadFile = File(...),
     title: str = Form(""),
     doc_type: str = Form("other"),
+    analyze: bool = Form(True),
+    authority: str = Form("reference"),
+    visibility: str = Form("student"),
+    course_scope: str = Form(""),
+    effective_version: str = Form(""),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> KnowledgeDocument:
     await get_assistant_or_404(assistant_id, db)
     if doc_type not in DOC_TYPES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Неизвестный тип документа: {doc_type}")
+    if authority not in AUTHORITIES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Неизвестный статус источника: {authority}")
+    if visibility not in VISIBILITIES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Неизвестный уровень доступа: {visibility}")
+    if authority == "unverified" and visibility == "student":
+        visibility = "quarantine"
     filename = file.filename or "document"
     suffix = Path(filename).suffix.lower()
     if suffix not in kb.ALLOWED_EXTENSIONS:
@@ -94,27 +107,44 @@ async def upload_document(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Поддерживаются PDF, изображения (JPG/PNG/WebP) и текст (.md/.txt)",
         )
-    content = await file.read()
     settings = get_settings()
-    if len(content) > settings.kb_max_file_mb * 1024 * 1024:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"Файл больше {settings.kb_max_file_mb} МБ")
     path = settings.kb_dir / f"{uuid.uuid4().hex}{suffix}"
-    path.write_bytes(content)
+    max_bytes = settings.kb_max_file_mb * 1024 * 1024
+    size_bytes = 0
+    try:
+        with path.open("wb") as destination:
+            while chunk := await file.read(1024 * 1024):
+                size_bytes += len(chunk)
+                if size_bytes > max_bytes:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"Файл больше {settings.kb_max_file_mb} МБ",
+                    )
+                destination.write(chunk)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
     document = KnowledgeDocument(
         assistant_id=assistant_id,
         title=title.strip() or Path(filename).stem,
         doc_type=doc_type,
+        authority=authority,
+        visibility=visibility,
+        course_scope=course_scope.strip()[:128],
+        effective_version=effective_version.strip()[:128],
         original_filename=filename,
         file_path=str(path),
         mime_type=file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream",
-        size_bytes=len(content),
+        size_bytes=size_bytes,
         status="uploaded",
         created_by=user.id,
     )
     db.add(document)
     await db.commit()
     await db.refresh(document)
-    background_tasks.add_task(kb.ingest_document, document.id)
+    background_tasks.add_task(kb.ingest_document, document.id, analyze and visibility != "quarantine")
     document.chunk_count = 0
     return document
 
@@ -202,8 +232,8 @@ async def extract_syllabus(
     document = await _get_document_or_404(db, assistant_id, body.document_id)
     if document.status != "parsed" or not document.markdown.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Документ ещё не разобран — дождитесь статуса «готов»")
-    provider, model = await resolve_architect(db)
     try:
+        provider, model = await kb.resolve_analysis_pair(db, assistant_id)
         topics = await kb.extract_syllabus(db, document, provider, model)
     except llm.LlmError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
@@ -221,8 +251,8 @@ async def analyze_document(
     # Авто-разбор уже отработал в фоне — отдаём сохранённый результат мгновенно.
     if not refresh and document.analysis_status in {"ready", "applied"} and document.analysis:
         return DocumentAnalysisResponse(**document.analysis)
-    provider, model = await resolve_architect(db)
     try:
+        provider, model = await kb.resolve_analysis_pair(db, assistant_id)
         analysis = await kb.analyze_document(db, document, provider, model)
     except llm.LlmError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
@@ -274,8 +304,9 @@ async def create_sheet(
     user: User = Depends(get_current_user),
 ) -> ReferenceSheet:
     await get_assistant_or_404(assistant_id, db)
+    source_document = None
     if body.source_document_id:
-        await _get_document_or_404(db, assistant_id, body.source_document_id)
+        source_document = await _get_document_or_404(db, assistant_id, body.source_document_id)
 
     title = body.title.strip()
     content = body.content_markdown.strip()
@@ -291,6 +322,11 @@ async def create_sheet(
     ).scalars().first()
     if existing is not None:
         existing.description = body.description
+        existing.visibility = (
+            source_document.visibility
+            if source_document is not None and source_document.visibility != "student"
+            else body.visibility
+        )
         existing.is_canonical = body.is_canonical
         existing.ord = body.ord
         if body.source_document_id:
@@ -299,10 +335,13 @@ async def create_sheet(
         await db.refresh(existing)
         return existing
 
+    payload = body.model_dump(exclude={"title", "content_markdown"})
+    if source_document is not None and source_document.visibility != "student":
+        payload["visibility"] = source_document.visibility
     sheet = ReferenceSheet(
         assistant_id=assistant_id,
         created_by=user.id,
-        **body.model_dump(exclude={"title", "content_markdown"}),
+        **payload,
         title=title,
         content_markdown=content,
     )
@@ -338,6 +377,7 @@ async def create_sheet_from_chunks(
         kind=body.kind,
         content_markdown="\n\n".join(chunk.content for chunk in chunks),
         source_document_id=document.id,
+        visibility=document.visibility,
         created_by=user.id,
     )
     db.add(sheet)

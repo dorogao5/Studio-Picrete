@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Crown, History, Lightbulb, Loader2, Play, RotateCcw, ScanText, Send, Star, Upload } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Crown,
+  History,
+  Lightbulb,
+  Loader2,
+  Play,
+  RotateCcw,
+  ScanText,
+  Send,
+  Star,
+  Upload,
+} from "lucide-react";
 import {
   apiErrorMessage,
   assistantsApi,
@@ -1065,9 +1078,18 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
 
 function HistoryMode({ assistant }: { assistant: Assistant }) {
   const [runs, setRuns] = useState<PlaygroundRun[] | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [promptLabels, setPromptLabels] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    playgroundApi.runs(assistant.id).then(setRuns).catch(() => setRuns([]));
+    setRuns(null);
+    setExpandedId(null);
+    void Promise.all([playgroundApi.runs(assistant.id), promptsApi.list(assistant.id)])
+      .then(([history, prompts]) => {
+        setRuns(history);
+        setPromptLabels(Object.fromEntries(prompts.map((prompt) => [prompt.id, `v${prompt.version} · ${prompt.target_family}`])));
+      })
+      .catch(() => setRuns([]));
   }, [assistant.id]);
 
   if (runs === null) return <Spinner />;
@@ -1077,23 +1099,78 @@ function HistoryMode({ assistant }: { assistant: Assistant }) {
   return (
     <div className="space-y-3">
       {runs.map((run) => (
-        <Card key={run.id} className="p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm truncate">{run.task_text.slice(0, 120)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {new Date(run.created_at).toLocaleString("ru-RU")} · {run.results.length} моделей
+        <Card key={run.id} className="min-w-0 overflow-hidden">
+          <button
+            type="button"
+            aria-expanded={expandedId === run.id}
+            className="flex w-full items-start gap-3 p-4 text-left hover:bg-muted/30"
+            onClick={() => setExpandedId((current) => (current === run.id ? null : run.id))}
+          >
+            {expandedId === run.id ? (
+              <ChevronDown className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm">{run.task_text.slice(0, 120)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {new Date(run.created_at).toLocaleString("ru-RU")} · {run.results.length} моделей · {run.prompt_version_id ? promptLabels[run.prompt_version_id] || "версия промпта недоступна" : "без выбранной версии"}
               </p>
             </div>
-            <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+            <div className="hidden shrink-0 flex-wrap justify-end gap-1.5 sm:flex">
               {run.results.map((result) => (
                 <Badge key={result.id} tone={result.is_winner ? "accent" : result.status === "failed" ? "destructive" : "default"}>
-                  {result.is_winner && <Crown className="h-3 w-3 mr-1" />}
+                  {result.is_winner && <Crown className="mr-1 h-3 w-3" />}
                   {result.model_id.split("/").pop()}: {result.output?.total_score ?? "—"}
                 </Badge>
               ))}
             </div>
-          </div>
+          </button>
+          {expandedId === run.id && (
+            <div className="space-y-4 border-t border-border p-4">
+              <section className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Задача</p>
+                  <MathText className="text-sm">{run.task_text}</MathText>
+                </div>
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Решение студента после OCR</p>
+                  <MathText className="text-sm">{run.ocr_text || "Текст решения не сохранён"}</MathText>
+                </div>
+              </section>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {run.results.map((result) => (
+                  <div key={result.id} className="rounded-md border border-border bg-card p-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="text-sm font-semibold">{result.provider_name} · {result.model_id}</p>
+                      {result.is_winner && <Badge tone="accent"><Crown className="mr-1 h-3 w-3" /> выбран преподавателем</Badge>}
+                      {result.rating !== null && <Badge tone="warning">★ {result.rating}</Badge>}
+                      <Badge tone={result.status === "failed" ? "destructive" : "success"}>
+                        {result.status === "failed" ? "ошибка" : `${result.output?.total_score ?? "—"} / ${result.output?.max_score ?? run.max_score}`}
+                      </Badge>
+                    </div>
+                    {result.error && <p className="mt-2 text-xs text-destructive">{result.error}</p>}
+                    {result.output?.criteria_scores && result.output.criteria_scores.length > 0 && (
+                      <ul className="mt-3 space-y-1.5 text-xs">
+                        {result.output.criteria_scores.map((criterion, index) => (
+                          <li key={`${criterion.criterion_name}-${index}`}>
+                            <span className="font-medium">{criterion.criterion_name}: {criterion.score}/{criterion.max_score}</span>
+                            {criterion.comment && <span className="text-muted-foreground"> — {criterion.comment}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {result.output?.feedback && <p className="mt-3 text-xs text-muted-foreground">{result.output.feedback}</p>}
+                    {result.feedback_comment && (
+                      <p className="mt-3 border-t border-border pt-2 text-xs">
+                        <span className="font-medium">Комментарий преподавателя:</span> {result.feedback_comment}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
       ))}
     </div>
