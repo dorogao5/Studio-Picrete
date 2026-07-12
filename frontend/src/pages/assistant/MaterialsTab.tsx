@@ -361,7 +361,7 @@ function DocumentsSection({
         <div className="space-y-2">
           {docs.map((doc) => (
             <Card key={doc.id} className="p-3.5">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-medium truncate">{doc.title}</p>
@@ -397,7 +397,7 @@ function DocumentsSection({
                     <p className="text-xs text-destructive mt-1 whitespace-pre-wrap">{doc.error}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0 justify-end">
+                <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1 border-t border-border pt-2 sm:w-auto sm:border-0 sm:pt-0">
                   {doc.status === "parsed" && doc.analysis_status === "ready" && (
                     <Button variant="accent" className="px-2.5 py-1 text-xs" onClick={() => setAnalyzeDoc(doc)}>
                       <Sparkles className="h-3.5 w-3.5" /> Разбор готов — применить
@@ -422,14 +422,14 @@ function DocumentsSection({
                       </span>
                     )}
                   <button
-                    className="p-1.5 text-muted-foreground hover:text-foreground"
+                    className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-auto sm:w-auto sm:p-1.5"
                     title="Открыть текст"
                     onClick={() => setViewDocId(doc.id)}
                   >
                     <Eye className="h-4 w-4" />
                   </button>
                   <button
-                    className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 sm:h-auto sm:w-auto sm:p-1.5"
                     title="Переразобрать файл"
                     disabled={doc.status === "parsing" || doc.status === "uploaded" || busyDocId === doc.id}
                     onClick={() => reparse(doc)}
@@ -441,7 +441,7 @@ function DocumentsSection({
                     )}
                   </button>
                   <button
-                    className="p-1.5 text-muted-foreground hover:text-destructive"
+                    className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive sm:h-auto sm:w-auto sm:p-1.5"
                     title="Удалить"
                     onClick={() => removeDoc(doc)}
                   >
