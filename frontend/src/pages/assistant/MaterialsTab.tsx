@@ -692,6 +692,9 @@ function AnalyzeModal({
 function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refreshKey: number }) {
   const [sheets, setSheets] = useState<ReferenceSheet[] | null>(null);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<ReferenceSheetKind | "all">("all");
+  const [showAll, setShowAll] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorSheet, setEditorSheet] = useState<ReferenceSheet | null>(null);
   const [fromDocOpen, setFromDocOpen] = useState(false);
@@ -720,6 +723,20 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
     }
   };
 
+  const filteredSheets = useMemo(() => {
+    if (sheets === null) return [];
+    const needle = query.trim().toLocaleLowerCase("ru-RU");
+    return sheets.filter((sheet) => {
+      if (kind !== "all" && sheet.kind !== kind) return false;
+      if (!needle) return true;
+      return `${sheet.title}\n${sheet.description}\n${sheet.content_markdown}`
+        .toLocaleLowerCase("ru-RU")
+        .includes(needle);
+    });
+  }, [kind, query, sheets]);
+
+  const visibleSheets = showAll ? filteredSheets : filteredSheets.slice(0, 12);
+
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -745,6 +762,40 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
         </div>
       </div>
 
+      {sheets !== null && sheets.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center">
+          <Input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setShowAll(false);
+            }}
+            placeholder="Найти таблицу, формулу или обозначение"
+            aria-label="Поиск по справочным материалам"
+            className="sm:flex-1"
+          />
+          <Select
+            value={kind}
+            onChange={(event) => {
+              setKind(event.target.value as ReferenceSheetKind | "all");
+              setShowAll(false);
+            }}
+            aria-label="Тип справочного материала"
+            className="sm:w-48"
+          >
+            <option value="all">Все типы</option>
+            {Object.entries(SHEET_KIND_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {filteredSheets.length} из {sheets.length}
+          </span>
+        </div>
+      )}
+
       <ErrorNote message={error} />
       {sheets === null ? (
         <Spinner />
@@ -754,43 +805,55 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
           hint="Добавьте таблицы констант, глоссарий и обозначения курса — вручную или из фрагментов документа"
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {sheets.map((sheet) => (
-            <Card key={sheet.id} className="p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium truncate">{sheet.title}</p>
-                    <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind]}</Badge>
-                    {sheet.is_canonical && <Badge tone="accent">канон</Badge>}
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {visibleSheets.map((sheet) => (
+              <Card key={sheet.id} className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium truncate">{sheet.title}</p>
+                      <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind]}</Badge>
+                      {sheet.is_canonical && <Badge tone="accent">канон</Badge>}
+                    </div>
+                    {sheet.description && <p className="text-xs text-muted-foreground mt-1">{sheet.description}</p>}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      обновлено {new Date(sheet.updated_at).toLocaleDateString("ru-RU")}
+                    </p>
                   </div>
-                  {sheet.description && <p className="text-xs text-muted-foreground mt-1">{sheet.description}</p>}
-                  <p className="text-xs text-muted-foreground mt-1">
-                    обновлено {new Date(sheet.updated_at).toLocaleDateString("ru-RU")}
-                  </p>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() => {
+                        setEditorSheet(sheet);
+                        setEditorOpen(true);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Изменить
+                    </Button>
+                    <button
+                      className="p-1 text-muted-foreground hover:text-destructive"
+                      title="Удалить"
+                      onClick={() => removeSheet(sheet)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost"
-                    className="px-2 py-1 text-xs"
-                    onClick={() => {
-                      setEditorSheet(sheet);
-                      setEditorOpen(true);
-                    }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" /> Изменить
-                  </Button>
-                  <button
-                    className="p-1 text-muted-foreground hover:text-destructive"
-                    title="Удалить"
-                    onClick={() => removeSheet(sheet)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            ))}
+          </div>
+          {filteredSheets.length === 0 && (
+            <EmptyState title="Ничего не найдено" hint="Измените запрос или выберите другой тип материала" />
+          )}
+          {filteredSheets.length > 12 && (
+            <div className="flex justify-center">
+              <Button variant="secondary" onClick={() => setShowAll((value) => !value)}>
+                {showAll ? "Свернуть список" : `Показать ещё ${filteredSheets.length - 12}`}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

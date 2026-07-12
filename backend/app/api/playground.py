@@ -55,6 +55,24 @@ async def compare(
 ) -> PlaygroundRun:
     assistant = await get_assistant_or_404(body.assistant_id, db)
 
+    # Browser/proxy layers may replay a long-running POST when a connection is interrupted.
+    # A client-generated run id makes that replay safe: return the already completed run
+    # instead of charging for the same model calls and storing duplicate expert history.
+    if body.run_id:
+        existing = (
+            await db.execute(
+                select(PlaygroundRun)
+                .options(selectinload(PlaygroundRun.results))
+                .where(PlaygroundRun.id == body.run_id)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.assistant_id != assistant.id or existing.created_by != user.id:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Идентификатор запуска уже используется")
+            if not existing.results:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Этот запуск уже выполняется")
+            return existing
+
     task_text, reference_solution, rubric, max_score = (
         body.task_text,
         body.reference_solution,
@@ -119,6 +137,7 @@ async def compare(
         grounding = await build_grounding_block(db, assistant.id, query=task_text[:200] or body.ocr_text[:200])
 
     run = PlaygroundRun(
+        id=body.run_id or uuid.uuid4().hex,
         assistant_id=assistant.id,
         prompt_version_id=prompt.id,
         task_text=task_text,

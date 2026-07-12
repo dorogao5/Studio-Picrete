@@ -564,6 +564,7 @@ class PlaygroundRunOut(ORMModel):
 
 
 class CompareRequest(BaseModel):
+    run_id: str | None = Field(default=None, min_length=32, max_length=32, pattern="^[0-9a-f]{32}$")
     assistant_id: str
     prompt_version_id: str | None = None
     task_id: str | None = None

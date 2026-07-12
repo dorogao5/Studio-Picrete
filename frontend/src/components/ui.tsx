@@ -128,13 +128,14 @@ export function Tabs({
   onChange: (key: string) => void;
 }) {
   return (
-    <div className="flex gap-1 border-b border-border">
+    <div className="flex gap-1 overflow-x-auto overscroll-x-contain border-b border-border">
       {tabs.map((tab) => (
         <button
+          type="button"
           key={tab.key}
           onClick={() => onChange(tab.key)}
           className={clsx(
-            "px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors",
+            "-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors sm:px-4",
             active === tab.key
               ? "border-accent text-accent"
               : "border-transparent text-muted-foreground hover:text-foreground",

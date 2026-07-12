@@ -280,6 +280,7 @@ export const playgroundApi = {
     return api.post<{ ocr_text: string; image_ids: string[] }>("/playground/ocr", form).then((r) => r.data);
   },
   compare: (body: {
+    run_id?: string;
     assistant_id: string;
     prompt_version_id?: string | null;
     task_id?: string | null;

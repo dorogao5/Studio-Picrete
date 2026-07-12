@@ -13,13 +13,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route
-          element={
-            <AppProvider>
-              <Layout />
-            </AppProvider>
-          }
-        >
+        <Route element={<ProtectedWorkspace />}>
           <Route path="/" element={<Navigate to="/disciplines" replace />} />
           <Route path="/disciplines" element={<Disciplines />} />
           <Route path="/disciplines/:id" element={<AssistantDetail />} />
@@ -30,5 +24,17 @@ export default function App() {
         <Route path="*" element={<Navigate to="/disciplines" replace />} />
       </Routes>
     </BrowserRouter>
+  );
+}
+
+function ProtectedWorkspace() {
+  if (!localStorage.getItem("studio_token")) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
+    <AppProvider>
+      <Layout />
+    </AppProvider>
   );
 }

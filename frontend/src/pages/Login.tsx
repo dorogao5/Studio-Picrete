@@ -17,7 +17,7 @@ export default function Login() {
     try {
       const token = await authApi.login(username, password);
       localStorage.setItem("studio_token", token);
-      navigate("/assistants");
+      navigate("/disciplines", { replace: true });
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {

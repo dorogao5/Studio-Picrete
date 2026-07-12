@@ -173,8 +173,10 @@ function TaskPicker({
   setReferenceSolution: (v: string) => void;
 }) {
   const [tasks, setTasks] = useState<GeneratedTask[]>([]);
+  const selectedTask = useMemo(() => tasks.find((task) => task.id === taskId) ?? null, [tasks, taskId]);
 
   useEffect(() => {
+    setTasks([]);
     tasksApi.list(assistant.id).then(setTasks).catch(() => {});
   }, [assistant.id]);
 
@@ -199,6 +201,39 @@ function TaskPicker({
             <Textarea rows={4} value={referenceSolution} onChange={(e) => setReferenceSolution(e.target.value)} />
           </Field>
         </>
+      )}
+      {taskId && selectedTask && (
+        <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={selectedTask.approved ? "success" : "default"}>
+              {selectedTask.approved ? "Одобрена" : "Не одобрена"}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {selectedTask.topic || "Без темы"} · максимум {selectedTask.max_score} баллов
+            </span>
+          </div>
+          <MathText className="text-sm">{selectedTask.statement}</MathText>
+          {(selectedTask.reference_solution || selectedTask.rubric.length > 0) && (
+            <details className="text-xs">
+              <summary className="cursor-pointer font-medium text-accent">Эталон и критерии</summary>
+              {selectedTask.reference_solution && (
+                <div className="mt-2 rounded border border-border bg-card p-2.5">
+                  <MathText>{selectedTask.reference_solution}</MathText>
+                </div>
+              )}
+              {selectedTask.rubric.length > 0 && (
+                <ul className="mt-2 space-y-1 text-muted-foreground">
+                  {selectedTask.rubric.map((criterion, index) => (
+                    <li key={`${criterion.criterion_name}-${index}`}>
+                      <span className="font-medium text-foreground">{criterion.criterion_name}</span>
+                      {` — ${criterion.max_score} балл.`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+          )}
+        </div>
       )}
     </div>
   );
@@ -241,6 +276,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
     setRun(null);
     try {
       const result = await playgroundApi.compare({
+        run_id: crypto.randomUUID().replaceAll("-", ""),
         assistant_id: assistant.id,
         prompt_version_id: promptVersionId || null,
         task_id: taskId || null,
