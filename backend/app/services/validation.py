@@ -112,9 +112,7 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
     return result
 
 
-def data_check(statement: str, sheets_text: str) -> dict:
-    if not (sheets_text or "").strip():
-        return {"status": "skipped", "unknown_numbers": []}
+def _sheet_number_index(sheets_text: str) -> tuple[set[str], list[float]]:
     sheet_tokens: set[str] = set()
     sheet_values: list[float] = []
     for token in _number_tokens(sheets_text):
@@ -123,6 +121,60 @@ def data_check(statement: str, sheets_text: str) -> dict:
         except ValueError:
             continue
         sheet_tokens.add(token.lower().lstrip("+"))
+    return sheet_tokens, sheet_values
+
+
+def _unknown_number_tokens(text: str, sheet_tokens: set[str], sheet_values: list[float]) -> list[str]:
+    unknown: list[str] = []
+    for token in _number_tokens(text):
+        try:
+            value = float(token)
+        except ValueError:
+            continue
+        key = token.lower().lstrip("+")
+        if key in sheet_tokens or key in unknown:
+            continue
+        if any(_close(value, sheet_value, 1e-6) for sheet_value in sheet_values):
+            continue
+        unknown.append(key)
+    return unknown
+
+
+def data_check(statement: str, sheets_text: str, data_used: list | None = None) -> dict:
+    """Validate source claims without confusing self-contained task inputs with reference data.
+
+    New tasks carry ``data_used`` provenance from the generator. Only values explicitly
+    claimed as copied from course sheets must be present in those sheets. The numbers a
+    teacher or generator puts directly into a self-contained problem are legitimate task
+    inputs and cannot be distinguished from tabular constants by their formatting alone.
+    ``None`` preserves the conservative legacy heuristic for older stored tasks.
+    """
+    if data_used is not None:
+        if not data_used:
+            return {"status": "ok", "unknown_numbers": [], "unknown_sources": []}
+        sheet_tokens, sheet_values = _sheet_number_index(sheets_text)
+        unknown_sources: list[str] = []
+        claimed_values: list[str] = []
+        sheets_casefold = (sheets_text or "").casefold()
+        for item in data_used:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("sheet_title") or "").strip()
+            if title and title.casefold() not in sheets_casefold and title not in unknown_sources:
+                unknown_sources.append(title)
+            values = item.get("values") or []
+            if isinstance(values, list):
+                claimed_values.extend(str(value) for value in values)
+        unknown = _unknown_number_tokens("\n".join(claimed_values), sheet_tokens, sheet_values)
+        return {
+            "status": "warn" if unknown or unknown_sources else "ok",
+            "unknown_numbers": unknown[:20],
+            "unknown_sources": unknown_sources[:20],
+        }
+
+    if not (sheets_text or "").strip():
+        return {"status": "skipped", "unknown_numbers": [], "unknown_sources": []}
+    sheet_tokens, sheet_values = _sheet_number_index(sheets_text)
     unknown: list[str] = []
     for token in _number_tokens(statement):
         try:
@@ -140,7 +192,7 @@ def data_check(statement: str, sheets_text: str) -> dict:
         if any(_close(value, sheet_value, 1e-6) for sheet_value in sheet_values):
             continue
         unknown.append(key)
-    return {"status": "warn" if unknown else "ok", "unknown_numbers": unknown[:20]}
+    return {"status": "warn" if unknown else "ok", "unknown_numbers": unknown[:20], "unknown_sources": []}
 
 
 def sanity_check(task: dict) -> dict:
@@ -229,6 +281,7 @@ async def run_validation(
     grounding: str,
     sheets_text: str,
     existing_statements: list[str],
+    data_used: list | None = None,
     solver_provider: Provider | None = None,
     solver_model: ModelEntry | None = None,
     run_solver: bool = True,
@@ -262,11 +315,13 @@ async def run_validation(
                     f"vs {reference_answer or '(пусто)'}"
                 )
 
-    data: dict = {"status": "skipped", "unknown_numbers": []}
+    data: dict = {"status": "skipped", "unknown_numbers": [], "unknown_sources": []}
     if run_data:
-        data = data_check(statement, sheets_text)
+        data = data_check(statement, sheets_text, data_used=data_used)
         if data["unknown_numbers"]:
             reasons.append("Числа не из справочника: " + ", ".join(data["unknown_numbers"][:10]))
+        if data["unknown_sources"]:
+            reasons.append("Неизвестные источники данных: " + ", ".join(data["unknown_sources"][:10]))
 
     sanity = sanity_check(
         {
@@ -286,6 +341,7 @@ async def run_validation(
     needs_review = (
         solver["status"] in ("mismatch", "uncertain", "error")
         or bool(data["unknown_numbers"])
+        or bool(data["unknown_sources"])
         or bool(sanity["issues"])
         or dedup["duplicate"]
     )

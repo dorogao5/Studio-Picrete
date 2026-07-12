@@ -324,6 +324,7 @@ async def revalidate_task(
         grounding=grounding_text,
         sheets_text=sheets_to_text(sheets),
         existing_statements=list(existing),
+        data_used=(task.grounding or {}).get("data_used", []),
         solver_provider=solver_provider,
         solver_model=solver_model,
         run_solver=merged["validation_solver"],
