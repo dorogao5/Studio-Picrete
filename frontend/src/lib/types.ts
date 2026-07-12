@@ -86,6 +86,8 @@ export interface Course {
   description: string;
   term: string;
   external_course_id: string;
+  published_version: string;
+  published_at: string | null;
   created_at: string;
 }
 

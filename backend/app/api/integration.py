@@ -178,10 +178,13 @@ async def publish_course_assistant(
             detail or f"Picrete отклонил публикацию (HTTP {response.status_code}).",
         )
     result = response.json()
+    course.published_version = snapshot["version"]
+    course.published_at = datetime.now(UTC)
+    await db.commit()
     return {
         "ok": True,
         "version": snapshot["version"],
-        "published_at": result.get("synced_at", snapshot["published_at"]),
+        "published_at": result.get("synced_at", course.published_at.isoformat()),
         "assistant_name": assistant.name,
         "course_id": external_course_id,
     }

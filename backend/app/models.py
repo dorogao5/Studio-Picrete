@@ -90,6 +90,8 @@ class Course(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     term: Mapped[str] = mapped_column(String(128), default="")
     external_course_id: Mapped[str] = mapped_column(String(64), default="")
+    published_version: Mapped[str] = mapped_column(String(64), default="")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

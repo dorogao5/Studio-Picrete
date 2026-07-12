@@ -138,6 +138,8 @@ class CourseOut(ORMModel):
     description: str
     term: str
     external_course_id: str
+    published_version: str = ""
+    published_at: datetime | None = None
     created_at: datetime
 
 

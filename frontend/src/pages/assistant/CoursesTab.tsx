@@ -44,6 +44,7 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
     try {
       await coursesApi.publish(assistant.id, course.id);
       setPublishedId(course.id);
+      await reload();
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -125,10 +126,24 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
                   onClick={() => void publish(course)}
                 >
                   <Send className="h-3.5 w-3.5" />
-                  {publishedId === course.id ? "Опубликовано" : "Опубликовать в Picrete"}
+                  {publishedId === course.id
+                    ? "Опубликовано"
+                    : course.published_at
+                      ? "Опубликовать обновление"
+                      : "Опубликовать в Picrete"}
                 </Button>
                 {!course.external_course_id && (
                   <p className="mt-1.5 text-center text-xs text-muted-foreground">Сначала выберите курс Picrete</p>
+                )}
+                {course.published_at && (
+                  <p className="mt-1.5 text-center text-xs text-muted-foreground">
+                    Последняя публикация: {new Date(course.published_at).toLocaleString("ru-RU", {
+                      day: "numeric",
+                      month: "long",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
                 )}
               </div>
             </Card>

@@ -74,6 +74,10 @@ async def seed_architect() -> None:
 
 
 SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
+    "courses": {
+        "published_version": "VARCHAR(64) DEFAULT ''",
+        "published_at": "DATETIME",
+    },
     "assistants": {
         "updated_by": "VARCHAR(32) DEFAULT ''",
         "updated_at": "DATETIME",
@@ -112,6 +116,15 @@ async def ensure_sqlite_columns(conn) -> None:
         for column, ddl in wanted.items():
             if column not in columns:
                 await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+async def ensure_postgres_columns(conn) -> None:
+    await conn.exec_driver_sql(
+        "ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_version VARCHAR(64) DEFAULT ''"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE"
+    )
 
 
 async def reconcile_interrupted_work() -> None:
@@ -155,6 +168,7 @@ async def lifespan(app: FastAPI):
         if conn.dialect.name == "sqlite":
             await ensure_sqlite_columns(conn)
         if conn.dialect.name == "postgresql":
+            await ensure_postgres_columns(conn)
             # pgvector — задел под эмбеддинг-поиск; без superuser может не взлететь, это не фатально.
             try:
                 await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
