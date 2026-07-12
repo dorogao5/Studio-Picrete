@@ -901,9 +901,15 @@ function BatchLaunchModal({
 }) {
   const production = useMemo(() => modelOptions(providers, true), [providers]);
   const generatorPrompts = useMemo(() => prompts.filter((p) => p.role === "generator"), [prompts]);
+  const preferredGeneratorId = production.some((model) => model.id === assistant.default_generator_model_id)
+    ? assistant.default_generator_model_id!
+    : (production[0]?.id ?? "");
+  const preferredSolverId = production.some((model) => model.id === assistant.default_grader_model_id)
+    ? assistant.default_grader_model_id!
+    : (production.find((model) => model.id !== preferredGeneratorId)?.id ?? preferredGeneratorId);
   const [templateId, setTemplateId] = useState(initialTemplateId);
-  const [modelId, setModelId] = useState(production[0]?.id ?? "");
-  const [solverId, setSolverId] = useState(production.find((m) => m.id !== (production[0]?.id ?? ""))?.id ?? "");
+  const [modelId, setModelId] = useState(preferredGeneratorId);
+  const [solverId, setSolverId] = useState(preferredSolverId);
   const [promptVersionId, setPromptVersionId] = useState("");
   const [topic, setTopic] = useState("");
   const [difficulty, setDifficulty] = useState(initialTemplateId ? "" : "medium");
