@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import httpx
+import pymupdf
 
 PORT = 8199
 BASE = f"http://127.0.0.1:{PORT}"
@@ -31,6 +32,25 @@ SAMPLE_MD = """# Физическая химия
 | H2O(ж)   | −237,2         |
 | NH3(г)   | −16,5          |
 """
+
+
+def highlighted_answer_pdf() -> bytes:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Question 1", fontsize=12)
+    page.insert_text((72, 96), "A. Wrong answer", fontsize=12)
+    page.insert_text((72, 120), "B. Correct answer", fontsize=12)
+    page.insert_textbox(
+        pymupdf.Rect(72, 150, 520, 260),
+        "Reference explanation for the answer key. " * 5,
+        fontsize=10,
+    )
+    rects = page.search_for("B. Correct answer")
+    assert rects
+    page.add_highlight_annot(rects)
+    content = doc.tobytes()
+    doc.close()
+    return content
 
 
 def wait_health(timeout: float = 30.0) -> None:
@@ -81,6 +101,28 @@ def main() -> None:
     r = client.get(f"/api/assistants/{aid}/kb/documents/{doc_id}/chunks")
     table_chunks = [c for c in r.json() if c["kind"] == "table"] if r.status_code == 200 else []
     check("table chunk detected", bool(table_chunks), r.text[:200])
+
+    r = client.post(
+        f"/api/assistants/{aid}/kb/documents",
+        files={"file": ("answers.pdf", highlighted_answer_pdf(), "application/pdf")},
+        data={"title": "Ответы к тесту", "doc_type": "problem_book"},
+    )
+    check("upload highlighted answer PDF", r.status_code == 200, r.text[:300])
+    answer_doc_id = r.json()["id"]
+    answer_doc = {}
+    for _ in range(30):
+        time.sleep(0.5)
+        answer_doc = client.get(f"/api/assistants/{aid}/kb/documents/{answer_doc_id}").json()
+        if answer_doc.get("status") in ("parsed", "failed"):
+            break
+    answer_markdown = answer_doc.get("markdown", "")
+    check(
+        "PDF highlight semantics preserved",
+        answer_doc.get("status") == "parsed"
+        and "Выделено в оригинале" in answer_markdown
+        and "B. Correct answer" in answer_markdown,
+        answer_markdown[:300],
+    )
 
     r = client.get(f"/api/assistants/{aid}/kb/search", params={"q": "энергия Гиббса"})
     check("fts search (morphology)", r.status_code == 200 and len(r.json()) > 0, r.text[:200])
@@ -145,6 +187,8 @@ def main() -> None:
 
     r = client.delete(f"/api/assistants/{aid}/kb/documents/{doc_id}")
     check("delete doc", r.status_code == 200, r.text[:200])
+    r = client.delete(f"/api/assistants/{aid}/kb/documents/{answer_doc_id}")
+    check("delete answer PDF", r.status_code == 200, r.text[:200])
 
     failed = [c for c in checks if not c[1]]
     print(f"\n{len(checks) - len(failed)}/{len(checks)} passed")

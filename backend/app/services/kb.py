@@ -53,6 +53,33 @@ def _clean_pdf_text(raw: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _page_highlights(page: pymupdf.Page) -> list[str]:
+    """Extract text covered by PDF Highlight annotations.
+
+    Answer keys are often distributed as ordinary question text plus yellow
+    highlights. Plain text extraction keeps the options but loses which one was
+    marked, so preserve that semantic signal explicitly in the knowledge base.
+    """
+    highlights: list[str] = []
+    seen: set[str] = set()
+    for annotation in page.annots() or []:
+        if annotation.type[0] != pymupdf.PDF_ANNOT_HIGHLIGHT:
+            continue
+        vertices = annotation.vertices or []
+        fragments: list[str] = []
+        for index in range(0, len(vertices) - 3, 4):
+            text = page.get_textbox(pymupdf.Quad(vertices[index : index + 4]).rect)
+            cleaned = re.sub(r"\s+", " ", text).strip()
+            if cleaned:
+                fragments.append(cleaned)
+        highlighted = " ".join(fragments).strip()
+        normalized = highlighted.casefold()
+        if highlighted and normalized not in seen:
+            seen.add(normalized)
+            highlights.append(highlighted)
+    return highlights
+
+
 def _pdf_to_markdown(content: bytes) -> tuple[str, int, float]:
     """(markdown, число_страниц, средн_символов_на_страницу) из текстового слоя PDF.
 
@@ -67,7 +94,8 @@ def _pdf_to_markdown(content: bytes) -> tuple[str, int, float]:
         for page in doc:
             cleaned = _clean_pdf_text(page.get_text())
             total_chars += len(cleaned)
-            if not cleaned:
+            highlights = _page_highlights(page)
+            if not cleaned and not highlights:
                 continue
             out_lines: list[str] = []
             for line in cleaned.split("\n"):
@@ -76,6 +104,15 @@ def _pdf_to_markdown(content: bytes) -> tuple[str, int, float]:
                     out_lines.append(f"## {stripped}")
                 else:
                     out_lines.append(line)
+            if highlights:
+                out_lines.extend(
+                    [
+                        "",
+                        f"### Выделено в оригинале на странице {page.number + 1}",
+                        "В тестах такое выделение обычно обозначает правильный ответ или ключ:",
+                        *(f"- {highlight}" for highlight in highlights),
+                    ]
+                )
             parts.append("\n".join(out_lines))
     finally:
         doc.close()
