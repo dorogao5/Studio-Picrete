@@ -4,6 +4,7 @@ import snowballstemmer
 
 from app.llm import client as llm
 from app.models import ModelEntry, Provider
+from app.services.model_policy import current_model_use_policy
 
 _ru_stemmer = snowballstemmer.stemmer("russian")
 
@@ -19,7 +20,7 @@ SOLVER_VERIFIER_SYSTEM_PROMPT = """Вы — второй независимый 
 запрошенные величины и выводы с единицами. Используйте только данные условия и приложенного контекста.
 Ответ — строго JSON: {"solution": "независимая проверка по шагам", "answer": "полный финальный ответ"}."""
 
-VALIDATION_POLICY_VERSION = "dual-independent-solver-v2"
+VALIDATION_POLICY_VERSION = "dual-independent-solver-v3-model-policy"
 
 ANSWER_FORMAT_HINTS = {
     "numeric": "число с единицами измерения",
@@ -92,9 +93,13 @@ _KNOWN_UNITS = {
     "эв",
 }
 _UNIT_RE = re.compile(
-    r"(?<![a-zа-яё])(" + "|".join(re.escape(unit) for unit in sorted(_KNOWN_UNITS, key=len, reverse=True)) + r")(?![a-zа-яё])",
+    r"(?<![a-zа-яё])("
+    + "|".join(re.escape(unit) for unit in sorted(_KNOWN_UNITS, key=len, reverse=True))
+    + r")(?![a-zа-яё])",
     re.IGNORECASE,
 )
+_ALTERNATIVE_CONNECTOR_RE = re.compile(r"(?<!\w)(?:или|либо|or)(?!\w)", re.IGNORECASE)
+_ALTERNATIVE_PUNCTUATION_RE = re.compile(r"[\s()\[\]{}<>,.;:|/\\=~≈±+\-–—'\"]+")
 
 
 def normalize_numeric_text(text: str) -> str:
@@ -129,6 +134,47 @@ def _number_tokens(text: str) -> list[str]:
     ]
 
 
+def _number_occurrences(text: str) -> tuple[str, list[tuple[float, int, int]]]:
+    normalized = normalize_numeric_text(text)
+    occurrences: list[tuple[float, int, int]] = []
+    for match in _NUMBER_RE.finditer(normalized):
+        if match.start() > 0 and normalized[match.start() - 1] == "^":
+            continue
+        try:
+            value = float(match.group(0))
+        except ValueError:
+            continue
+        occurrences.append((value, match.start(), match.end()))
+    return normalized, occurrences
+
+
+def _is_direct_numeric_alternative(separator: str) -> bool:
+    """True for separators such as ``см (или `` or `` / or `` between two numbers."""
+
+    connectors = list(_ALTERNATIVE_CONNECTOR_RE.finditer(separator))
+    if len(connectors) != 1:
+        return False
+    remainder = _ALTERNATIVE_CONNECTOR_RE.sub(" ", separator)
+    remainder = _UNIT_RE.sub(" ", remainder)
+    remainder = _ALTERNATIVE_PUNCTUATION_RE.sub("", remainder)
+    return not remainder
+
+
+def extract_number_groups(text: str) -> list[list[float]]:
+    """Extract required numeric outputs, grouping explicit ``x or y`` alternatives."""
+
+    normalized, occurrences = _number_occurrences(text)
+    groups: list[list[float]] = []
+    previous_end: int | None = None
+    for value, start, end in occurrences:
+        if previous_end is not None and _is_direct_numeric_alternative(normalized[previous_end:start]):
+            groups[-1].append(value)
+        else:
+            groups.append([value])
+        previous_end = end
+    return groups
+
+
 def extract_numbers(text: str) -> list[float]:
     values: list[float] = []
     for token in _number_tokens(text):
@@ -156,47 +202,63 @@ def _drop_context_numbers(values: list[float], context_values: list[float]) -> l
     return [v for v in values if not any(_close(v, c, 1e-6) for c in context_values)]
 
 
+def _drop_context_groups(groups: list[list[float]], context_values: list[float]) -> list[list[float]]:
+    filtered: list[list[float]] = []
+    for group in groups:
+        remaining = _drop_context_numbers(group, context_values)
+        if remaining:
+            filtered.append(remaining)
+    return filtered
+
+
 def compare_answers(reference: str, solver: str, tolerance_pct: float, context: str = "") -> dict:
     ref_text = (reference or "").strip()
     solver_text = (solver or "").strip()
     result: dict = {"verdict": "uncertain", "reference": ref_text, "solver": solver_text}
     if not ref_text or not solver_text:
         return result
-    ref_numbers = extract_numbers(ref_text)
+    ref_groups = extract_number_groups(ref_text)
+    ref_numbers = [value for group in ref_groups for value in group]
     solver_numbers = extract_numbers(solver_text)
     if ref_numbers and solver_numbers:
         rel = tolerance_pct / 100
         # Числа из условия (T=298, табличные значения) — контекст, а не ответ: убираем их с обеих сторон.
         context_values = extract_numbers(context)
-        ref_filtered = _drop_context_numbers(ref_numbers, context_values)
+        ref_grouped = _drop_context_groups(ref_groups, context_values)
         solver_filtered = _drop_context_numbers(solver_numbers, context_values)
-        if not ref_filtered or not solver_filtered:
-            ref_filtered, solver_filtered = ref_numbers, solver_numbers
+        if not ref_grouped or not solver_filtered:
+            ref_grouped, solver_filtered = ref_groups, solver_numbers
+        ref_filtered = [value for group in ref_grouped for value in group]
         unmatched_solver = set(range(len(solver_filtered)))
         matched: list[tuple[float, float]] = []
-        missing: list[float] = []
-        for reference_value in ref_filtered:
-            match_index = next(
+        missing_groups: list[list[float]] = []
+        for reference_group in ref_grouped:
+            match: tuple[int, float] | None = next(
                 (
-                    index
+                    (index, reference_value)
+                    for reference_value in reference_group
                     for index in unmatched_solver
                     if _close(reference_value, solver_filtered[index], rel)
                 ),
                 None,
             )
-            if match_index is None:
-                missing.append(reference_value)
+            if match is None:
+                missing_groups.append(reference_group)
                 continue
+            match_index, matched_reference = match
             unmatched_solver.remove(match_index)
-            matched.append((reference_value, solver_filtered[match_index]))
+            matched.append((matched_reference, solver_filtered[match_index]))
+        missing: list[float | list[float]] = [group[0] if len(group) == 1 else group for group in missing_groups]
         result.update(
             reference_number=ref_filtered[-1],
             solver_number=solver_filtered[-1],
             reference_numbers=ref_filtered,
+            reference_number_groups=ref_grouped,
             solver_numbers=solver_filtered,
             matched_count=len(matched),
-            required_count=len(ref_filtered),
+            required_count=len(ref_grouped),
             missing_reference_numbers=missing,
+            missing_reference_groups=missing_groups,
         )
         reference_units = extract_units(ref_text)
         solver_units = extract_units(solver_text)
@@ -222,7 +284,9 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
         # одинаковые термины встречаются и в химически противоположных утверждениях.
         ref_stems = set(_ru_stemmer.stemWords(re.findall(r"\w+", ref_text.lower())))
         solver_stems = set(_ru_stemmer.stemWords(re.findall(r"\w+", solver_text.lower())))
-        similarity = len(ref_stems & solver_stems) / len(ref_stems | solver_stems) if ref_stems and solver_stems else 0.0
+        similarity = (
+            len(ref_stems & solver_stems) / len(ref_stems | solver_stems) if ref_stems and solver_stems else 0.0
+        )
         result["similarity"] = round(similarity, 2)
         result["verdict"] = "mismatch" if similarity < 0.12 else "uncertain"
     else:
@@ -379,9 +443,7 @@ async def solver_check(
         parts.append(grounding)
     parts.append(f'Поле "answer" — {hint}. Ответ строго JSON {{"solution": "...", "answer": "..."}}.')
     try:
-        result = await llm.chat(
-            provider, model, system_prompt, "\n\n".join(parts), temperature=0.0, json_mode=True
-        )
+        result = await llm.chat(provider, model, system_prompt, "\n\n".join(parts), temperature=0.0, json_mode=True)
         parsed = llm.extract_json(result.text)
     except llm.LlmError as err:
         return {
@@ -483,14 +545,16 @@ async def run_validation(
     hard_fail = bool(data["unknown_numbers"] or data["unknown_sources"] or sanity["issues"] or dedup["duplicate"])
     solver: dict = {"status": "skipped"}
     verifier: dict = {"status": "skipped"}
-    preview_only = False
+    model_use = current_model_use_policy().classify(solver_model)
+    advisory_only = not model_use.decision_capable
+    if not run_solver:
+        reasons.append("Семантическая проверка решателем отключена — требуется решение преподавателя")
     if run_solver and not hard_fail:
         if solver_provider is None or solver_model is None:
             solver = {"status": "error", "error": "Модель-решатель не настроена"}
             reasons.append("Модель-решатель не настроена")
         else:
             model_name = f"{solver_provider.name}/{solver_model.model_id}"
-            preview_only = "flash" in solver_model.model_id.casefold()
             solved = await solver_check(solver_provider, solver_model, statement, grounding, answer_format)
             compared = (
                 compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
@@ -500,8 +564,8 @@ async def run_validation(
             solver = _solver_report(solved, reference_answer, model_name, compared)
             _append_solver_reason(reasons, "Основной решатель", solver)
 
-            if preview_only:
-                reasons.append("Flash используется только для предварительной проверки и не подтверждает задачу")
+            if advisory_only:
+                reasons.append(f"{model_use.reason}: {solver_model.model_id}. Задача не подтверждена автоматически")
             else:
                 verified = await solver_check(
                     solver_provider,
@@ -519,10 +583,13 @@ async def run_validation(
                 verifier = _solver_report(verified, reference_answer, model_name, verified_comparison)
                 _append_solver_reason(reasons, "Независимый аудитор", verifier)
 
+    semantic_validation_complete = (
+        run_solver and model_use.decision_capable and solver["status"] == "match" and verifier["status"] == "match"
+    )
     needs_review = (
-        solver["status"] in ("mismatch", "incomplete", "uncertain", "error")
+        not semantic_validation_complete
+        or solver["status"] in ("mismatch", "incomplete", "uncertain", "error")
         or verifier["status"] in ("mismatch", "incomplete", "uncertain", "error")
-        or preview_only
         or bool(data["unknown_numbers"])
         or bool(data["unknown_sources"])
         or bool(sanity["issues"])
@@ -530,6 +597,7 @@ async def run_validation(
     )
     return {
         "policy_version": VALIDATION_POLICY_VERSION,
+        "model_policy": model_use.as_dict(),
         "solver": solver,
         "verifier": verifier,
         "data": data,

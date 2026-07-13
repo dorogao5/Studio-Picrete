@@ -136,7 +136,12 @@ def test_pipeline_passes_current_assistant_profile_to_grader(monkeypatch) -> Non
         steps=[{"type": "grade", "title": "Проверка", "config": {"model_entry_id": model.id}}],
     )
     run = SimpleNamespace(
-        input={"task_text": "Условие", "ocr_text": "Работа студента"},
+        input={
+            "task_text": "Условие",
+            "ocr_text": "Работа студента",
+            "rubric": [{"criterion_name": "Расчёт", "max_score": 4}],
+            "max_score": 4,
+        },
         status="running",
         error="",
         steps_log=[],

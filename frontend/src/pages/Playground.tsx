@@ -7,11 +7,13 @@ import {
   History,
   Lightbulb,
   Loader2,
+  Plus,
   Play,
   RotateCcw,
   ScanText,
   Send,
   Star,
+  Trash2,
   Upload,
 } from "lucide-react";
 import {
@@ -40,6 +42,63 @@ import type {
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Tabs, Textarea } from "../components/ui";
 import MathText from "../components/MathText";
 import { modelOptions } from "./assistant/PromptsTab";
+
+type RubricCriterion = GeneratedTask["rubric"][number];
+
+const SCORE_TOLERANCE = 1e-6;
+
+function rubricFromAssistant(assistant: Assistant): RubricCriterion[] {
+  return assistant.criteria.map((criterion) => ({
+    criterion_name: criterion.name,
+    max_score: criterion.max_score,
+    description: criterion.description,
+  }));
+}
+
+function rubricTotal(rubric: RubricCriterion[]): number {
+  return rubric.reduce((total, criterion) => total + (Number.isFinite(criterion.max_score) ? criterion.max_score : 0), 0);
+}
+
+function defaultMaxScore(rubric: RubricCriterion[]): number {
+  const total = rubricTotal(rubric);
+  return total > 0 ? total : 10;
+}
+
+function formatScore(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toLocaleString("ru-RU", { maximumFractionDigits: 3 });
+}
+
+function validateRubric(rubric: RubricCriterion[], maxScore: number): string {
+  if (rubric.length === 0) return "Добавьте хотя бы один критерий оценивания.";
+
+  const seen = new Set<string>();
+  for (let index = 0; index < rubric.length; index += 1) {
+    const criterion = rubric[index];
+    const name = criterion.criterion_name.trim();
+    if (!name) return `Укажите название критерия ${index + 1}.`;
+    if (seen.has(name)) return `Критерий «${name}» добавлен повторно.`;
+    if (!Number.isFinite(criterion.max_score) || criterion.max_score <= 0) {
+      return `Баллы критерия «${name}» должны быть больше нуля.`;
+    }
+    seen.add(name);
+  }
+
+  if (!Number.isFinite(maxScore) || maxScore <= 0) return "Максимальный балл задачи должен быть больше нуля.";
+
+  const total = rubricTotal(rubric);
+  if (Math.abs(total - maxScore) > SCORE_TOLERANCE) {
+    return `Сумма критериев — ${formatScore(total)}, максимум задачи — ${formatScore(maxScore)}. Исправьте значения перед запуском.`;
+  }
+  return "";
+}
+
+function normalizedRubric(rubric: RubricCriterion[]): RubricCriterion[] {
+  return rubric.map((criterion) => ({
+    ...criterion,
+    criterion_name: criterion.criterion_name.trim(),
+    description: criterion.description?.trim() || "",
+  }));
+}
 
 export default function Playground() {
   const [params, setParams] = useSearchParams();
@@ -168,6 +227,112 @@ function useSolutionInput() {
   return { ocrText, imageIds, node };
 }
 
+function ManualRubricEditor({
+  rubric,
+  setRubric,
+  maxScore,
+  setMaxScore,
+  error,
+}: {
+  rubric: RubricCriterion[];
+  setRubric: (rubric: RubricCriterion[]) => void;
+  maxScore: number;
+  setMaxScore: (score: number) => void;
+  error: string;
+}) {
+  const updateCriterion = (index: number, patch: Partial<RubricCriterion>) => {
+    setRubric(rubric.map((criterion, current) => (current === index ? { ...criterion, ...patch } : criterion)));
+  };
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/15 p-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Рубрика проверки</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Критерии попадут в каждую проверку без изменений.</p>
+        </div>
+        <div className="flex items-end gap-2">
+          <span className="pb-2 text-xs text-muted-foreground">Сумма: {formatScore(rubricTotal(rubric))}</span>
+          <label className="block w-24 space-y-1">
+            <span className="text-xs font-medium">Максимум</span>
+            <Input
+              type="number"
+              min={0}
+              step={0.5}
+              value={Number.isFinite(maxScore) ? maxScore : ""}
+              onChange={(event) => setMaxScore(event.target.value === "" ? Number.NaN : Number(event.target.value))}
+              aria-label="Максимальный балл задачи"
+            />
+          </label>
+        </div>
+      </div>
+
+      {rubric.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+          Без критериев автоматическая оценка не запускается.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rubric.map((criterion, index) => (
+            <div
+              key={index}
+              className="grid gap-2 rounded-md border border-border bg-card p-2 sm:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_5.5rem_2.25rem]"
+            >
+              <Input
+                value={criterion.criterion_name}
+                onChange={(event) => updateCriterion(index, { criterion_name: event.target.value })}
+                placeholder="Критерий"
+                aria-label={`Название критерия ${index + 1}`}
+              />
+              <Input
+                value={criterion.description ?? ""}
+                onChange={(event) => updateCriterion(index, { description: event.target.value })}
+                placeholder="Что проверяем"
+                aria-label={`Описание критерия ${index + 1}`}
+              />
+              <Input
+                type="number"
+                min={0}
+                step={0.5}
+                value={Number.isFinite(criterion.max_score) ? criterion.max_score : ""}
+                onChange={(event) =>
+                  updateCriterion(index, {
+                    max_score: event.target.value === "" ? Number.NaN : Number(event.target.value),
+                  })
+                }
+                aria-label={`Максимальный балл критерия ${index + 1}`}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-10 !px-2 text-muted-foreground hover:text-destructive"
+                aria-label={`Удалить критерий ${index + 1}`}
+                onClick={() => setRubric(rubric.filter((_, current) => current !== index))}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Button
+        type="button"
+        variant="secondary"
+        className="text-xs"
+        onClick={() => setRubric([...rubric, { criterion_name: "", max_score: 1, description: "" }])}
+      >
+        <Plus className="h-3.5 w-3.5" /> Добавить критерий
+      </Button>
+      {error && (
+        <p role="alert" className="text-xs font-medium text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TaskPicker({
   assistant,
   taskId,
@@ -176,6 +341,12 @@ function TaskPicker({
   setTaskText,
   referenceSolution,
   setReferenceSolution,
+  rubric,
+  setRubric,
+  maxScore,
+  setMaxScore,
+  rubricError,
+  onSelectedTaskChange,
 }: {
   assistant: Assistant;
   taskId: string;
@@ -184,20 +355,51 @@ function TaskPicker({
   setTaskText: (v: string) => void;
   referenceSolution: string;
   setReferenceSolution: (v: string) => void;
+  rubric: RubricCriterion[];
+  setRubric: (rubric: RubricCriterion[]) => void;
+  maxScore: number;
+  setMaxScore: (score: number) => void;
+  rubricError: string;
+  onSelectedTaskChange: (task: GeneratedTask | null) => void;
 }) {
   const [tasks, setTasks] = useState<GeneratedTask[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(true);
+  const [tasksError, setTasksError] = useState("");
   const selectedTask = useMemo(() => tasks.find((task) => task.id === taskId) ?? null, [tasks, taskId]);
 
   useEffect(() => {
+    let cancelled = false;
     setTasks([]);
-    tasksApi.list(assistant.id).then(setTasks).catch(() => {});
+    setLoadingTasks(true);
+    setTasksError("");
+    tasksApi
+      .list(assistant.id)
+      .then((list) => {
+        if (!cancelled) setTasks(list);
+      })
+      .catch((err) => {
+        if (!cancelled) setTasksError(apiErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTasks(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [assistant.id]);
 
   return (
     <div className="space-y-3">
       <Field label="Задача из банка">
-        <Select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-          <option value="">— ввести условие вручную —</option>
+        <Select
+          value={taskId}
+          onChange={(event) => {
+            const nextId = event.target.value;
+            setTaskId(nextId);
+            onSelectedTaskChange(tasks.find((task) => task.id === nextId) ?? null);
+          }}
+        >
+          <option value="">{loadingTasks ? "— загружаем банк задач —" : "— ввести условие вручную —"}</option>
           {tasks.map((t) => (
             <option key={t.id} value={t.id}>
               {(t.approved ? "✓ " : "") + t.statement.slice(0, 90)}
@@ -205,6 +407,7 @@ function TaskPicker({
           ))}
         </Select>
       </Field>
+      <ErrorNote message={tasksError} />
       {!taskId && (
         <>
           <Field label="Условие задачи">
@@ -213,6 +416,13 @@ function TaskPicker({
           <Field label="Эталонное решение (желательно)">
             <Textarea rows={4} value={referenceSolution} onChange={(e) => setReferenceSolution(e.target.value)} />
           </Field>
+          <ManualRubricEditor
+            rubric={rubric}
+            setRubric={setRubric}
+            maxScore={maxScore}
+            setMaxScore={setMaxScore}
+            error={rubricError}
+          />
         </>
       )}
       {taskId && selectedTask && (
@@ -248,6 +458,11 @@ function TaskPicker({
           )}
         </div>
       )}
+      {taskId && rubricError && (
+        <p role="alert" className="text-xs font-medium text-destructive">
+          {rubricError}
+        </p>
+      )}
     </div>
   );
 }
@@ -259,17 +474,27 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
   const [taskId, setTaskId] = useState("");
   const [taskText, setTaskText] = useState("");
   const [referenceSolution, setReferenceSolution] = useState("");
+  const [manualRubric, setManualRubric] = useState<RubricCriterion[]>(() => rubricFromAssistant(assistant));
+  const [manualMaxScore, setManualMaxScore] = useState(() => defaultMaxScore(rubricFromAssistant(assistant)));
+  const [selectedTask, setSelectedTask] = useState<GeneratedTask | null>(null);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [run, setRun] = useState<PlaygroundRun | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const solution = useSolutionInput();
+  const activeRubric = taskId ? selectedTask?.rubric ?? [] : manualRubric;
+  const activeMaxScore = taskId ? selectedTask?.max_score ?? 0 : manualMaxScore;
+  const rubricError = validateRubric(activeRubric, activeMaxScore);
 
   useEffect(() => {
+    const nextRubric = rubricFromAssistant(assistant);
     setPromptVersionId("");
     setTaskId("");
     setTaskText("");
     setReferenceSolution("");
+    setManualRubric(nextRubric);
+    setManualMaxScore(defaultMaxScore(nextRubric));
+    setSelectedTask(null);
     setRun(null);
     setError("");
     promptsApi.list(assistant.id).then((list) => {
@@ -284,6 +509,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
   };
 
   const execute = async () => {
+    if (rubricError) return;
     setRunning(true);
     setError("");
     setRun(null);
@@ -295,6 +521,8 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
         task_id: taskId || null,
         task_text: taskText,
         reference_solution: referenceSolution,
+        rubric: normalizedRubric(activeRubric),
+        max_score: activeMaxScore,
         ocr_text: solution.ocrText,
         image_ids: solution.imageIds,
         model_entry_ids: selectedModels,
@@ -320,6 +548,12 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
             setTaskText={setTaskText}
             referenceSolution={referenceSolution}
             setReferenceSolution={setReferenceSolution}
+            rubric={manualRubric}
+            setRubric={setManualRubric}
+            maxScore={manualMaxScore}
+            setMaxScore={setManualMaxScore}
+            rubricError={rubricError}
+            onSelectedTaskChange={setSelectedTask}
           />
           <Field label="Версия промпта проверки">
             <Select value={promptVersionId} onChange={(e) => setPromptVersionId(e.target.value)}>
@@ -363,7 +597,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
         <Button
           onClick={execute}
           loading={running}
-          disabled={selectedModels.length === 0 || !solution.ocrText.trim() || (!taskId && !taskText.trim())}
+          disabled={Boolean(rubricError) || selectedModels.length === 0 || !solution.ocrText.trim() || (!taskId && !taskText.trim())}
         >
           <Play className="h-4 w-4" /> Запустить проверку {selectedModels.length > 0 && `(${selectedModels.length})`}
         </Button>
@@ -587,29 +821,54 @@ function NuanceModal({
 }
 
 function PipelineMode({ assistant }: { assistant: Assistant }) {
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[] | null>(null);
   const [pipelineId, setPipelineId] = useState("");
   const [taskId, setTaskId] = useState("");
   const [taskText, setTaskText] = useState("");
   const [referenceSolution, setReferenceSolution] = useState("");
+  const [manualRubric, setManualRubric] = useState<RubricCriterion[]>(() => rubricFromAssistant(assistant));
+  const [manualMaxScore, setManualMaxScore] = useState(() => defaultMaxScore(rubricFromAssistant(assistant)));
+  const [selectedTask, setSelectedTask] = useState<GeneratedTask | null>(null);
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const solution = useSolutionInput();
+  const activeRubric = taskId ? selectedTask?.rubric ?? [] : manualRubric;
+  const activeMaxScore = taskId ? selectedTask?.max_score ?? 0 : manualMaxScore;
+  const rubricError = validateRubric(activeRubric, activeMaxScore);
 
   useEffect(() => {
+    let cancelled = false;
+    const nextRubric = rubricFromAssistant(assistant);
     setTaskId("");
     setTaskText("");
     setReferenceSolution("");
+    setManualRubric(nextRubric);
+    setManualMaxScore(defaultMaxScore(nextRubric));
+    setSelectedTask(null);
     setRun(null);
     setError("");
-    pipelinesApi.list(assistant.id).then((list) => {
-      setPipelines(list);
-      setPipelineId(list[0]?.id ?? "");
-    });
+    setPipelines(null);
+    pipelinesApi
+      .list(assistant.id)
+      .then((list) => {
+        if (cancelled) return;
+        setPipelines(list);
+        setPipelineId(list[0]?.id ?? "");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPipelines([]);
+        setPipelineId("");
+        setError(apiErrorMessage(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [assistant.id]);
 
   const execute = async () => {
+    if (rubricError) return;
     setRunning(true);
     setError("");
     setRun(null);
@@ -618,6 +877,8 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
         task_id: taskId || null,
         task_text: taskText,
         reference_solution: referenceSolution,
+        rubric: normalizedRubric(activeRubric),
+        max_score: activeMaxScore,
         ocr_text: solution.ocrText,
         image_ids: solution.imageIds,
       });
@@ -636,8 +897,9 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
           <h2 className="text-sm font-semibold">Пайплайн и задача</h2>
           <Field label="Пайплайн">
             <Select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
-              {pipelines.length === 0 && <option value="">— создайте пайплайн у ассистента —</option>}
-              {pipelines.map((p) => (
+              {pipelines === null && <option value="">— загружаем пайплайны —</option>}
+              {pipelines?.length === 0 && <option value="">— создайте пайплайн у ассистента —</option>}
+              {pipelines?.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({p.steps.length} шагов)
                 </option>
@@ -652,14 +914,19 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
             setTaskText={setTaskText}
             referenceSolution={referenceSolution}
             setReferenceSolution={setReferenceSolution}
+            rubric={manualRubric}
+            setRubric={setManualRubric}
+            maxScore={manualMaxScore}
+            setMaxScore={setManualMaxScore}
+            rubricError={rubricError}
+            onSelectedTaskChange={setSelectedTask}
           />
         </Card>
         <Card className="p-5 space-y-4">
           <h2 className="text-sm font-semibold">Решение студента</h2>
           {solution.node}
           <p className="text-xs text-muted-foreground">
-            Если в пайплайне есть шаг OCR и вы загрузили фото — распознавание случится внутри пайплайна; уже
-            распознанный текст выше имеет приоритет.
+            Фото распознаётся при загрузке; пайплайн использует отредактированный текст и не оплачивает повторный OCR.
           </p>
         </Card>
       </div>
@@ -668,7 +935,12 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
       <Button
         onClick={execute}
         loading={running}
-        disabled={!pipelineId || (!taskId && !taskText.trim()) || (!solution.ocrText.trim() && solution.imageIds.length === 0)}
+        disabled={
+          Boolean(rubricError) ||
+          !pipelineId ||
+          (!taskId && !taskText.trim()) ||
+          (!solution.ocrText.trim() && solution.imageIds.length === 0)
+        }
       >
         <Play className="h-4 w-4" /> Запустить пайплайн
       </Button>

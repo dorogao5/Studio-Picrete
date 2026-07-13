@@ -149,7 +149,7 @@ export const tasksApi = {
       instructions?: string;
     },
   ) => api.post<GeneratedTask[]>(`/assistants/${assistantId}/tasks/generate`, body).then((r) => r.data),
-  update: (assistantId: string, taskId: string, body: Partial<GeneratedTask>) =>
+  update: (assistantId: string, taskId: string, body: Partial<GeneratedTask> & { approval_reason?: string }) =>
     api.patch<GeneratedTask>(`/assistants/${assistantId}/tasks/${taskId}`, body).then((r) => r.data),
   remove: (assistantId: string, taskId: string) => api.delete(`/assistants/${assistantId}/tasks/${taskId}`),
   createBatch: (

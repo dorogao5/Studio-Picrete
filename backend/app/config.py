@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 300.0
     data_dir: Path = Path("./data")
 
+    # Only explicitly allowlisted models may make decisions that become grades,
+    # validated tasks or student-facing tutor replies. Unlisted models are safe
+    # by default: they remain available only for an explicit preview.
+    model_use_policy_version: str = "model-use-v1"
+    decision_model_ids: str = "deepseek-v4-pro"
+    advisory_model_ids: str = "deepseek-v4-flash"
+
     # Server-to-server publication into the stable Picrete runtime.
     picrete_api_url: str = ""
     picrete_integration_token: str = ""

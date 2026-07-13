@@ -292,6 +292,7 @@ class GeneratedTaskUpdate(BaseModel):
     max_score: float | None = None
     status: str | None = Field(default=None, pattern="^(draft|validated|needs_review|approved|rejected)$")
     approved: bool | None = None
+    approval_reason: str | None = Field(default=None, max_length=500)
 
 
 class TaskGenerateRequest(BaseModel):
@@ -462,6 +463,7 @@ class TutorChatRequest(BaseModel):
     task_id: str | None = None
     prompt_version_id: str | None = None
     model_entry_id: str
+    preview: bool = False
     student_work: str = ""
     messages: list[TutorMessage] = Field(min_length=1)
 

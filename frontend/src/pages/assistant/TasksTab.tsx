@@ -429,16 +429,24 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [revalidating, setRevalidating] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalReason, setApprovalReason] = useState("");
   const [error, setError] = useState("");
   const status = STATUS_META[task.status] ?? STATUS_META.draft;
 
-  const setStatus = async (next: GeneratedTaskStatus) => {
+  const setStatus = async (next: GeneratedTaskStatus, approvalReasonOverride = "") => {
+    setUpdatingStatus(true);
     setError("");
     try {
-      await tasksApi.update(assistantId, task.id, { status: next });
+      await tasksApi.update(assistantId, task.id, { status: next, approval_reason: approvalReasonOverride });
+      setApprovalOpen(false);
+      setApprovalReason("");
       onChanged();
     } catch (err) {
       setError(apiErrorMessage(err));
+    } finally {
+      setUpdatingStatus(false);
     }
   };
 
@@ -524,11 +532,17 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
       <ErrorNote message={error} />
       <div className="mt-3 flex items-center gap-1 flex-wrap">
         {task.status !== "approved" ? (
-          <Button variant="secondary" onClick={() => setStatus("approved")}>
-            <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить
-          </Button>
+          task.status === "validated" ? (
+            <Button variant="secondary" loading={updatingStatus} onClick={() => setStatus("approved")}>
+              <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить
+            </Button>
+          ) : (
+            <Button variant="secondary" disabled={updatingStatus} onClick={() => setApprovalOpen((open) => !open)}>
+              <CheckCircle2 className="h-3.5 w-3.5" /> Ручное одобрение
+            </Button>
+          )
         ) : (
-          <Button variant="ghost" onClick={() => setStatus("draft")}>
+          <Button variant="ghost" loading={updatingStatus} onClick={() => setStatus("draft")}>
             <RefreshCw className="h-3.5 w-3.5" /> Вернуть в черновики
           </Button>
         )}
@@ -574,6 +588,42 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           </button>
         </div>
       </div>
+      {approvalOpen && task.status !== "approved" && (
+        <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
+          <p className="text-sm font-medium">Почему задачу можно принять без зелёной автопроверки?</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Причина сохранится в истории задачи. Перед одобрением проверьте условие, решение, ответ и рубрику.
+          </p>
+          <Textarea
+            className="mt-3"
+            rows={2}
+            maxLength={500}
+            value={approvalReason}
+            onChange={(event) => setApprovalReason(event.target.value)}
+            placeholder="Например: проверено вручную по методичке, допустимое округление подтверждено"
+          />
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              loading={updatingStatus}
+              disabled={approvalReason.trim().length < 10}
+              onClick={() => setStatus("approved", approvalReason.trim())}
+            >
+              Подтвердить одобрение
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={updatingStatus}
+              onClick={() => {
+                setApprovalOpen(false);
+                setApprovalReason("");
+              }}
+            >
+              Отмена
+            </Button>
+          </div>
+        </div>
+      )}
 
       {editOpen && (
         <TaskEditModal

@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.validation import compare_answers
 
 
@@ -61,3 +63,64 @@ def test_equivalent_litre_notation_is_normalized() -> None:
 
     reverse = compare_answers("V = 2 дм^3", "V = 2 л", tolerance_pct=2)
     assert reverse["verdict"] == "match"
+
+
+def test_explicit_rounded_alternative_is_one_required_output() -> None:
+    result = compare_answers(
+        "Среднее: 10.4975 см (или 10.498 см). Абсолютная погрешность: 0.0025 см. Относительная: 0.024%.",
+        "Среднее 10.4975 см; абсолютная погрешность 0.0025 см; относительная 0.024%.",
+        tolerance_pct=0.01,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["reference_number_groups"] == [[10.4975, 10.498], [0.0025], [0.024]]
+    assert result["matched_count"] == result["required_count"] == 3
+    assert result["missing_reference_numbers"] == []
+
+
+@pytest.mark.parametrize("connector", ["или", "либо", "or", "OR"])
+def test_supported_connectors_form_numeric_alternative_group(connector: str) -> None:
+    result = compare_answers(
+        f"x = 1.234 {connector} 1.23 г; y = 7 мл",
+        "x = 1.234 г; y = 7 мл",
+        tolerance_pct=0.01,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["reference_number_groups"] == [[1.234, 1.23], [7.0]]
+    assert result["required_count"] == 2
+
+
+def test_numeric_alternative_does_not_make_other_outputs_optional() -> None:
+    result = compare_answers(
+        "x = 1.00 или 1.01; y = 5; z = 7",
+        "x = 1.00; y = 5",
+        tolerance_pct=0.01,
+    )
+
+    assert result["verdict"] == "incomplete"
+    assert result["matched_count"] == 2
+    assert result["required_count"] == 3
+    assert result["missing_reference_numbers"] == [7.0]
+
+
+def test_words_between_connector_and_number_do_not_collapse_distinct_outputs() -> None:
+    result = compare_answers(
+        "x = 1 или отдельный результат y = 2",
+        "x = 1",
+        tolerance_pct=0.01,
+    )
+
+    assert result["verdict"] == "incomplete"
+    assert result["required_count"] == 2
+
+
+def test_alternative_number_still_requires_reference_unit() -> None:
+    result = compare_answers(
+        "Среднее: 10.4975 см (или 10.498 см)",
+        "Среднее: 10.4975 мм",
+        tolerance_pct=0.01,
+    )
+
+    assert result["verdict"] == "incomplete"
+    assert result["missing_reference_units"] == ["см"]

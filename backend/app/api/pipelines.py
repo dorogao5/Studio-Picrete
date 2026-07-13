@@ -7,53 +7,16 @@ from app.db import get_db
 from app.models import GeneratedTask, Pipeline, PipelineRun, User
 from app.schemas import PipelineCreate, PipelineOut, PipelineRunOut, PipelineRunRequest, PipelineUpdate
 from app.security import get_current_user
-from app.services.pipeline import STEP_TYPES, execute_pipeline
+from app.services.pipeline import PipelineError, execute_pipeline, preflight_pipeline, validate_pipeline_steps
 
 router = APIRouter(tags=["pipelines"])
 
 
 def _validate_steps(steps: list) -> None:
-    grade_count = 0
-    ocr_count = 0
-    consensus_seen = False
-    for index, step in enumerate(steps):
-        if not isinstance(step, dict) or step.get("type") not in STEP_TYPES:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                f"Каждый шаг должен иметь type из {STEP_TYPES}",
-            )
-        step_type = step["type"]
-        if consensus_seen:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "После консенсуса нельзя добавлять другие шаги",
-            )
-        if step_type == "ocr":
-            ocr_count += 1
-            if ocr_count > 1 or grade_count > 0:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    "Шаг OCR может быть только один и должен идти до проверок",
-                )
-        elif step_type == "grade":
-            grade_count += 1
-        elif step_type == "consensus":
-            if grade_count < 2:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    "Для консенсуса добавьте минимум две проверки LLM",
-                )
-            if index != len(steps) - 1:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    "Консенсус должен быть последним шагом",
-                )
-            consensus_seen = True
-    if steps and grade_count == 0:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "В пайплайне должен быть хотя бы один шаг проверки LLM",
-        )
+    try:
+        validate_pipeline_steps(steps)
+    except PipelineError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
 
 
 @router.get("/assistants/{assistant_id}/pipelines", response_model=list[PipelineOut])
@@ -85,9 +48,7 @@ async def create_pipeline(
 
 async def _get_pipeline(db: AsyncSession, assistant_id: str, pipeline_id: str) -> Pipeline:
     pipeline = (
-        await db.execute(
-            select(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.assistant_id == assistant_id)
-        )
+        await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.assistant_id == assistant_id))
     ).scalar_one_or_none()
     if pipeline is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пайплайн не найден")
@@ -104,7 +65,7 @@ async def update_pipeline(
 ) -> Pipeline:
     pipeline = await _get_pipeline(db, assistant_id, pipeline_id)
     payload = body.model_dump(exclude_unset=True)
-    if "steps" in payload and payload["steps"] is not None:
+    if "steps" in payload:
         _validate_steps(payload["steps"])
     for field, value in payload.items():
         setattr(pipeline, field, value)
@@ -132,8 +93,7 @@ async def run_pipeline(
     user: User = Depends(get_current_user),
 ) -> PipelineRun:
     pipeline = await _get_pipeline(db, assistant_id, pipeline_id)
-    if not pipeline.steps:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "В пайплайне нет шагов")
+    _validate_steps(pipeline.steps)
 
     run_input = body.model_dump()
     if body.task_id:
@@ -155,12 +115,17 @@ async def run_pipeline(
     if not run_input.get("task_text"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Не задано условие задачи (task_id или task_text)")
 
+    try:
+        plan = await preflight_pipeline(db, pipeline, run_input)
+    except PipelineError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
+
     run = PipelineRun(pipeline_id=pipeline_id, input=run_input, created_by=user.id)
     db.add(run)
     await db.commit()
     await db.refresh(run)
 
-    await execute_pipeline(db, pipeline, run)
+    await execute_pipeline(db, pipeline, run, plan)
     await db.refresh(run)
     return run
 

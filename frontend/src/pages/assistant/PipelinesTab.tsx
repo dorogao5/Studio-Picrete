@@ -22,35 +22,63 @@ export default function PipelinesTab({ assistant, providers }: { assistant: Assi
   const [pipelines, setPipelines] = useState<Pipeline[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const reload = async () => {
     try {
       const list = await pipelinesApi.list(assistant.id);
       setPipelines(list);
-      if (list.length > 0 && !selected) setSelected(list[0].id);
+      setSelected((current) => (current && list.some((pipeline) => pipeline.id === current) ? current : (list[0]?.id ?? null)));
     } catch (err) {
       setError(apiErrorMessage(err));
     }
   };
 
   useEffect(() => {
-    void reload();
+    let cancelled = false;
+    setPipelines(null);
+    setSelected(null);
+    setError("");
+    pipelinesApi
+      .list(assistant.id)
+      .then((list) => {
+        if (cancelled) return;
+        setPipelines(list);
+        setSelected(list[0]?.id ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPipelines([]);
+        setError(apiErrorMessage(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [assistant.id]);
 
   const createDefault = async () => {
-    const production = modelOptions(providers, true);
-    const defaultModel = production.some((model) => model.id === assistant.default_grader_model_id)
-      ? assistant.default_grader_model_id!
-      : (production[0]?.id ?? "");
-    await pipelinesApi.create(assistant.id, {
-      name: "Основной пайплайн",
-      description: "OCR → проверка DeepSeek Pro → решение преподавателя",
-      steps: [
-        { type: "ocr", config: {} },
-        { type: "grade", config: { model_entry_id: defaultModel } },
-      ],
-    });
-    await reload();
+    setCreating(true);
+    setError("");
+    try {
+      const production = modelOptions(providers, true);
+      const defaultModel = production.some((model) => model.id === assistant.default_grader_model_id)
+        ? assistant.default_grader_model_id!
+        : (production[0]?.id ?? "");
+      const created = await pipelinesApi.create(assistant.id, {
+        name: "Основной пайплайн",
+        description: "OCR → проверка выбранной моделью → решение преподавателя",
+        steps: [
+          { type: "ocr", config: {} },
+          { type: "grade", config: { model_entry_id: defaultModel } },
+        ],
+      });
+      setSelected(created.id);
+      await reload();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setCreating(false);
+    }
   };
 
   if (pipelines === null) return <Spinner />;
@@ -85,7 +113,7 @@ export default function PipelinesTab({ assistant, providers }: { assistant: Assi
             {p.name}
           </button>
         ))}
-        <Button variant="secondary" onClick={createDefault}>
+        <Button variant="secondary" onClick={createDefault} loading={creating}>
           <Plus className="h-4 w-4" /> Новый пайплайн
         </Button>
       </div>
@@ -121,8 +149,13 @@ function PipelineEditor({
   const [steps, setSteps] = useState<PipelineStep[]>(pipeline.steps);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const gradeCount = steps.filter((step) => step.type === "grade").length;
+  const gradeModelIds = steps
+    .filter((step) => step.type === "grade")
+    .map((step) => String(step.config.model_entry_id ?? ""));
+  const hasDistinctGradeModels = gradeModelIds.every(Boolean) && new Set(gradeModelIds).size === gradeModelIds.length;
   const hasOcr = steps.some((step) => step.type === "ocr");
   const hasConsensus = steps.some((step) => step.type === "consensus");
 
@@ -146,6 +179,7 @@ function PipelineEditor({
   };
 
   const updateStep = (index: number, patch: Partial<PipelineStep>) => {
+    setSavedAt(null);
     setSteps(steps.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
 
@@ -154,8 +188,18 @@ function PipelineEditor({
     const target = index + delta;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
+    setSavedAt(null);
     setSteps(next);
   };
+
+  let draftError = "";
+  if (!name.trim()) draftError = "Укажите название пайплайна";
+  else if (gradeCount === 0) draftError = "Добавьте хотя бы одну проверяющую модель";
+  else if (steps.some((step) => step.type === "grade" && !step.config.model_entry_id)) {
+    draftError = "Выберите модель для каждого шага проверки";
+  } else if (hasConsensus && !hasDistinctGradeModels) {
+    draftError = "Для консенсуса выберите разные модели-проверщики";
+  }
 
   const save = async () => {
     setSaving(true);
@@ -175,14 +219,31 @@ function PipelineEditor({
     <div className="space-y-4">
       <div className="flex items-end gap-2">
         <Field label="Название пайплайна">
-          <Input value={name} onChange={(e) => setName(e.target.value)} className="w-72" />
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setSavedAt(null);
+            }}
+            className="w-72"
+          />
         </Field>
         <Button
           variant="destructive"
+          loading={deleting}
+          aria-label={`Удалить пайплайн «${pipeline.name}»`}
           onClick={async () => {
             if (confirm(`Удалить пайплайн «${pipeline.name}»?`)) {
-              await pipelinesApi.remove(assistant.id, pipeline.id);
-              onChanged();
+              setDeleting(true);
+              setError("");
+              try {
+                await pipelinesApi.remove(assistant.id, pipeline.id);
+                await onChanged();
+              } catch (err) {
+                setError(apiErrorMessage(err));
+              } finally {
+                setDeleting(false);
+              }
             }
           }}
         >
@@ -225,7 +286,10 @@ function PipelineEditor({
                 </button>
                 <button
                   className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:hover:text-muted-foreground"
-                  onClick={() => setSteps(steps.filter((_, i) => i !== index))}
+                  onClick={() => {
+                    setSavedAt(null);
+                    setSteps(steps.filter((_, i) => i !== index));
+                  }}
                   disabled={step.type === "grade" && hasConsensus && gradeCount <= 2}
                   title={step.type === "grade" && hasConsensus && gradeCount <= 2 ? "Сначала удалите шаг консенсуса" : "Удалить шаг"}
                   aria-label="Удалить шаг"
@@ -278,7 +342,10 @@ function PipelineEditor({
           variant="secondary"
           disabled={hasOcr}
           title={hasOcr ? "Шаг OCR уже добавлен" : "Добавить OCR первым шагом"}
-          onClick={() => setSteps([{ type: "ocr", config: {} }, ...steps])}
+          onClick={() => {
+            setSavedAt(null);
+            setSteps([{ type: "ocr", config: {} }, ...steps]);
+          }}
         >
           <Plus className="h-3.5 w-3.5" /> OCR
         </Button>
@@ -287,6 +354,7 @@ function PipelineEditor({
           onClick={() => {
             const grade = { type: "grade", config: { model_entry_id: preferredGraderId } } as PipelineStep;
             const consensusIndex = steps.findIndex((step) => step.type === "consensus");
+            setSavedAt(null);
             setSteps(consensusIndex === -1 ? [...steps, grade] : [...steps.slice(0, consensusIndex), grade, ...steps.slice(consensusIndex)]);
           }}
         >
@@ -294,23 +362,29 @@ function PipelineEditor({
         </Button>
         <Button
           variant="secondary"
-          disabled={gradeCount < 2 || hasConsensus}
+          disabled={gradeCount < 2 || hasConsensus || !hasDistinctGradeModels}
           title={
             hasConsensus
               ? "Шаг консенсуса уже добавлен"
               : gradeCount < 2
                 ? "Для консенсуса нужны минимум две проверки LLM"
+                : !hasDistinctGradeModels
+                  ? "Для консенсуса выберите разные модели-проверщики"
                 : "Свести результаты проверяющих моделей"
           }
-          onClick={() => setSteps([...steps, { type: "consensus", config: { disagreement_threshold_pct: 20 } }])}
+          onClick={() => {
+            setSavedAt(null);
+            setSteps([...steps, { type: "consensus", config: { disagreement_threshold_pct: 20 } }]);
+          }}
         >
           <Plus className="h-3.5 w-3.5" /> Консенсус
         </Button>
       </div>
 
       <ErrorNote message={error} />
+      {!error && draftError && <ErrorNote message={draftError} />}
       <div className="flex items-center gap-3">
-        <Button onClick={save} loading={saving}>
+        <Button onClick={save} loading={saving} disabled={Boolean(draftError)}>
           <Save className="h-4 w-4" /> Сохранить пайплайн
         </Button>
         {savedAt && <span className="text-xs text-success">Сохранено</span>}

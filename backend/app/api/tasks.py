@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.assistants import get_assistant_or_404, resolve_model
 from app.db import get_db
 from app.llm import client as llm
-from app.models import GeneratedTask, GenerationBatch, TaskTemplate, User
+from app.models import GeneratedTask, GenerationBatch, TaskTemplate, User, utcnow
 from app.schemas import (
     GeneratedTaskOut,
     GeneratedTaskUpdate,
@@ -32,7 +32,7 @@ from app.services.taskgen import (
     sheets_to_text,
     task_from_item,
 )
-from app.services.validation import run_validation
+from app.services.validation import VALIDATION_POLICY_VERSION, run_validation
 
 router = APIRouter(tags=["tasks"], dependencies=[Depends(get_current_user)])
 
@@ -348,6 +348,16 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "Нет задач для экспорта — одобрите задачи или передайте task_ids"
         )
+    if body.task_ids:
+        requested_ids = set(body.task_ids)
+        if len(tasks) != len(requested_ids):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Часть выбранных задач не найдена")
+        unapproved = [task for task in tasks if not task.approved or task.status != "approved"]
+        if unapproved:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Экспорт остановлен: сначала одобрите выбранные задачи ({len(unapproved)})",
+            )
     source_title = body.source_title or assistant.discipline
     if body.mode == "bank":
         return build_bank_export(tasks, source_code=body.source_code, source_title=source_title, version=body.version)
@@ -363,14 +373,66 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
 
 @router.patch("/assistants/{assistant_id}/tasks/{task_id}", response_model=GeneratedTaskOut)
 async def update_task(
-    assistant_id: str, task_id: str, body: GeneratedTaskUpdate, db: AsyncSession = Depends(get_db)
+    assistant_id: str,
+    task_id: str,
+    body: GeneratedTaskUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> GeneratedTask:
     task = await _get_task_or_404(db, assistant_id, task_id)
     data = {field: value for field, value in body.model_dump(exclude_unset=True).items() if value is not None}
-    if "status" in data:
-        data["approved"] = data["status"] == "approved"
-    elif "approved" in data:
-        data["status"] = "approved" if data["approved"] else "draft"
+    approval_reason = str(data.pop("approval_reason", "")).strip()
+    content_fields = {"statement", "reference_solution", "answer", "rubric", "max_score"}
+    changes_content = bool(content_fields.intersection(data))
+    requested_status = data.get("status")
+    if requested_status is None and "approved" in data:
+        requested_status = "approved" if data["approved"] else "draft"
+
+    if requested_status in {"validated", "needs_review"}:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Статусы автопроверки меняются только после запуска проверки",
+        )
+    if changes_content and requested_status == "approved":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Сначала сохраните изменения и запустите автопроверку, затем одобрите задачу",
+        )
+
+    if changes_content:
+        data["validation"] = {}
+        data["status"] = "draft"
+        data["approved"] = False
+    elif requested_status == "approved":
+        validation = dict(task.validation or {})
+        model_policy = validation.get("model_policy") or {}
+        policy_validated = (
+            validation.get("verdict") == "validated"
+            and validation.get("policy_version") == VALIDATION_POLICY_VERSION
+            and model_policy.get("decision_capable") is True
+        )
+        if not policy_validated and len(approval_reason) < 10:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Задача не подтверждена текущей политикой: укажите причину ручного одобрения (не менее 10 символов)",
+            )
+        validation["approval"] = {
+            "basis": "policy_validated" if policy_validated else "teacher_override",
+            "reviewed_by": user.id,
+            "reviewed_at": utcnow().isoformat(),
+            "reason": approval_reason,
+            "policy_version": VALIDATION_POLICY_VERSION,
+        }
+        data["validation"] = validation
+        data["status"] = "approved"
+        data["approved"] = True
+    elif requested_status is not None:
+        validation = dict(task.validation or {})
+        validation.pop("approval", None)
+        data["validation"] = validation
+        data["status"] = requested_status
+        data["approved"] = False
+
     for field, value in data.items():
         setattr(task, field, value)
     await db.commit()

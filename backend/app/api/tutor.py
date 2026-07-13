@@ -9,6 +9,7 @@ from app.models import Assistant, GeneratedTask, PromptVersion, TutorRun, User
 from app.schemas import TutorChatRequest, TutorChatResponse, TutorFeedbackRequest, TutorRunOut
 from app.security import get_current_user
 from app.services.grounding import build_grounding_block
+from app.services.model_policy import ModelUsePolicyError, require_decision_model
 from app.services.tutor import FALLBACK_TUTOR_PROMPT, build_tutor_context, flatten_dialog, run_tutor_reply
 
 router = APIRouter(tags=["tutor"])
@@ -54,6 +55,13 @@ async def tutor_chat(
     if body.messages[-1].role != "user":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Последнее сообщение должно быть от студента")
     provider, model = await resolve_model(db, body.model_entry_id)
+    try:
+        require_decision_model(model, allow_advisory=body.preview)
+    except ModelUsePolicyError as err:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"{err}. Для тестового запуска передайте preview=true.",
+        ) from err
     prompt = await _resolve_tutor_prompt(db, assistant, body.prompt_version_id)
     system_prompt = prompt.system_prompt if prompt else FALLBACK_TUTOR_PROMPT.format(discipline=assistant.discipline)
 
