@@ -1,6 +1,6 @@
 {
   "schema_version": "picrete-content-manifest-v1",
-  "content_version": "COLLOID-CURATED-2026-07",
+  "content_version": "COLLOID-CURATED-2026-07-R1",
   "assistant_scope": "colloid-chemistry-launch",
   "course_scope": "",
   "binding_status": "pending_course_binding",
@@ -50,6 +50,8 @@
       "SHA-256 matches the manifest.",
       "BET and electrokinetic formulas are checked against rendered pages, not copied text.",
       "Every task states units and model applicability.",
+      "Every numerical input and constant required by the reference solution is stated in the task; universal constants are not an exception.",
+      "A stability classification is included only when its criterion, applicability and provenance are present in the grounding or task.",
       "No laboratory procedure, emergency instruction or test answer enters the curated layer.",
       "A teacher approves the final card and binds the assistant to the actual course before publication."
     ]
@@ -61,7 +63,7 @@
     "authority": "course_lecture",
     "visibility": "student",
     "course_scope": "",
-    "effective_version": "COLLOID-CURATED-2026-07",
+    "effective_version": "COLLOID-CURATED-2026-07-R1",
     "analyze": false
   },
   "reference_sheet_proposals": [
@@ -69,7 +71,7 @@
       "slug": "col-00-verification",
       "title": "COL-00 · Проверка формул и обозначений",
       "kind": "conventions",
-      "description": "Manual-verification gate, единицы и словарь обозначений для curated-задач.",
+      "description": "Manual-verification gate, самодостаточность, единицы и словарь обозначений для curated-задач.",
       "content_anchor": "COL-00",
       "source_provenance": ["Curated Picrete policy; applies to all sections in this package."],
       "visibility": "student",
@@ -119,6 +121,8 @@
     "nuances_to_add": [
       "Для БЭТ указывать x=p/ps, единицы a/am, диапазон регрессии и проверять физический смысл C и am.",
       "ζ-потенциал относится к плоскости скольжения; формула Смолуховского допустима только при явно заданном приближении тонкого двойного слоя.",
+      "В задаче на ζ-потенциал задавать либо v и E, либо готовую μe; в обоих случаях обязательно задавать η, εr и ε0 в SI.",
+      "Не классифицировать устойчивость дисперсии только по ζ-потенциалу без курируемого критерия, его области применимости и источника.",
       "Энергию ДЛФО сравнивать с kBT только после согласования единиц; не смешивать Дж, Дж/моль и U/kBT.",
       "Тестовый банк не является источником эталона до ручной проверки каждого ответа."
     ]
@@ -182,14 +186,14 @@
         "name": "Коллоиды · ζ-потенциал по подвижности",
         "topic": "Электрокинетические явления",
         "difficulty": "medium",
-        "instructions": "Явно укажи применимость приближения тонкого двойного слоя. Дай v и E либо μe, η, εr и ε0 в SI. Попроси найти μe и ζ, определить знак по заданному направлению и выполнить размерностную проверку. Варьируй мПа·с/Па·с для проверки перевода, но не описывай прибор.",
+        "instructions": "Явно укажи применимость приближения тонкого двойного слоя. Дай либо v и E, либо готовую μe; в обоих случаях обязательно дай η, εr и ε0 численно в SI. Если даны v и E, попроси найти μe и ζ; если дана μe, попроси найти ζ. Явно задай направление поля и соглашение о знаке, потребуй размерностную проверку. Варьируй мПа·с/Па·с для проверки перевода, но не описывай прибор. Не добавляй вывод об устойчивости дисперсии, если в условии и grounding нет курируемого критерия с областью применимости и источником.",
         "example": "",
         "task_kind": "calculation",
         "answer_format": "numeric",
         "numeric_tolerance_pct": 1,
         "reference_sheet_ids": [],
         "example_tasks": [],
-        "kb_query": "COL-02 electrophoretic mobility zeta Smoluchowski viscosity permittivity SI",
+        "kb_query": "COL-00 COL-02 self-contained electrophoretic mobility zeta Smoluchowski viscosity permittivity epsilon0 SI applicability",
         "validation_solver": true,
         "validation_data_check": true
       },
@@ -197,7 +201,7 @@
         {"criterion_name": "Подвижность", "max_score": 2, "description": "μe=v/E вычислена со знаком и SI units."},
         {"criterion_name": "ζ-потенциал", "max_score": 3, "description": "ημe/(εrε0) применено корректно."},
         {"criterion_name": "Перевод единиц", "max_score": 2, "description": "Вязкость и остальные величины приведены к SI."},
-        {"criterion_name": "Знак и смысл", "max_score": 1, "description": "Знак согласован с направлением поля."},
+        {"criterion_name": "Знак и границы вывода", "max_score": 1, "description": "Знак согласован с направлением поля; нет неподтверждённой классификации устойчивости."},
         {"criterion_name": "Применимость", "max_score": 2, "description": "Названо приближение и его ограничение."}
       ]
     },

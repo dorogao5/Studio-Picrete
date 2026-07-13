@@ -664,6 +664,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           </p>
           <Textarea
             className="mt-3"
+            autoFocus
             rows={2}
             maxLength={500}
             value={approvalReason}
