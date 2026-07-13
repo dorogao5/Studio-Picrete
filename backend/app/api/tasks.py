@@ -1,5 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.assistants import get_assistant_or_404, resolve_model
@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.security import get_current_user
 from app.services.export import build_bank_export, build_variants_export
+from app.services.task_approval import has_complete_approval, validation_is_current_decision
 from app.services.taskgen import (
     GenerationError,
     build_generation_grounding,
@@ -342,7 +343,7 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
     if body.task_ids:
         query = query.where(GeneratedTask.id.in_(body.task_ids))
     else:
-        query = query.where(GeneratedTask.approved.is_(True))
+        query = query.where(or_(GeneratedTask.approved.is_(True), GeneratedTask.status == "approved"))
     tasks = list((await db.execute(query.order_by(GeneratedTask.created_at))).scalars())
     if not tasks:
         raise HTTPException(
@@ -352,12 +353,18 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
         requested_ids = set(body.task_ids)
         if len(tasks) != len(requested_ids):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Часть выбранных задач не найдена")
-        unapproved = [task for task in tasks if not task.approved or task.status != "approved"]
-        if unapproved:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                f"Экспорт остановлен: сначала одобрите выбранные задачи ({len(unapproved)})",
-            )
+    unapproved = [task for task in tasks if not task.approved or task.status != "approved"]
+    if unapproved:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Экспорт остановлен: сначала одобрите задачи ({len(unapproved)})",
+        )
+    unaudited = [task for task in tasks if not has_complete_approval(task.validation)]
+    if unaudited:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Экспорт остановлен: подтвердите одобрение по текущей политике ({len(unaudited)})",
+        )
     source_title = body.source_title or assistant.discipline
     if body.mode == "bank":
         return build_bank_export(tasks, source_code=body.source_code, source_title=source_title, version=body.version)
@@ -404,13 +411,8 @@ async def update_task(
         data["status"] = "draft"
         data["approved"] = False
     elif requested_status == "approved":
-        validation = dict(task.validation or {})
-        model_policy = validation.get("model_policy") or {}
-        policy_validated = (
-            validation.get("verdict") == "validated"
-            and validation.get("policy_version") == VALIDATION_POLICY_VERSION
-            and model_policy.get("decision_capable") is True
-        )
+        validation = dict(task.validation) if isinstance(task.validation, dict) else {}
+        policy_validated = validation_is_current_decision(validation)
         if not policy_validated and len(approval_reason) < 10:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -427,7 +429,7 @@ async def update_task(
         data["status"] = "approved"
         data["approved"] = True
     elif requested_status is not None:
-        validation = dict(task.validation or {})
+        validation = dict(task.validation) if isinstance(task.validation, dict) else {}
         validation.pop("approval", None)
         data["validation"] = validation
         data["status"] = requested_status

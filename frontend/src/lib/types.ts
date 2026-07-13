@@ -193,6 +193,9 @@ export interface GeneratedTask {
   validation: TaskValidation;
   grounding: { sheets?: Array<{ id: string; title: string }>; kb_chunks?: number };
   approved: boolean;
+  approval_ready: boolean;
+  validation_ready: boolean;
+  export_ready: boolean;
   created_at: string;
 }
 

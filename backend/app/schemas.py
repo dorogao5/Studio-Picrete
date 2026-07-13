@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from app.services.task_approval import has_complete_approval, validation_is_current_decision
 
 
 class ORMModel(BaseModel):
@@ -282,6 +284,21 @@ class GeneratedTaskOut(ORMModel):
     grounding: dict
     approved: bool
     created_at: datetime
+
+    @computed_field
+    @property
+    def approval_ready(self) -> bool:
+        return has_complete_approval(self.validation)
+
+    @computed_field
+    @property
+    def validation_ready(self) -> bool:
+        return validation_is_current_decision(self.validation)
+
+    @computed_field
+    @property
+    def export_ready(self) -> bool:
+        return self.status == "approved" and self.approved and has_complete_approval(self.validation)
 
 
 class GeneratedTaskUpdate(BaseModel):

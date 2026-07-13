@@ -87,6 +87,10 @@ function slugify(text: string): string {
   return out.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "course";
 }
 
+function hasCurrentApproval(task: GeneratedTask): boolean {
+  return task.export_ready === true;
+}
+
 export default function TasksTab({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [tasks, setTasks] = useState<GeneratedTask[] | null>(null);
@@ -152,12 +156,14 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   }, [batches, assistant.id]);
 
   const taskList = tasks ?? [];
-  const validatedCount = taskList.filter((t) => t.status === "validated").length;
-  const approvedCount = taskList.filter((t) => t.status === "approved").length;
+  const validatedCount = taskList.filter((t) => t.status === "validated" && t.validation_ready).length;
+  const approvedTasks = taskList.filter((t) => t.status === "approved");
+  const approvedCount = approvedTasks.filter(hasCurrentApproval).length;
+  const legacyApprovalCount = approvedTasks.length - approvedCount;
   const filtered = filter === "all" ? taskList : taskList.filter((t) => t.status === filter);
 
   const approveAllValidated = async () => {
-    const validated = taskList.filter((t) => t.status === "validated");
+    const validated = taskList.filter((t) => t.status === "validated" && t.validation_ready);
     if (validated.length === 0) return;
     if (!confirm(`Одобрить задачи, прошедшие проверку (${validated.length} шт.)?`)) return;
     setBulkLoading(true);
@@ -349,7 +355,14 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           }}
         />
       )}
-      {exportOpen && <ExportModal assistant={assistant} approvedCount={approvedCount} onClose={() => setExportOpen(false)} />}
+      {exportOpen && (
+        <ExportModal
+          assistant={assistant}
+          approvedCount={approvedCount}
+          legacyApprovalCount={legacyApprovalCount}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -454,6 +467,8 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
   const [approvalReason, setApprovalReason] = useState("");
   const [error, setError] = useState("");
   const status = STATUS_META[task.status] ?? STATUS_META.draft;
+  const hasRecordedApproval = hasCurrentApproval(task);
+  const hasCurrentValidation = task.validation_ready === true;
 
   const setStatus = async (next: GeneratedTaskStatus, approvalReasonOverride = "") => {
     setUpdatingStatus(true);
@@ -552,25 +567,49 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
       <ErrorNote message={error} />
       <div className="mt-3 flex items-center gap-1 flex-wrap">
         {task.status !== "approved" ? (
-          task.status === "validated" ? (
-            <Button variant="secondary" loading={updatingStatus} onClick={() => setStatus("approved")}>
+          hasCurrentValidation ? (
+            <Button
+              variant="secondary"
+              loading={updatingStatus}
+              disabled={revalidating}
+              onClick={() => setStatus("approved")}
+            >
               <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить
             </Button>
           ) : (
-            <Button variant="secondary" disabled={updatingStatus} onClick={() => setApprovalOpen((open) => !open)}>
+            <Button
+              variant="secondary"
+              disabled={updatingStatus || revalidating}
+              onClick={() => setApprovalOpen((open) => !open)}
+            >
               <CheckCircle2 className="h-3.5 w-3.5" /> Ручное одобрение
             </Button>
           )
         ) : (
-          <Button variant="ghost" loading={updatingStatus} onClick={() => setStatus("draft")}>
-            <RefreshCw className="h-3.5 w-3.5" /> Вернуть в черновики
-          </Button>
+          <>
+            {!hasRecordedApproval && (
+              <Button
+                variant="secondary"
+                disabled={updatingStatus || revalidating}
+                onClick={() =>
+                  hasCurrentValidation ? setStatus("approved") : setApprovalOpen((open) => !open)
+                }
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> Зафиксировать одобрение
+              </Button>
+            )}
+            <Button variant="ghost" loading={updatingStatus} disabled={revalidating} onClick={() => setStatus("draft")}>
+              <RefreshCw className="h-3.5 w-3.5" /> Вернуть в черновики
+            </Button>
+          </>
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {task.status !== "rejected" && (
             <button
-              className="p-1.5 text-muted-foreground hover:text-foreground"
+              className="p-1.5 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               title="Отклонить"
+              aria-label="Отклонить задачу"
+              disabled={updatingStatus || revalidating}
               onClick={() => setStatus("rejected")}
             >
               <XCircle className="h-4 w-4" />
@@ -579,21 +618,26 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           <button
             className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
             title="Перепроверить автопроверкой"
-            disabled={revalidating}
+            aria-label="Перепроверить задачу"
+            disabled={revalidating || updatingStatus}
             onClick={revalidate}
           >
             {revalidating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
           <button
-            className="p-1.5 text-muted-foreground hover:text-foreground"
+            className="p-1.5 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             title="Редактировать"
+            aria-label="Редактировать задачу"
+            disabled={updatingStatus || revalidating}
             onClick={() => setEditOpen(true)}
           >
             <Pencil className="h-4 w-4" />
           </button>
           <button
-            className="p-1.5 text-muted-foreground hover:text-destructive"
+            className="p-1.5 text-muted-foreground hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
             title="Удалить"
+            aria-label="Удалить задачу"
+            disabled={updatingStatus || revalidating}
             onClick={async () => {
               if (!confirm(`Удалить задачу?`)) return;
               try {
@@ -608,11 +652,15 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           </button>
         </div>
       </div>
-      {approvalOpen && task.status !== "approved" && (
+      {approvalOpen && (task.status !== "approved" || !hasRecordedApproval) && (
         <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
-          <p className="text-sm font-medium">Почему задачу можно принять без зелёной автопроверки?</p>
+          <p className="text-sm font-medium">
+            {task.status === "approved" ? "Подтвердите старое одобрение" : "Почему задачу можно принять без зелёной автопроверки?"}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Причина сохранится в истории задачи. Перед одобрением проверьте условие, решение, ответ и рубрику.
+            {task.status === "approved"
+              ? "У этой задачи нет записи о проверке. Сверьте условие, решение, ответ и рубрику — причина сохранится в истории."
+              : "Причина сохранится в истории задачи. Перед одобрением проверьте условие, решение, ответ и рубрику."}
           </p>
           <Textarea
             className="mt-3"
@@ -1135,10 +1183,12 @@ function BatchLaunchModal({
 function ExportModal({
   assistant,
   approvedCount,
+  legacyApprovalCount,
   onClose,
 }: {
   assistant: Assistant;
   approvedCount: number;
+  legacyApprovalCount: number;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"bank" | "variants">("bank");
@@ -1212,15 +1262,21 @@ function ExportModal({
           <Input value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} />
         </Field>
         <p className="text-xs text-muted-foreground">
-          Будут экспортированы одобренные задачи: {approvedCount} шт.
-          {approvedCount === 0 ? " Сначала одобрите задачи в банке." : ""}
+          Готовы к экспорту: {approvedCount} шт.
+          {approvedCount === 0 && legacyApprovalCount === 0 ? " Сначала одобрите задачи в банке." : ""}
         </p>
+        {legacyApprovalCount > 0 && (
+          <p className="rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-foreground">
+            Экспорт приостановлен: у {legacyApprovalCount} ранее одобренных задач нет записи о проверке. Откройте фильтр
+            «Одобрены» и зафиксируйте одобрение после ручной сверки.
+          </p>
+        )}
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Отмена
           </Button>
-          <Button onClick={submit} loading={loading} disabled={approvedCount === 0}>
+          <Button onClick={submit} loading={loading} disabled={approvedCount === 0 || legacyApprovalCount > 0}>
             <Download className="h-4 w-4" /> Скачать JSON
           </Button>
         </div>

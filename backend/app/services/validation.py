@@ -521,7 +521,12 @@ async def run_validation(
 
     data: dict = {"status": "skipped", "unknown_numbers": [], "unknown_sources": []}
     if run_data:
-        data = data_check(statement, sheets_text, data_used=data_used)
+        # The generator can cite either a selected ReferenceSheet or a retrieved KB chunk.
+        # Validate against the exact grounding it actually saw; ``sheets_text`` contains
+        # only ReferenceSheets and would falsely reject a real KB heading. Falling back
+        # preserves revalidation for older/manual calls that have no grounding block.
+        provenance_text = grounding if (grounding or "").strip() else sheets_text
+        data = data_check(statement, provenance_text, data_used=data_used)
         if data["unknown_numbers"]:
             reasons.append("Числа не из справочника: " + ", ".join(data["unknown_numbers"][:10]))
         if data["unknown_sources"]:
