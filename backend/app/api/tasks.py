@@ -29,6 +29,7 @@ from app.services.taskgen import (
     load_reference_sheets,
     merge_template_params,
     resolve_generator_prompt,
+    resolve_generator_prompt_version,
     run_batch,
     sheets_to_text,
     task_from_item,
@@ -214,15 +215,20 @@ async def create_batch(
     if body.template_id:
         await _get_template_or_404(db, assistant_id, body.template_id)
     try:
-        await resolve_generator_prompt(db, assistant_id, body.prompt_version_id)
+        prompt_version = await resolve_generator_prompt_version(db, assistant_id, body.prompt_version_id)
     except GenerationError as err:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
+
+    params = body.model_dump()
+    # Freeze the active version before the background job is queued. If no active
+    # generator prompt exists, None intentionally preserves the built-in fallback.
+    params["prompt_version_id"] = prompt_version.id if prompt_version else None
 
     batch = GenerationBatch(
         assistant_id=assistant_id,
         template_id=body.template_id,
         status="running",
-        params=body.model_dump(),
+        params=params,
         model_used=f"{provider.name}/{model.model_id}",
         requested_count=body.count,
         progress={"stage": "В очереди", "done": 0, "total": body.count},

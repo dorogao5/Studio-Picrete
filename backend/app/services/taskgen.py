@@ -203,7 +203,9 @@ def merge_template_params(template: TaskTemplate | None, *, topic: str, difficul
     }
 
 
-async def resolve_generator_prompt(db: AsyncSession, assistant_id: str, prompt_version_id: str | None) -> str | None:
+async def resolve_generator_prompt_version(
+    db: AsyncSession, assistant_id: str, prompt_version_id: str | None
+) -> PromptVersion | None:
     if prompt_version_id:
         prompt = (
             await db.execute(
@@ -214,8 +216,8 @@ async def resolve_generator_prompt(db: AsyncSession, assistant_id: str, prompt_v
         ).scalar_one_or_none()
         if prompt is None:
             raise GenerationError("Версия промпта не найдена")
-        return prompt.system_prompt
-    active = (
+        return prompt
+    return (
         (
             await db.execute(
                 select(PromptVersion)
@@ -230,7 +232,11 @@ async def resolve_generator_prompt(db: AsyncSession, assistant_id: str, prompt_v
         .scalars()
         .first()
     )
-    return active.system_prompt if active else None
+
+
+async def resolve_generator_prompt(db: AsyncSession, assistant_id: str, prompt_version_id: str | None) -> str | None:
+    prompt = await resolve_generator_prompt_version(db, assistant_id, prompt_version_id)
+    return prompt.system_prompt if prompt else None
 
 
 async def load_reference_sheets(
