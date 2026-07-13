@@ -100,10 +100,11 @@ export default function AssistantDetail() {
           <Button variant="ghost" onClick={() => setTab("courses")} title="Привязка к курсам Picrete">
             <GraduationCap className="h-4 w-4" /> Курсы
           </Button>
-          <Link to="/playground">
-            <Button variant="accent">
-              <FlaskConical className="h-4 w-4" /> Playground
-            </Button>
+          <Link
+            to="/playground"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground transition-colors hover:opacity-90"
+          >
+            <FlaskConical className="h-4 w-4" /> Playground
           </Link>
         </div>
       </div>

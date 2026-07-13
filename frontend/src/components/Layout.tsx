@@ -24,6 +24,8 @@ import { useApp } from "../lib/context";
 import CreateDisciplineModal from "./CreateDisciplineModal";
 import { Button, ErrorNote, Field, Input, Modal, Spinner } from "./ui";
 
+const DESKTOP_MEDIA_QUERY = "(min-width: 1024px)";
+
 export default function Layout() {
   const token = localStorage.getItem("studio_token");
   const { me, loading, selected } = useApp();
@@ -31,12 +33,26 @@ export default function Layout() {
   const navigate = useNavigate();
   const [pwOpen, setPwOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_MEDIA_QUERY).matches);
   const navRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const navTitleId = useId();
+  const drawerOpen = navOpen && !isDesktop;
+  const navHidden = !isDesktop && !drawerOpen;
 
   useEffect(() => {
-    if (!navOpen) return;
+    const mediaQuery = window.matchMedia(DESKTOP_MEDIA_QUERY);
+    const syncViewport = () => {
+      setIsDesktop(mediaQuery.matches);
+      if (mediaQuery.matches) setNavOpen(false);
+    };
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const frame = window.requestAnimationFrame(() => {
@@ -70,9 +86,9 @@ export default function Layout() {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      menuButtonRef.current?.focus();
+      if (!window.matchMedia(DESKTOP_MEDIA_QUERY).matches) menuButtonRef.current?.focus();
     };
-  }, [navOpen]);
+  }, [drawerOpen]);
 
   if (!token) return <Navigate to="/login" replace />;
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner /></div>;
@@ -100,7 +116,7 @@ export default function Layout() {
           ref={menuButtonRef}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
           aria-label="Открыть меню"
-          aria-expanded={navOpen}
+          aria-expanded={drawerOpen}
           aria-controls="studio-navigation"
           onClick={() => setNavOpen(true)}
         >
@@ -109,19 +125,21 @@ export default function Layout() {
         <span className="font-semibold text-sm tracking-tight">Picrete Studio</span>
       </header>
 
-      {navOpen && (
+      {drawerOpen && (
         <div aria-hidden="true" className="fixed inset-0 z-40 bg-foreground/40 lg:hidden" onClick={() => setNavOpen(false)} />
       )}
       <aside
         id="studio-navigation"
         ref={navRef}
-        role={navOpen ? "dialog" : undefined}
-        aria-modal={navOpen ? "true" : undefined}
-        aria-labelledby={navOpen ? navTitleId : undefined}
+        role={drawerOpen ? "dialog" : undefined}
+        aria-modal={drawerOpen ? "true" : undefined}
+        aria-labelledby={drawerOpen ? navTitleId : undefined}
+        aria-hidden={navHidden || undefined}
+        inert={navHidden || undefined}
         className={clsx(
           "w-60 shrink-0 border-r border-border bg-card flex flex-col",
           "fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0 lg:transition-none",
-          navOpen ? "translate-x-0" : "-translate-x-full",
+          drawerOpen ? "translate-x-0" : "-translate-x-full",
         )}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("a")) setNavOpen(false);

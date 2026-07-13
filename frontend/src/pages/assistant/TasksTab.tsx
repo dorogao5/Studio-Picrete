@@ -296,6 +296,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             return (
               <button
                 key={f.key}
+                type="button"
+                aria-pressed={filter === f.key}
                 onClick={() => setFilter(f.key)}
                 className={`rounded-full px-3 py-1 text-xs font-medium border ${
                   filter === f.key
