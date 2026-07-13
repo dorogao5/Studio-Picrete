@@ -150,19 +150,30 @@ export interface TaskTemplate {
 
 export type GeneratedTaskStatus = "draft" | "validated" | "needs_review" | "approved" | "rejected";
 
+interface ValidationSolverResult {
+  status?: "match" | "mismatch" | "incomplete" | "uncertain" | "error" | "skipped";
+  answer?: string;
+  solution?: string;
+  model?: string;
+  error?: string;
+}
+
 export interface TaskValidation {
-  solver?: {
-    status?: "match" | "mismatch" | "uncertain" | "error" | "skipped";
-    answer?: string;
-    solution?: string;
-    model?: string;
-    error?: string;
-  };
+  solver?: ValidationSolverResult;
+  verifier?: ValidationSolverResult;
   data?: { status?: "ok" | "warn" | "skipped"; unknown_numbers?: string[] };
   sanity?: { issues?: string[] };
   dedup?: { duplicate?: boolean; similarity?: number };
   verdict?: "validated" | "needs_review";
   reasons?: string[];
+  model_policy?: { tier?: string; decision_capable?: boolean; policy_version?: string };
+  approval?: {
+    basis?: "policy_validated" | "teacher_override";
+    reviewed_by?: string;
+    reviewed_at?: string;
+    reason?: string;
+    policy_version?: string;
+  };
 }
 
 export interface GeneratedTask {

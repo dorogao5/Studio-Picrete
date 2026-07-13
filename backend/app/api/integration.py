@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Assistant, Course, PromptVersion, ReferenceSheet, User
+from app.models import Assistant, Course, ModelEntry, PromptVersion, ReferenceSheet, User
 from app.security import get_current_user
+from app.services.model_policy import current_model_use_policy
 
 router = APIRouter(tags=["integration"])
 
@@ -59,7 +60,51 @@ async def _course_or_404(db: AsyncSession, assistant_id: str, course_id: str) ->
     return assistant, course
 
 
+async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
+    if not assistant.default_grader_model_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Перед публикацией выберите основную модель проверки ассистента.",
+        )
+    model = await db.get(ModelEntry, assistant.default_grader_model_id)
+    if model is None or not model.enabled:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Основная модель проверки не найдена или отключена.",
+        )
+    use = current_model_use_policy().classify(model)
+    if not use.decision_capable:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Модель {model.model_id} нельзя опубликовать для работы со студентами: {use.reason}.",
+        )
+    return {
+        "policy_version": use.policy_version,
+        # Пока Studio не хранит отдельную tutor-модель: student-facing tutor использует
+        # ту же decision-grade модель, что и итоговая проверка.
+        "tutor_model_id": model.model_id,
+        "decision_model_id": model.model_id,
+        "tier": use.tier,
+        "allowed_uses": ["student_tutor", "task_validation", "grading"],
+    }
+
+
+def _seal_snapshot(snapshot: dict) -> dict:
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    if len(encoded) > 1_500_000:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Снимок ассистента больше 1,5 МБ. Оставьте каноническими только нужные справочники.",
+        )
+    return {
+        **snapshot,
+        "version": hashlib.sha256(encoded).hexdigest(),
+        "published_at": datetime.now(UTC).isoformat(),
+    }
+
+
 async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
+    runtime_policy = await _build_runtime_policy(db, assistant)
     prompts = list(
         (
             await db.execute(
@@ -110,6 +155,7 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             "topics": assistant.topics or [],
             "criteria": assistant.criteria or [],
             "nuances": assistant.nuances or [],
+            "runtime_policy": runtime_policy,
         },
         "prompts": active_prompts,
         "reference_sheets": [
@@ -123,15 +169,7 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             for sheet in sheets
         ],
     }
-    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    if len(encoded) > 1_500_000:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Снимок ассистента больше 1,5 МБ. Оставьте каноническими только нужные справочники.",
-        )
-    snapshot["version"] = hashlib.sha256(encoded).hexdigest()
-    snapshot["published_at"] = datetime.now(UTC).isoformat()
-    return snapshot
+    return _seal_snapshot(snapshot)
 
 
 @router.post("/assistants/{assistant_id}/courses/{course_id}/publish")

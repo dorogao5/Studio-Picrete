@@ -396,7 +396,7 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
 
 function ValidationReport({ task }: { task: GeneratedTask }) {
   const v: TaskValidation = task.validation ?? {};
-  const hasReport = Boolean(v.solver || v.data || v.sanity || v.dedup);
+  const hasReport = Boolean(v.solver || v.verifier || v.data || v.sanity || v.dedup || v.approval);
   if (!hasReport) return <p className="text-xs text-muted-foreground">Проверка не выполнялась</p>;
   return (
     <div className="space-y-2">
@@ -404,8 +404,15 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
         {v.solver?.status === "match" && <Badge tone="success">Решатель: совпал ✓</Badge>}
         {v.solver?.status === "mismatch" && <Badge tone="destructive">Решатель: расходится</Badge>}
         {v.solver?.status === "uncertain" && <Badge tone="warning">Решатель: не уверен</Badge>}
+        {v.solver?.status === "incomplete" && <Badge tone="warning">Решатель: ответ неполный</Badge>}
         {v.solver?.status === "error" && <Badge tone="destructive">Решатель: ошибка</Badge>}
         {v.solver?.status === "skipped" && <Badge>Решатель: пропущен</Badge>}
+        {v.verifier?.status === "match" && <Badge tone="success">Аудитор: совпал ✓</Badge>}
+        {v.verifier?.status === "mismatch" && <Badge tone="destructive">Аудитор: расходится</Badge>}
+        {v.verifier?.status === "incomplete" && <Badge tone="warning">Аудитор: ответ неполный</Badge>}
+        {v.verifier?.status === "uncertain" && <Badge tone="warning">Аудитор: не уверен</Badge>}
+        {v.verifier?.status === "error" && <Badge tone="destructive">Аудитор: ошибка</Badge>}
+        {v.verifier?.status === "skipped" && <Badge>Аудитор: пропущен</Badge>}
         {v.data?.status === "ok" && <Badge tone="success">Данные: ок</Badge>}
         {v.data?.status === "warn" && <Badge tone="warning">Данные: есть числа не из справочников</Badge>}
         {v.data?.status === "skipped" && <Badge>Данные: пропущено</Badge>}
@@ -420,6 +427,19 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
             </li>
           ))}
         </ul>
+      )}
+      {v.approval && (
+        <div className="rounded-md border border-border bg-muted/20 p-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={v.approval.basis === "teacher_override" ? "warning" : "success"}>
+              {v.approval.basis === "teacher_override" ? "Одобрено преподавателем вручную" : "Одобрено после автопроверки"}
+            </Badge>
+            {v.approval.reviewed_at && (
+              <span className="text-muted-foreground">{new Date(v.approval.reviewed_at).toLocaleString("ru-RU")}</span>
+            )}
+          </div>
+          {v.approval.reason && <p className="mt-1.5 text-muted-foreground">{v.approval.reason}</p>}
+        </div>
       )}
     </div>
   );
