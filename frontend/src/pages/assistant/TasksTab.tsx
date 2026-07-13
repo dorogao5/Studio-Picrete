@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -95,8 +95,12 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [tasks, setTasks] = useState<GeneratedTask[] | null>(null);
   const [batches, setBatches] = useState<GenerationBatch[]>([]);
-  const [sheets, setSheets] = useState<ReferenceSheet[]>([]);
-  const [prompts, setPrompts] = useState<PromptVersion[]>([]);
+  const [sheets, setSheets] = useState<ReferenceSheet[] | null>(null);
+  const [prompts, setPrompts] = useState<PromptVersion[] | null>(null);
+  const [sheetsLoading, setSheetsLoading] = useState(false);
+  const [promptsLoading, setPromptsLoading] = useState(false);
+  const [sheetsError, setSheetsError] = useState("");
+  const [promptsError, setPromptsError] = useState("");
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<"all" | GeneratedTaskStatus>("all");
   const [templateModal, setTemplateModal] = useState<{ open: boolean; template: TaskTemplate | null }>({
@@ -107,52 +111,147 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [exportOpen, setExportOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const assistantIdRef = useRef(assistant.id);
+  const sheetsRequestRef = useRef(0);
+  const promptsRequestRef = useRef(0);
+
+  // Keep async responses from a previously selected assistant out of the current tab.
+  assistantIdRef.current = assistant.id;
 
   const reloadTasks = async () => {
+    const requestedAssistantId = assistant.id;
     try {
-      setTasks(await tasksApi.list(assistant.id));
+      const nextTasks = await tasksApi.list(requestedAssistantId);
+      if (assistantIdRef.current === requestedAssistantId) setTasks(nextTasks);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      if (assistantIdRef.current === requestedAssistantId) setError(apiErrorMessage(err));
     }
   };
 
-  const reload = async () => {
+  const reloadTemplates = async () => {
+    const requestedAssistantId = assistant.id;
     try {
-      const [tpl, tsk, bt, sh, pr] = await Promise.all([
-        tasksApi.templates(assistant.id),
-        tasksApi.list(assistant.id),
-        tasksApi.batches(assistant.id),
-        sheetsApi.list(assistant.id),
-        promptsApi.list(assistant.id),
-      ]);
-      setTemplates(tpl);
-      setTasks(tsk);
-      setBatches(bt);
-      setSheets(sh);
-      setPrompts(pr);
+      const nextTemplates = await tasksApi.templates(requestedAssistantId);
+      if (assistantIdRef.current === requestedAssistantId) setTemplates(nextTemplates);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      if (assistantIdRef.current === requestedAssistantId) setError(apiErrorMessage(err));
     }
+  };
+
+  const loadSheets = async () => {
+    const requestedAssistantId = assistant.id;
+    const requestId = ++sheetsRequestRef.current;
+    setSheetsLoading(true);
+    setSheetsError("");
+    try {
+      const nextSheets = await sheetsApi.list(requestedAssistantId);
+      if (assistantIdRef.current === requestedAssistantId && sheetsRequestRef.current === requestId) {
+        setSheets(nextSheets);
+      }
+    } catch (err) {
+      if (assistantIdRef.current === requestedAssistantId && sheetsRequestRef.current === requestId) {
+        setSheetsError(apiErrorMessage(err));
+      }
+    } finally {
+      if (assistantIdRef.current === requestedAssistantId && sheetsRequestRef.current === requestId) {
+        setSheetsLoading(false);
+      }
+    }
+  };
+
+  const loadPrompts = async () => {
+    const requestedAssistantId = assistant.id;
+    const requestId = ++promptsRequestRef.current;
+    setPromptsLoading(true);
+    setPromptsError("");
+    try {
+      const nextPrompts = await promptsApi.list(requestedAssistantId);
+      if (assistantIdRef.current === requestedAssistantId && promptsRequestRef.current === requestId) {
+        setPrompts(nextPrompts);
+      }
+    } catch (err) {
+      if (assistantIdRef.current === requestedAssistantId && promptsRequestRef.current === requestId) {
+        setPromptsError(apiErrorMessage(err));
+      }
+    } finally {
+      if (assistantIdRef.current === requestedAssistantId && promptsRequestRef.current === requestId) {
+        setPromptsLoading(false);
+      }
+    }
+  };
+
+  const openTemplateModal = (template: TaskTemplate | null) => {
+    setTemplateModal({ open: true, template });
+    if (sheets === null && !sheetsLoading) void loadSheets();
+  };
+
+  const openBatchModal = (templateId: string) => {
+    setBatchModal({ open: true, templateId });
+    if (prompts === null && !promptsLoading) void loadPrompts();
   };
 
   useEffect(() => {
+    const requestedAssistantId = assistant.id;
+    let cancelled = false;
+
+    sheetsRequestRef.current += 1;
+    promptsRequestRef.current += 1;
+    setTemplates([]);
+    setTasks(null);
+    setBatches([]);
+    setSheets(null);
+    setPrompts(null);
+    setSheetsLoading(false);
+    setPromptsLoading(false);
+    setSheetsError("");
+    setPromptsError("");
+    setError("");
+    setTemplateModal({ open: false, template: null });
+    setBatchModal({ open: false, templateId: "" });
+    setExportOpen(false);
     setInitialLoading(true);
-    void reload().finally(() => setInitialLoading(false));
+    void Promise.all([
+      tasksApi.templates(requestedAssistantId),
+      tasksApi.list(requestedAssistantId),
+      tasksApi.batches(requestedAssistantId),
+    ])
+      .then(([nextTemplates, nextTasks, nextBatches]) => {
+        if (cancelled || assistantIdRef.current !== requestedAssistantId) return;
+        setTemplates(nextTemplates);
+        setTasks(nextTasks);
+        setBatches(nextBatches);
+      })
+      .catch((err) => {
+        if (!cancelled && assistantIdRef.current === requestedAssistantId) setError(apiErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled && assistantIdRef.current === requestedAssistantId) setInitialLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [assistant.id]);
 
   useEffect(() => {
     const running = batches.filter((b) => b.status === "running");
     if (running.length === 0) return;
+    const requestedAssistantId = assistant.id;
+    let cancelled = false;
     const timer = setInterval(async () => {
       try {
-        const updated = await Promise.all(running.map((b) => tasksApi.batch(assistant.id, b.id)));
+        const updated = await Promise.all(running.map((b) => tasksApi.batch(requestedAssistantId, b.id)));
+        if (cancelled || assistantIdRef.current !== requestedAssistantId) return;
         setBatches((prev) => prev.map((b) => updated.find((u) => u.id === b.id) ?? b));
         if (updated.some((u) => u.status !== "running")) void reloadTasks();
       } catch {
         // сеть моргнула — попробуем на следующем тике
       }
     }, 2500);
-    return () => clearInterval(timer);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [batches, assistant.id]);
 
   const taskList = tasks ?? [];
@@ -186,7 +285,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Типовые задачи (блюпринты)</h2>
-          <Button variant="secondary" onClick={() => setTemplateModal({ open: true, template: null })}>
+          <Button variant="secondary" onClick={() => openTemplateModal(null)}>
             <Plus className="h-4 w-4" /> Новый блюпринт
           </Button>
         </div>
@@ -217,7 +316,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                       className="p-1 text-muted-foreground hover:text-foreground"
                       title="Редактировать"
                       aria-label={`Редактировать блюпринт «${template.name}»`}
-                      onClick={() => setTemplateModal({ open: true, template })}
+                      onClick={() => openTemplateModal(template)}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
@@ -229,7 +328,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                         if (!confirm(`Удалить блюпринт «${template.name}»?`)) return;
                         try {
                           await tasksApi.removeTemplate(assistant.id, template.id);
-                          setTemplates(await tasksApi.templates(assistant.id));
+                          await reloadTemplates();
                         } catch (err) {
                           setError(apiErrorMessage(err));
                         }
@@ -243,7 +342,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                   <Button
                     variant="accent"
                     className="w-full sm:w-auto"
-                    onClick={() => setBatchModal({ open: true, templateId: template.id })}
+                    onClick={() => openBatchModal(template.id)}
                   >
                     <Sparkles className="h-3.5 w-3.5" /> Сгенерировать партию
                   </Button>
@@ -257,7 +356,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Партии генерации</h2>
-          <Button variant="ghost" className="text-xs" onClick={() => setBatchModal({ open: true, templateId: "" })}>
+          <Button variant="ghost" className="text-xs" onClick={() => openBatchModal("")}>
             <Sparkles className="h-3.5 w-3.5" /> Генерация по теме, без блюпринта
           </Button>
         </div>
@@ -327,7 +426,31 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         )}
       </section>
 
-      {templateModal.open && (
+      {templateModal.open && sheets === null && (
+        <Modal
+          title={templateModal.template ? "Редактирование блюпринта" : "Новый блюпринт"}
+          open
+          onClose={() => setTemplateModal({ open: false, template: null })}
+          wide
+        >
+          {sheetsLoading ? (
+            <Spinner label="Загружаем справочники курса…" />
+          ) : (
+            <div className="space-y-4">
+              <ErrorNote message={sheetsError || "Не удалось загрузить справочники курса"} />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setTemplateModal({ open: false, template: null })}>
+                  Закрыть
+                </Button>
+                <Button onClick={() => void loadSheets()} loading={sheetsLoading}>
+                  <RefreshCw className="h-3.5 w-3.5" /> Повторить
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+      {templateModal.open && sheets !== null && (
         <TemplateModal
           assistant={assistant}
           sheets={sheets}
@@ -336,14 +459,33 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           onSaved={async () => {
             setTemplateModal({ open: false, template: null });
             try {
-              setTemplates(await tasksApi.templates(assistant.id));
+              await reloadTemplates();
             } catch (err) {
               setError(apiErrorMessage(err));
             }
           }}
         />
       )}
-      {batchModal.open && (
+      {batchModal.open && prompts === null && (
+        <Modal title="Партия генерации" open onClose={() => setBatchModal({ open: false, templateId: "" })}>
+          {promptsLoading ? (
+            <Spinner label="Загружаем версии промптов…" />
+          ) : (
+            <div className="space-y-4">
+              <ErrorNote message={promptsError || "Не удалось загрузить версии промптов"} />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setBatchModal({ open: false, templateId: "" })}>
+                  Закрыть
+                </Button>
+                <Button onClick={() => void loadPrompts()} loading={promptsLoading}>
+                  <RefreshCw className="h-3.5 w-3.5" /> Повторить
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+      {batchModal.open && prompts !== null && (
         <BatchLaunchModal
           assistant={assistant}
           providers={providers}
