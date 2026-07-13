@@ -124,3 +124,63 @@ def test_alternative_number_still_requires_reference_unit() -> None:
 
     assert result["verdict"] == "incomplete"
     assert result["missing_reference_units"] == ["см"]
+
+
+def test_equivalent_voltage_representations_are_one_required_group() -> None:
+    result = compare_answers(
+        "ζ = 0.020 V (20 mV)",
+        "ζ = 20 mV",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["reference_number_groups"] == [[0.02, 20.0]]
+    assert result["matched_count"] == result["required_count"] == 1
+    assert result["missing_reference_units"] == []
+
+
+@pytest.mark.parametrize(
+    ("reference", "solver"),
+    [
+        ("ζ = 0.020 V", "ζ = 20 mV"),
+        ("ζ = 20 mV", "ζ = 0.020 V"),
+        ("ζ = 0.020 V и 20 mV", "ζ = 20 mV"),
+    ],
+)
+def test_si_prefix_conversion_matches_single_representation(reference: str, solver: str) -> None:
+    result = compare_answers(reference, solver, tolerance_pct=0.5)
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 1
+
+
+def test_distinct_faraday_outputs_remain_three_required_quantities() -> None:
+    result = compare_answers(
+        "Q = 225 C; n = 2.25e-3 mol; m = 243 mg",
+        "Q = 225 C; n = 2.25e-3 mol; m = 243 mg",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["reference_number_groups"] == [[225.0], [0.00225], [243.0]]
+    assert result["required_count"] == 3
+
+
+def test_equal_normalized_values_of_different_quantities_are_not_grouped() -> None:
+    result = compare_answers(
+        "ζ = 0.020 V; отдельное напряжение Δφ = 20 mV",
+        "ζ = 0.020 V",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "incomplete"
+    assert result["reference_number_groups"] == [[0.02], [20.0]]
+    assert result["matched_count"] == 1
+    assert result["required_count"] == 2
+
+
+def test_voltage_is_not_equated_to_unknown_compound_unit() -> None:
+    result = compare_answers("ζ = 0.020 V", "градиент = 20 mV/cm", tolerance_pct=0.5)
+
+    assert result["verdict"] != "match"
+    assert result["missing_reference_units"] == ["в"]

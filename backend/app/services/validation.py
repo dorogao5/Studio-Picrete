@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 
 import snowballstemmer
 
@@ -38,8 +39,10 @@ _WORD_RE = re.compile(r"\w+")
 _UNIT_ALIASES = {
     "дм3": "л",
     "дм^3": "л",
+    "mv": "мв",
     "см3": "мл",
     "см^3": "мл",
+    "v": "в",
     "моль/дм3": "моль/л",
     "моль/дм^3": "моль/л",
 }
@@ -48,6 +51,8 @@ _KNOWN_UNITS = {
     "°c",
     "атм",
     "бар",
+    "mv",
+    "v",
     "в",
     "г",
     "г/л",
@@ -92,6 +97,10 @@ _KNOWN_UNITS = {
     "ч",
     "эв",
 }
+_UNIT_SIGNATURES = {
+    "в": ("voltage", 1.0),
+    "мв": ("voltage", 1e-3),
+}
 _UNIT_RE = re.compile(
     r"(?<![a-zа-яё])("
     + "|".join(re.escape(unit) for unit in sorted(_KNOWN_UNITS, key=len, reverse=True))
@@ -99,7 +108,17 @@ _UNIT_RE = re.compile(
     re.IGNORECASE,
 )
 _ALTERNATIVE_CONNECTOR_RE = re.compile(r"(?<!\w)(?:или|либо|or)(?!\w)", re.IGNORECASE)
+_EQUIVALENT_CONJUNCTION_RE = re.compile(r"(?<!\w)(?:и|and)(?!\w)", re.IGNORECASE)
 _ALTERNATIVE_PUNCTUATION_RE = re.compile(r"[\s()\[\]{}<>,.;:|/\\=~≈±+\-–—'\"]+")
+
+
+@dataclass(frozen=True)
+class _NumberOccurrence:
+    value: float
+    start: int
+    end: int
+    unit: str | None
+    unit_end: int | None
 
 
 def normalize_numeric_text(text: str) -> str:
@@ -134,9 +153,28 @@ def _number_tokens(text: str) -> list[str]:
     ]
 
 
-def _number_occurrences(text: str) -> tuple[str, list[tuple[float, int, int]]]:
+def _canonical_unit(value: str) -> str:
+    normalized = value.casefold()
+    return _UNIT_ALIASES.get(normalized, normalized)
+
+
+def _unit_after(normalized: str, number_end: int) -> tuple[str | None, int | None]:
+    whitespace = re.match(r"\s*", normalized[number_end:])
+    unit_start = number_end + (whitespace.end() if whitespace else 0)
+    match = _UNIT_RE.match(normalized, unit_start)
+    if match is None:
+        return None, None
+    # Do not treat the prefix of an unknown compound (for example mV/cm) as a
+    # standalone voltage. Known compounds are matched whole because _UNIT_RE is
+    # ordered longest-first; an immediate operator means the full unit is unknown.
+    if re.match(r"\s*[/·×*^]", normalized[match.end() :]):
+        return None, None
+    return _canonical_unit(match.group(1)), match.end()
+
+
+def _number_occurrences(text: str) -> tuple[str, list[_NumberOccurrence]]:
     normalized = normalize_numeric_text(text)
-    occurrences: list[tuple[float, int, int]] = []
+    occurrences: list[_NumberOccurrence] = []
     for match in _NUMBER_RE.finditer(normalized):
         if match.start() > 0 and normalized[match.start() - 1] == "^":
             continue
@@ -144,7 +182,16 @@ def _number_occurrences(text: str) -> tuple[str, list[tuple[float, int, int]]]:
             value = float(match.group(0))
         except ValueError:
             continue
-        occurrences.append((value, match.start(), match.end()))
+        unit, unit_end = _unit_after(normalized, match.end())
+        occurrences.append(
+            _NumberOccurrence(
+                value=value,
+                start=match.start(),
+                end=match.end(),
+                unit=unit,
+                unit_end=unit_end,
+            )
+        )
     return normalized, occurrences
 
 
@@ -160,19 +207,71 @@ def _is_direct_numeric_alternative(separator: str) -> bool:
     return not remainder
 
 
-def extract_number_groups(text: str) -> list[list[float]]:
-    """Extract required numeric outputs, grouping explicit ``x or y`` alternatives."""
+def _physical_value(occurrence: _NumberOccurrence) -> tuple[str, float] | None:
+    signature = _UNIT_SIGNATURES.get(occurrence.unit or "")
+    if signature is None:
+        return None
+    dimension, factor = signature
+    return dimension, occurrence.value * factor
 
+
+def _same_physical_value(left: _NumberOccurrence, right: _NumberOccurrence, rel: float = 1e-9) -> bool:
+    left_physical = _physical_value(left)
+    right_physical = _physical_value(right)
+    if left_physical is None or right_physical is None or left_physical[0] != right_physical[0]:
+        return False
+    return _close(left_physical[1], right_physical[1], rel)
+
+
+def _is_equivalent_unit_representation(
+    previous: _NumberOccurrence,
+    current: _NumberOccurrence,
+    separator: str,
+    normalized: str,
+) -> bool:
+    """Recognize compact forms such as ``0.020 V (20 mV)`` or ``0.020 V = 20 mV``."""
+
+    if not _same_physical_value(previous, current):
+        return False
+    has_parenthesis = "(" in separator or "[" in separator
+    has_equality = any(marker in separator for marker in ("=", "≈", "~"))
+    has_conjunction = _EQUIVALENT_CONJUNCTION_RE.search(separator) is not None
+    if not has_parenthesis and not has_equality and not has_conjunction:
+        return False
+    remainder = _UNIT_RE.sub(" ", separator, count=1)
+    remainder = _EQUIVALENT_CONJUNCTION_RE.sub(" ", remainder)
+    remainder = _ALTERNATIVE_PUNCTUATION_RE.sub("", remainder)
+    if remainder:
+        return False
+    if has_parenthesis:
+        if current.unit_end is None or re.match(r"\s*[)\]]", normalized[current.unit_end :]) is None:
+            return False
+    return True
+
+
+def _number_occurrence_groups(text: str) -> tuple[str, list[list[_NumberOccurrence]]]:
     normalized, occurrences = _number_occurrences(text)
-    groups: list[list[float]] = []
-    previous_end: int | None = None
-    for value, start, end in occurrences:
-        if previous_end is not None and _is_direct_numeric_alternative(normalized[previous_end:start]):
-            groups[-1].append(value)
+    groups: list[list[_NumberOccurrence]] = []
+    previous: _NumberOccurrence | None = None
+    for occurrence in occurrences:
+        separator = normalized[previous.end : occurrence.start] if previous is not None else ""
+        same_group = previous is not None and (
+            _is_direct_numeric_alternative(separator)
+            or _is_equivalent_unit_representation(previous, occurrence, separator, normalized)
+        )
+        if same_group:
+            groups[-1].append(occurrence)
         else:
-            groups.append([value])
-        previous_end = end
-    return groups
+            groups.append([occurrence])
+        previous = occurrence
+    return normalized, groups
+
+
+def extract_number_groups(text: str) -> list[list[float]]:
+    """Extract required outputs, grouping explicit alternatives and equivalent unit forms."""
+
+    _, groups = _number_occurrence_groups(text)
+    return [[occurrence.value for occurrence in group] for group in groups]
 
 
 def extract_numbers(text: str) -> list[float]:
@@ -190,7 +289,7 @@ def extract_units(text: str) -> set[str]:
     normalized = re.sub(r"\^\s*\{?\s*([+-]?\d+)\s*\}?", r"^\1", normalized)
     normalized = re.sub(r"\s*/\s*", "/", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
-    units = {_UNIT_ALIASES.get(match.group(1), match.group(1)) for match in _UNIT_RE.finditer(normalized)}
+    units = {_canonical_unit(match.group(1)) for match in _UNIT_RE.finditer(normalized)}
     return units
 
 
@@ -202,13 +301,44 @@ def _drop_context_numbers(values: list[float], context_values: list[float]) -> l
     return [v for v in values if not any(_close(v, c, 1e-6) for c in context_values)]
 
 
-def _drop_context_groups(groups: list[list[float]], context_values: list[float]) -> list[list[float]]:
-    filtered: list[list[float]] = []
+def _drop_context_occurrences(
+    occurrences: list[_NumberOccurrence], context_values: list[float]
+) -> list[_NumberOccurrence]:
+    return [
+        occurrence
+        for occurrence in occurrences
+        if not any(_close(occurrence.value, context, 1e-6) for context in context_values)
+    ]
+
+
+def _drop_context_groups(
+    groups: list[list[_NumberOccurrence]], context_values: list[float]
+) -> list[list[_NumberOccurrence]]:
+    filtered: list[list[_NumberOccurrence]] = []
     for group in groups:
-        remaining = _drop_context_numbers(group, context_values)
+        remaining = _drop_context_occurrences(group, context_values)
         if remaining:
             filtered.append(remaining)
     return filtered
+
+
+def _occurrences_match(reference: _NumberOccurrence, solver: _NumberOccurrence, rel: float) -> bool:
+    # Preserve the legacy numeric match so a same number with a wrong prefix is diagnosed
+    # as a missing unit, then additionally accept physically equal SI-prefixed values.
+    return _close(reference.value, solver.value, rel) or _same_physical_value(reference, solver, rel)
+
+
+def _unit_has_equivalent_value(
+    unit: str,
+    references: list[_NumberOccurrence],
+    solvers: list[_NumberOccurrence],
+    rel: float,
+) -> bool:
+    return any(
+        reference.unit == unit and _same_physical_value(reference, solver, rel)
+        for reference in references
+        for solver in solvers
+    )
 
 
 def compare_answers(reference: str, solver: str, tolerance_pct: float, context: str = "") -> dict:
@@ -217,52 +347,61 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
     result: dict = {"verdict": "uncertain", "reference": ref_text, "solver": solver_text}
     if not ref_text or not solver_text:
         return result
-    ref_groups = extract_number_groups(ref_text)
-    ref_numbers = [value for group in ref_groups for value in group]
-    solver_numbers = extract_numbers(solver_text)
+    _, ref_occurrence_groups = _number_occurrence_groups(ref_text)
+    _, solver_occurrences = _number_occurrences(solver_text)
+    ref_numbers = [occurrence.value for group in ref_occurrence_groups for occurrence in group]
+    solver_numbers = [occurrence.value for occurrence in solver_occurrences]
     if ref_numbers and solver_numbers:
         rel = tolerance_pct / 100
         # Числа из условия (T=298, табличные значения) — контекст, а не ответ: убираем их с обеих сторон.
         context_values = extract_numbers(context)
-        ref_grouped = _drop_context_groups(ref_groups, context_values)
-        solver_filtered = _drop_context_numbers(solver_numbers, context_values)
+        ref_grouped = _drop_context_groups(ref_occurrence_groups, context_values)
+        solver_filtered = _drop_context_occurrences(solver_occurrences, context_values)
         if not ref_grouped or not solver_filtered:
-            ref_grouped, solver_filtered = ref_groups, solver_numbers
-        ref_filtered = [value for group in ref_grouped for value in group]
+            ref_grouped, solver_filtered = ref_occurrence_groups, solver_occurrences
+        ref_filtered = [occurrence.value for group in ref_grouped for occurrence in group]
+        solver_filtered_values = [occurrence.value for occurrence in solver_filtered]
         unmatched_solver = set(range(len(solver_filtered)))
-        matched: list[tuple[float, float]] = []
-        missing_groups: list[list[float]] = []
+        matched: list[tuple[_NumberOccurrence, _NumberOccurrence]] = []
+        missing_occurrence_groups: list[list[_NumberOccurrence]] = []
         for reference_group in ref_grouped:
-            match: tuple[int, float] | None = next(
+            match: tuple[int, _NumberOccurrence] | None = next(
                 (
-                    (index, reference_value)
-                    for reference_value in reference_group
+                    (index, reference_occurrence)
+                    for reference_occurrence in reference_group
                     for index in unmatched_solver
-                    if _close(reference_value, solver_filtered[index], rel)
+                    if _occurrences_match(reference_occurrence, solver_filtered[index], rel)
                 ),
                 None,
             )
             if match is None:
-                missing_groups.append(reference_group)
+                missing_occurrence_groups.append(reference_group)
                 continue
             match_index, matched_reference = match
             unmatched_solver.remove(match_index)
             matched.append((matched_reference, solver_filtered[match_index]))
+        reference_groups = [[occurrence.value for occurrence in group] for group in ref_grouped]
+        missing_groups = [[occurrence.value for occurrence in group] for group in missing_occurrence_groups]
         missing: list[float | list[float]] = [group[0] if len(group) == 1 else group for group in missing_groups]
         result.update(
             reference_number=ref_filtered[-1],
-            solver_number=solver_filtered[-1],
+            solver_number=solver_filtered_values[-1],
             reference_numbers=ref_filtered,
-            reference_number_groups=ref_grouped,
-            solver_numbers=solver_filtered,
+            reference_number_groups=reference_groups,
+            solver_numbers=solver_filtered_values,
             matched_count=len(matched),
-            required_count=len(ref_grouped),
+            required_count=len(reference_groups),
             missing_reference_numbers=missing,
             missing_reference_groups=missing_groups,
         )
         reference_units = extract_units(ref_text)
         solver_units = extract_units(solver_text)
-        missing_units = sorted(reference_units - solver_units)
+        reference_occurrences = [occurrence for group in ref_grouped for occurrence in group]
+        missing_units = sorted(
+            unit
+            for unit in reference_units - solver_units
+            if not _unit_has_equivalent_value(unit, reference_occurrences, solver_filtered, rel)
+        )
         result.update(
             reference_units=sorted(reference_units),
             solver_units=sorted(solver_units),
