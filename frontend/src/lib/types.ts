@@ -130,6 +130,12 @@ export interface ExampleTask {
   answer: string;
 }
 
+export interface RubricCriterion {
+  criterion_name: string;
+  max_score: number;
+  description: string;
+}
+
 export interface TaskTemplate {
   id: string;
   assistant_id: string;
@@ -141,6 +147,7 @@ export interface TaskTemplate {
   task_kind: TaskKind;
   answer_format: AnswerFormat;
   numeric_tolerance_pct: number;
+  rubric: RubricCriterion[];
   reference_sheet_ids: string[];
   example_tasks: ExampleTask[];
   kb_query: string;
@@ -184,7 +191,7 @@ export interface GeneratedTask {
   statement: string;
   reference_solution: string;
   answer: string;
-  rubric: Array<{ criterion_name: string; max_score: number; description?: string }>;
+  rubric: RubricCriterion[];
   max_score: number;
   difficulty: string;
   topic: string;

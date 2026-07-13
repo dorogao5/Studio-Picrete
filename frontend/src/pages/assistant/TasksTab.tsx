@@ -25,12 +25,14 @@ import type {
   PromptVersion,
   Provider,
   ReferenceSheet,
+  RubricCriterion,
   TaskKind,
   TaskTemplate,
   TaskValidation,
 } from "../../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
 import MathText from "../../components/MathText";
+import { RubricEditor, rubricValidationError } from "../../components/RubricEditor";
 import { modelOptions } from "./PromptsTab";
 
 type Tone = "default" | "success" | "warning" | "destructive" | "info" | "accent";
@@ -1060,6 +1062,7 @@ function TemplateModal({
   const [difficulty, setDifficulty] = useState(template?.difficulty ?? "medium");
   const [answerFormat, setAnswerFormat] = useState<AnswerFormat>(template?.answer_format ?? "numeric");
   const [tolerance, setTolerance] = useState(template?.numeric_tolerance_pct ?? 2);
+  const [rubric, setRubric] = useState<RubricCriterion[]>(template?.rubric ?? []);
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [kbQuery, setKbQuery] = useState(template?.kb_query ?? "");
   const [sheetIds, setSheetIds] = useState<string[]>(template?.reference_sheet_ids ?? []);
@@ -1068,6 +1071,7 @@ function TemplateModal({
   const [validationDataCheck, setValidationDataCheck] = useState(template?.validation_data_check ?? true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const rubricError = rubricValidationError(rubric);
 
   const toggleSheet = (id: string) =>
     setSheetIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
@@ -1087,6 +1091,7 @@ function TemplateModal({
         task_kind: taskKind,
         answer_format: answerFormat,
         numeric_tolerance_pct: tolerance,
+        rubric,
         reference_sheet_ids: sheetIds,
         example_tasks: examples,
         kb_query: kbQuery,
@@ -1159,6 +1164,7 @@ function TemplateModal({
             />
           </Field>
         )}
+        <RubricEditor value={rubric} onChange={setRubric} disabled={loading} />
         <Field
           label="Инструкции генерации"
           hint="Что варьировать, какие данные давать, чего избегать — это и есть «типовое задание»"
@@ -1257,7 +1263,7 @@ function TemplateModal({
           <Button variant="ghost" onClick={onClose}>
             Отмена
           </Button>
-          <Button onClick={submit} loading={loading} disabled={!name.trim()}>
+          <Button onClick={submit} loading={loading} disabled={!name.trim() || Boolean(rubricError)}>
             {template ? "Сохранить" : "Создать блюпринт"}
           </Button>
         </div>

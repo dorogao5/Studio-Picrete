@@ -166,6 +166,7 @@ async def generate(
             answer_format=merged["answer_format"],
             instructions=merged["instructions"],
             grounding=grounding_text,
+            rubric=merged["rubric"],
             example_tasks=merged["example_tasks"],
             existing_statements=list(existing),
             temperature=body.temperature,
@@ -185,6 +186,7 @@ async def generate(
             difficulty=merged["difficulty"],
             model_used=f"{provider.name}/{model.model_id}",
             grounding_meta=grounding_meta,
+            template_rubric=merged["rubric"],
         )
         if task is not None:
             db.add(task)

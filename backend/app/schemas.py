@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from app.services.task_approval import has_complete_approval, validation_is_current_decision
 
@@ -216,6 +216,31 @@ class ExampleTask(BaseModel):
     answer: str = ""
 
 
+class TemplateRubricCriterion(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    criterion_name: str = Field(min_length=1, max_length=200)
+    max_score: float = Field(gt=0, le=10)
+    description: str = Field(default="", max_length=1000)
+
+    @field_validator("criterion_name", "description", mode="before")
+    @classmethod
+    def strip_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+def _validate_template_rubric(value: list[TemplateRubricCriterion]) -> list[TemplateRubricCriterion]:
+    if not value:
+        return value
+    names = [criterion.criterion_name.casefold() for criterion in value]
+    if len(names) != len(set(names)):
+        raise ValueError("Названия критериев рубрики не должны повторяться")
+    total = sum(criterion.max_score for criterion in value)
+    if abs(total - 10.0) > 1e-6:
+        raise ValueError(f"Сумма баллов рубрики должна быть ровно 10, сейчас {total:g}")
+    return value
+
+
 class TaskTemplateOut(ORMModel):
     id: str
     assistant_id: str
@@ -227,6 +252,7 @@ class TaskTemplateOut(ORMModel):
     task_kind: str
     answer_format: str
     numeric_tolerance_pct: float
+    rubric: list[TemplateRubricCriterion]
     reference_sheet_ids: list
     example_tasks: list
     kb_query: str
@@ -243,11 +269,17 @@ class TaskTemplateCreate(BaseModel):
     task_kind: str = Field(default="calculation", pattern="^(calculation|conceptual|test_tf|test_mc|derivation)$")
     answer_format: str = Field(default="numeric", pattern="^(numeric|formula|text|choice)$")
     numeric_tolerance_pct: float = Field(default=2.0, ge=0, le=50)
+    rubric: list[TemplateRubricCriterion] = Field(default_factory=list, max_length=12)
     reference_sheet_ids: list[str] = []
     example_tasks: list[ExampleTask] = []
     kb_query: str = ""
     validation_solver: bool = True
     validation_data_check: bool = True
+
+    @field_validator("rubric")
+    @classmethod
+    def validate_rubric(cls, value: list[TemplateRubricCriterion]) -> list[TemplateRubricCriterion]:
+        return _validate_template_rubric(value)
 
 
 class TaskTemplateUpdate(BaseModel):
@@ -259,11 +291,19 @@ class TaskTemplateUpdate(BaseModel):
     task_kind: str | None = Field(default=None, pattern="^(calculation|conceptual|test_tf|test_mc|derivation)$")
     answer_format: str | None = Field(default=None, pattern="^(numeric|formula|text|choice)$")
     numeric_tolerance_pct: float | None = Field(default=None, ge=0, le=50)
+    rubric: list[TemplateRubricCriterion] | None = Field(default=None, max_length=12)
     reference_sheet_ids: list[str] | None = None
     example_tasks: list[ExampleTask] | None = None
     kb_query: str | None = None
     validation_solver: bool | None = None
     validation_data_check: bool | None = None
+
+    @field_validator("rubric")
+    @classmethod
+    def validate_rubric(
+        cls, value: list[TemplateRubricCriterion] | None
+    ) -> list[TemplateRubricCriterion] | None:
+        return None if value is None else _validate_template_rubric(value)
 
 
 class GeneratedTaskOut(ORMModel):

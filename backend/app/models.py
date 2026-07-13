@@ -125,6 +125,7 @@ class TaskTemplate(Base):
     task_kind: Mapped[str] = mapped_column(String(16), default="calculation")
     answer_format: Mapped[str] = mapped_column(String(16), default="numeric")
     numeric_tolerance_pct: Mapped[float] = mapped_column(Float, default=2.0)
+    rubric: Mapped[list] = mapped_column(JSON, default=list)
     reference_sheet_ids: Mapped[list] = mapped_column(JSON, default=list)
     example_tasks: Mapped[list] = mapped_column(JSON, default=list)
     kb_query: Mapped[str] = mapped_column(String(512), default="")

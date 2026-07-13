@@ -69,6 +69,7 @@ def _build_generation_message(template: TaskTemplate | None, grounding: str, exi
         answer_format=merged["answer_format"],
         instructions=merged["instructions"],
         grounding=grounding,
+        rubric=merged["rubric"],
         example_tasks=merged["example_tasks"],
         existing_statements=existing_statements,
     )

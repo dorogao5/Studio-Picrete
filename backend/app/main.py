@@ -86,6 +86,7 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
         "task_kind": "VARCHAR(16) DEFAULT 'calculation'",
         "answer_format": "VARCHAR(16) DEFAULT 'numeric'",
         "numeric_tolerance_pct": "FLOAT DEFAULT 2.0",
+        "rubric": "JSON NOT NULL DEFAULT '[]'",
         "reference_sheet_ids": "JSON DEFAULT '[]'",
         "example_tasks": "JSON DEFAULT '[]'",
         "kb_query": "VARCHAR(512) DEFAULT ''",
@@ -126,6 +127,9 @@ async def ensure_sqlite_columns(conn) -> None:
 
 
 async def ensure_postgres_columns(conn) -> None:
+    await conn.exec_driver_sql(
+        "ALTER TABLE task_templates ADD COLUMN IF NOT EXISTS rubric JSONB NOT NULL DEFAULT '[]'::jsonb"
+    )
     await conn.exec_driver_sql(
         "ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_version VARCHAR(64) DEFAULT ''"
     )

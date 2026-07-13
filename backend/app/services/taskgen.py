@@ -1,3 +1,4 @@
+import json
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import or_, select
@@ -86,6 +87,7 @@ def build_generation_user_message(
     answer_format: str = "numeric",
     instructions: str = "",
     grounding: str = "",
+    rubric: list[dict] | None = None,
     example_tasks: list[dict] | None = None,
     existing_statements: list[str] | None = None,
 ) -> str:
@@ -100,6 +102,14 @@ def build_generation_user_message(
     ]
     if grounding:
         sections.append(grounding)
+    if rubric:
+        sections.append(
+            "Рубрика преподавателя (обязательный контракт):\n"
+            f"{json.dumps(rubric, ensure_ascii=False, indent=2)}\n"
+            "Для каждой задачи верните rubric с ТОЧНО теми же criterion_name, max_score и description, "
+            "в том же порядке. Не добавляйте, не удаляйте, не переименовывайте и не перераспределяйте критерии. "
+            "Поле max_score задачи должно быть равно 10."
+        )
     sections.append(f"Инструкции преподавателя:\n{instructions or '(нет)'}")
     sections.append(f"Примеры задач в нужном стиле:\n{examples or '(нет)'}")
     sections.append(f"Уже существующие задачи (НЕ повторяйте их сюжеты и числа):\n{existing or '(нет)'}")
@@ -128,6 +138,7 @@ async def generate_tasks(
     answer_format: str = "numeric",
     instructions: str = "",
     grounding: str = "",
+    rubric: list[dict] | None = None,
     example_tasks: list[dict] | None = None,
     existing_statements: list[str] | None = None,
     temperature: float = 0.7,
@@ -144,6 +155,7 @@ async def generate_tasks(
         answer_format=answer_format,
         instructions=instructions,
         grounding=grounding,
+        rubric=rubric,
         example_tasks=example_tasks,
         existing_statements=existing_statements,
     )
@@ -184,6 +196,7 @@ def merge_template_params(template: TaskTemplate | None, *, topic: str, difficul
             "example_tasks": [],
             "validation_solver": True,
             "validation_data_check": True,
+            "rubric": [],
         }
     example_tasks = list(template.example_tasks or [])
     if not example_tasks and template.example:
@@ -200,6 +213,7 @@ def merge_template_params(template: TaskTemplate | None, *, topic: str, difficul
         "example_tasks": example_tasks,
         "validation_solver": template.validation_solver,
         "validation_data_check": template.validation_data_check,
+        "rubric": list(getattr(template, "rubric", None) or []),
     }
 
 
@@ -281,6 +295,7 @@ def task_from_item(
     difficulty: str,
     model_used: str,
     grounding_meta: dict,
+    template_rubric: list[dict] | None = None,
 ) -> GeneratedTask | None:
     if not isinstance(item, dict) or not item.get("statement"):
         return None
@@ -289,6 +304,16 @@ def task_from_item(
     except (TypeError, ValueError):
         max_score = 10.0
     rubric = item.get("rubric")
+    if template_rubric:
+        rubric = [
+            {
+                "criterion_name": criterion["criterion_name"],
+                "max_score": criterion["max_score"],
+                "description": criterion.get("description", ""),
+            }
+            for criterion in template_rubric
+        ]
+        max_score = 10.0
     data_used = item.get("data_used")
     return GeneratedTask(
         assistant_id=assistant_id,
@@ -359,6 +384,7 @@ async def _generate_batch_items(
                 answer_format=merged["answer_format"],
                 instructions=merged["instructions"],
                 grounding=grounding_text,
+                rubric=merged.get("rubric", []),
                 example_tasks=merged["example_tasks"],
                 existing_statements=seen_statements,
                 temperature=float(params.get("temperature") or 0.7),
@@ -539,6 +565,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             difficulty=merged["difficulty"],
             model_used=f"{provider.name}/{model.model_id}",
             grounding_meta=grounding_meta,
+            template_rubric=merged.get("rubric", []),
         )
         if task is not None:
             db.add(task)
