@@ -32,6 +32,7 @@ import MathText from "../../components/MathText";
 import { modelOptions } from "./PromptsTab";
 
 type Tone = "default" | "success" | "warning" | "destructive" | "info" | "accent";
+type TasksSection = "templates" | "batches" | "bank";
 
 const KIND_LABELS: Record<TaskKind, string> = {
   calculation: "Расчётная задача",
@@ -103,6 +104,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [promptsError, setPromptsError] = useState("");
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<"all" | GeneratedTaskStatus>("all");
+  const [section, setSection] = useState<TasksSection | null>(null);
   const [templateModal, setTemplateModal] = useState<{ open: boolean; template: TaskTemplate | null }>({
     open: false,
     template: null,
@@ -206,6 +208,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     setSheetsError("");
     setPromptsError("");
     setError("");
+    setSection(null);
     setTemplateModal({ open: false, template: null });
     setBatchModal({ open: false, templateId: "" });
     setExportOpen(false);
@@ -220,6 +223,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         setTemplates(nextTemplates);
         setTasks(nextTasks);
         setBatches(nextBatches);
+        setSection(nextTasks.length > 0 ? "bank" : "templates");
       })
       .catch((err) => {
         if (!cancelled && assistantIdRef.current === requestedAssistantId) setError(apiErrorMessage(err));
@@ -260,6 +264,12 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const approvedCount = approvedTasks.filter(hasCurrentApproval).length;
   const legacyApprovalCount = approvedTasks.length - approvedCount;
   const filtered = filter === "all" ? taskList : taskList.filter((t) => t.status === filter);
+  const activeSection = section ?? (taskList.length > 0 ? "bank" : "templates");
+  const sections: Array<{ key: TasksSection; label: string; count: number }> = [
+    { key: "templates", label: "Блюпринты", count: templates.length },
+    { key: "batches", label: "Партии", count: batches.length },
+    { key: "bank", label: "Банк задач", count: taskList.length },
+  ];
 
   const approveAllValidated = async () => {
     const validated = taskList.filter((t) => t.status === "validated" && t.validation_ready);
@@ -282,7 +292,30 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     <div className="space-y-6">
       <ErrorNote message={error} />
 
-      <section className="space-y-2">
+      <nav
+        aria-label="Разделы заданий"
+        className="grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-muted/40 p-1"
+      >
+        {sections.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={activeSection === item.key}
+            onClick={() => setSection(item.key)}
+            className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-medium transition-colors sm:text-sm ${
+              activeSection === item.key
+                ? "bg-card text-foreground shadow-soft"
+                : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
+            }`}
+          >
+            <span className="truncate">{item.label}</span>
+            <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">{item.count}</span>
+          </button>
+        ))}
+      </nav>
+
+      {activeSection === "templates" && (
+        <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Типовые задачи (блюпринты)</h2>
           <Button variant="secondary" onClick={() => openTemplateModal(null)}>
@@ -351,9 +384,11 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             ))}
           </div>
         )}
-      </section>
+        </section>
+      )}
 
-      <section className="space-y-2">
+      {activeSection === "batches" && (
+        <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Партии генерации</h2>
           <Button variant="ghost" className="text-xs" onClick={() => openBatchModal("")}>
@@ -372,9 +407,11 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             ))}
           </div>
         )}
-      </section>
+        </section>
+      )}
 
-      <section className="space-y-2">
+      {activeSection === "bank" && (
+        <section className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="text-sm font-semibold">Банк задач</h2>
           <div className="flex items-center gap-2">
@@ -424,7 +461,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             ))}
           </div>
         )}
-      </section>
+        </section>
+      )}
 
       {templateModal.open && sheets === null && (
         <Modal
@@ -458,6 +496,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           onClose={() => setTemplateModal({ open: false, template: null })}
           onSaved={async () => {
             setTemplateModal({ open: false, template: null });
+            setSection("templates");
             try {
               await reloadTemplates();
             } catch (err) {
@@ -496,6 +535,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           onLaunched={(batch) => {
             setBatchModal({ open: false, templateId: "" });
             setBatches((prev) => [batch, ...prev]);
+            setSection("batches");
           }}
         />
       )}
