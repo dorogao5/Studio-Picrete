@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import tasks as tasks_api
-from app.schemas import GeneratedTaskUpdate, TaskExportRequest
+from app.schemas import GeneratedTaskUpdate, RevalidateRequest, TaskExportRequest
 from app.services.model_policy import current_model_use_policy
 from app.services.validation import VALIDATION_POLICY_VERSION
 
@@ -18,9 +18,16 @@ class FakeDb:
     async def execute(self, _statement):
         values = self.tasks
 
+        class ScalarValues:
+            def __iter__(self):
+                return iter(values)
+
+            def all(self):
+                return values
+
         class Result:
             def scalars(self):
-                return values
+                return ScalarValues()
 
         return Result()
 
@@ -43,7 +50,9 @@ def generated_task(*, status="needs_review", validation=None, approved=False):
         rubric=[{"criterion_name": "Решение", "max_score": 5}],
         max_score=5,
         topic="Стехиометрия",
+        difficulty="medium",
         template_id=None,
+        grounding={},
     )
 
 
@@ -126,6 +135,57 @@ def test_editing_content_invalidates_previous_approval(monkeypatch) -> None:
     assert result.status == "draft"
     assert result.approved is False
     assert result.validation == {}
+
+
+def test_revalidation_atomically_clears_previous_approval(monkeypatch) -> None:
+    previous_approval = complete_approval()["approval"]
+    task = generated_task(
+        status="approved",
+        validation={"verdict": "validated", "approval": previous_approval},
+        approved=True,
+    )
+
+    async def fake_assistant(*_args):
+        return SimpleNamespace(default_grader_model_id="solver-1", default_generator_model_id=None)
+
+    async def fake_task(*_args):
+        return task
+
+    async def fake_model(*_args):
+        return SimpleNamespace(name="DeepSeek"), SimpleNamespace(model_id="deepseek-v4-pro")
+
+    async def fake_sheets(*_args, **_kwargs):
+        return []
+
+    async def fake_grounding(*_args, **_kwargs):
+        return ""
+
+    async def fake_validation(**_kwargs):
+        return {
+            "verdict": "needs_review",
+            "reasons": ["Новый результат проверки"],
+            "approval": previous_approval,
+        }
+
+    monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    monkeypatch.setattr(tasks_api, "_get_task_or_404", fake_task)
+    monkeypatch.setattr(tasks_api, "resolve_model", fake_model)
+    monkeypatch.setattr(tasks_api, "load_reference_sheets", fake_sheets)
+    monkeypatch.setattr(tasks_api, "build_generation_grounding", fake_grounding)
+    monkeypatch.setattr(tasks_api, "run_validation", fake_validation)
+    db = FakeDb()
+
+    result = asyncio.run(
+        tasks_api.revalidate_task("assistant", task.id, RevalidateRequest(), db)
+    )
+
+    assert result.status == "needs_review"
+    assert result.approved is False
+    assert result.validation == {
+        "verdict": "needs_review",
+        "reasons": ["Новый результат проверки"],
+    }
+    assert db.commits == 1
 
 
 def test_explicit_export_rejects_unapproved_tasks(monkeypatch) -> None:

@@ -337,8 +337,11 @@ async def revalidate_task(
         run_solver=merged["validation_solver"],
         run_data=merged["validation_data_check"],
     )
+    validation = dict(validation)
+    validation.pop("approval", None)
     task.validation = validation
     task.status = validation["verdict"]
+    task.approved = False
     await db.commit()
     await db.refresh(task)
     return task

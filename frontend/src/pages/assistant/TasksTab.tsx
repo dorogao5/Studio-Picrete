@@ -15,6 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { apiErrorMessage, promptsApi, sheetsApi, tasksApi } from "../../lib/api";
+import { exportReadyTaskIds } from "../../lib/taskExport";
 import type {
   AnswerFormat,
   Assistant,
@@ -271,8 +272,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const taskList = tasks ?? [];
   const validatedCount = taskList.filter((t) => t.status === "validated" && t.validation_ready).length;
   const approvedTasks = taskList.filter((t) => t.status === "approved");
-  const approvedCount = approvedTasks.filter(hasCurrentApproval).length;
-  const legacyApprovalCount = approvedTasks.length - approvedCount;
+  const exportTaskIds = exportReadyTaskIds(taskList);
+  const legacyApprovalCount = approvedTasks.filter((task) => !hasCurrentApproval(task)).length;
+  const excludedExportCount = taskList.length - exportTaskIds.length;
   const statusFiltered = filter === "all" ? taskList : taskList.filter((t) => t.status === filter);
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase("ru-RU");
   const filtered = normalizedQuery
@@ -625,7 +627,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
       {exportOpen && (
         <ExportModal
           assistant={assistant}
-          approvedCount={approvedCount}
+          taskIds={exportTaskIds}
+          excludedCount={excludedExportCount}
           legacyApprovalCount={legacyApprovalCount}
           onClose={() => setExportOpen(false)}
         />
@@ -1454,12 +1457,14 @@ function BatchLaunchModal({
 
 function ExportModal({
   assistant,
-  approvedCount,
+  taskIds,
+  excludedCount,
   legacyApprovalCount,
   onClose,
 }: {
   assistant: Assistant;
-  approvedCount: number;
+  taskIds: string[];
+  excludedCount: number;
   legacyApprovalCount: number;
   onClose: () => void;
 }) {
@@ -1475,7 +1480,7 @@ function ExportModal({
     setError("");
     try {
       const data = await tasksApi.exportTasks(assistant.id, {
-        task_ids: [],
+        task_ids: taskIds,
         mode,
         source_code: sourceCode,
         source_title: sourceTitle,
@@ -1534,13 +1539,20 @@ function ExportModal({
           <Input value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} />
         </Field>
         <p className="text-xs text-muted-foreground">
-          Готовы к экспорту: {approvedCount} шт.
-          {approvedCount === 0 && legacyApprovalCount === 0 ? " Сначала одобрите задачи в банке." : ""}
+          В файл войдут задачи с актуальным одобрением: {taskIds.length} шт.
         </p>
-        {legacyApprovalCount > 0 && (
+        {excludedCount > 0 && (
           <p className="rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-foreground">
-            Экспорт приостановлен: у {legacyApprovalCount} ранее одобренных задач нет записи о проверке. Откройте фильтр
-            «Одобрены» и зафиксируйте одобрение после ручной сверки.
+            Исключены из файла: {excludedCount} шт.
+            {legacyApprovalCount > 0
+              ? ` Из них ${legacyApprovalCount} — старые одобрения без записи о проверке.`
+              : ""}{" "}
+            Черновики и задачи без актуального одобрения в экспорт не попадут.
+          </p>
+        )}
+        {taskIds.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Сначала проверьте и одобрите хотя бы одну задачу в банке.
           </p>
         )}
         <ErrorNote message={error} />
@@ -1548,7 +1560,7 @@ function ExportModal({
           <Button variant="ghost" onClick={onClose}>
             Отмена
           </Button>
-          <Button onClick={submit} loading={loading} disabled={approvedCount === 0 || legacyApprovalCount > 0}>
+          <Button onClick={submit} loading={loading} disabled={taskIds.length === 0}>
             <Download className="h-4 w-4" /> Скачать JSON
           </Button>
         </div>
