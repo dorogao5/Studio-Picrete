@@ -1,0 +1,255 @@
+{
+  "schema_version": "picrete-content-manifest-v1",
+  "content_version": "COLLOID-CURATED-2026-07",
+  "assistant_scope": "colloid-chemistry-launch",
+  "course_scope": "",
+  "binding_status": "pending_course_binding",
+  "source": {
+    "title": "Коллоидная химия · курс лекций",
+    "file": "/Users/doroga/Documents/projects/picrete/Коллоидная химия/Lektsia_full.pdf",
+    "sha256": "6a3f3178f650a9afca38f3980b3962d45186eb839ce1d338beaf3f572b312b59",
+    "pdf_pages_used": "32–34, 66–67, 77–78, 87–94",
+    "authority": "course_lecture",
+    "visibility": "student",
+    "quality_notes": [
+      "Text extraction reorders fractions and damages Greek symbols; rendered PDF is authoritative for formulas.",
+      "Page numbering inside lecture sections restarts; provenance uses absolute PDF page numbers.",
+      "Only theoretical and calculation-safe fragments are included in the curated document."
+    ]
+  },
+  "exclusions": [
+    {
+      "file": "/Users/doroga/Documents/projects/picrete/Коллоидная химия/Тест.pdf",
+      "sha256": "6657dba1bb736e195f8bb0143fb5a9ed40a6d3c432cb6692085b305ab213f6e8",
+      "disposition": "quarantine",
+      "reason": "Unverified answer highlighting and duplicate option labels; no answer may enter grounding or a task reference until manual normalization and key approval."
+    },
+    {
+      "source_file": "/Users/doroga/Documents/projects/picrete/Коллоидная химия/Lektsia_full.pdf",
+      "pdf_pages": "all formulas outside the explicitly used ranges",
+      "disposition": "not_in_this_package",
+      "reason": "The package is intentionally limited to BET, electrokinetics/zeta and DLVO."
+    },
+    {
+      "source_file": "/Users/doroga/Documents/projects/picrete/Коллоидная химия/Lektsia_full.pdf",
+      "pdf_pages": "66–67 and 77–78",
+      "disposition": "concept_and_verified_formula_only",
+      "reason": "Do not convert the lecture into instrument settings or an experimental procedure."
+    }
+  ],
+  "manual_verification": {
+    "checked_on": "2026-07-13",
+    "rendered_pdf_pages": [
+      "Lektsia_full.pdf:33",
+      "Lektsia_full.pdf:34",
+      "Lektsia_full.pdf:67",
+      "Lektsia_full.pdf:87–88",
+      "Lektsia_full.pdf:91–92"
+    ],
+    "publish_gates": [
+      "SHA-256 matches the manifest.",
+      "BET and electrokinetic formulas are checked against rendered pages, not copied text.",
+      "Every task states units and model applicability.",
+      "No laboratory procedure, emergency instruction or test answer enters the curated layer.",
+      "A teacher approves the final card and binds the assistant to the actual course before publication."
+    ]
+  },
+  "document_upload": {
+    "file": "grounding.md",
+    "title": "Коллоидная химия · БЭТ, электрокинетика и ДЛФО",
+    "doc_type": "methodical",
+    "authority": "course_lecture",
+    "visibility": "student",
+    "course_scope": "",
+    "effective_version": "COLLOID-CURATED-2026-07",
+    "analyze": false
+  },
+  "reference_sheet_proposals": [
+    {
+      "slug": "col-00-verification",
+      "title": "COL-00 · Проверка формул и обозначений",
+      "kind": "conventions",
+      "description": "Manual-verification gate, единицы и словарь обозначений для curated-задач.",
+      "content_anchor": "COL-00",
+      "source_provenance": ["Curated Picrete policy; applies to all sections in this package."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 300
+    },
+    {
+      "slug": "col-01-bet",
+      "title": "COL-01 · Модель БЭТ",
+      "kind": "formulas",
+      "description": "Основная и линейная формы, параметры am/C, удельная поверхность и область применимости.",
+      "content_anchor": "COL-01",
+      "source_provenance": ["Lektsia_full.pdf, absolute PDF pages 32–34; equations visually checked on page 33."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 301
+    },
+    {
+      "slug": "col-02-zeta",
+      "title": "COL-02 · Электрофоретическая подвижность и ζ-потенциал",
+      "kind": "formulas",
+      "description": "μe=v/E, приближение Гельмгольца–Смолуховского, SI units и ограничения.",
+      "content_anchor": "COL-02",
+      "source_provenance": ["Lektsia_full.pdf, absolute PDF pages 66–67 and 77–78; equation visually checked on page 67."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 302
+    },
+    {
+      "slug": "col-03-dlvo",
+      "title": "COL-03 · Энергетический профиль ДЛФО",
+      "kind": "conventions",
+      "description": "Притяжение/отталкивание, барьер, первичный и вторичный минимумы, сравнение с kBT.",
+      "content_anchor": "COL-03",
+      "source_provenance": ["Lektsia_full.pdf, absolute PDF pages 87–94; potential-curve interpretation visually checked on pages 91–92."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 303
+    }
+  ],
+  "assistant_profile_patch": {
+    "topics_to_add": [
+      "Модель БЭТ и удельная поверхность",
+      "Электрофоретическая подвижность и ζ-потенциал",
+      "Энергетический профиль ДЛФО"
+    ],
+    "nuances_to_add": [
+      "Для БЭТ указывать x=p/ps, единицы a/am, диапазон регрессии и проверять физический смысл C и am.",
+      "ζ-потенциал относится к плоскости скольжения; формула Смолуховского допустима только при явно заданном приближении тонкого двойного слоя.",
+      "Энергию ДЛФО сравнивать с kBT только после согласования единиц; не смешивать Дж, Дж/моль и U/kBT.",
+      "Тестовый банк не является источником эталона до ручной проверки каждого ответа."
+    ]
+  },
+  "task_templates": [
+    {
+      "slug": "col-bet-linear-parameters",
+      "reference_sheet_slugs": ["col-00-verification", "col-01-bet"],
+      "payload": {
+        "name": "Коллоиды · параметры линейной формы БЭТ",
+        "topic": "Полимолекулярная адсорбция и пористость",
+        "difficulty": "medium",
+        "instructions": "Дай slope s и intercept i регрессии y=x/[a(1−x)] либо небольшой уже подготовленный линейный набор. Попроси вычислить am и C, назвать их единицы/безразмерность и проверить положительность. Диапазон x и способ построения y должны быть явно указаны. Не генерируй экспериментальную процедуру.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "COL-01 БЭТ линейная форма slope intercept am C applicability",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Линейная форма", "max_score": 2, "description": "s и i сопоставлены с правильными коэффициентами."},
+        {"criterion_name": "Параметр am", "max_score": 2, "description": "am=1/(s+i) рассчитан с единицей адсорбции."},
+        {"criterion_name": "Параметр C", "max_score": 2, "description": "C=1+s/i рассчитан как безразмерная величина."},
+        {"criterion_name": "Физическая проверка", "max_score": 2, "description": "Проверены знак, знаменатели и смысл параметров."},
+        {"criterion_name": "Область применимости", "max_score": 2, "description": "Учтён заданный диапазон x и ограничения модели."}
+      ]
+    },
+    {
+      "slug": "col-bet-surface-area",
+      "reference_sheet_slugs": ["col-01-bet"],
+      "payload": {
+        "name": "Коллоиды · удельная поверхность по ёмкости монослоя",
+        "topic": "Полимолекулярная адсорбция и пористость",
+        "difficulty": "medium",
+        "instructions": "Дай am в моль/г, площадь одной молекулы в нм² и NA. Попроси найти Ssp в м²/г и показать перевод нм²→м². Не подставляй площадь молекулы из памяти и не описывай измерение изотермы.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 1,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "COL-01 БЭТ am удельная поверхность площадь молекулы Avogadro units",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Модель монослоя", "max_score": 2, "description": "Использовано Ssp=am NA s0 с корректной базой am."},
+        {"criterion_name": "Перевод площади", "max_score": 3, "description": "нм² корректно переведены в м²."},
+        {"criterion_name": "Числовой результат", "max_score": 3, "description": "Ssp вычислена без арифметических ошибок."},
+        {"criterion_name": "Единицы и масштаб", "max_score": 2, "description": "Получены м²/г и проверен порядок величины."}
+      ]
+    },
+    {
+      "slug": "col-zeta-smoluchowski",
+      "reference_sheet_slugs": ["col-00-verification", "col-02-zeta"],
+      "payload": {
+        "name": "Коллоиды · ζ-потенциал по подвижности",
+        "topic": "Электрокинетические явления",
+        "difficulty": "medium",
+        "instructions": "Явно укажи применимость приближения тонкого двойного слоя. Дай v и E либо μe, η, εr и ε0 в SI. Попроси найти μe и ζ, определить знак по заданному направлению и выполнить размерностную проверку. Варьируй мПа·с/Па·с для проверки перевода, но не описывай прибор.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 1,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "COL-02 electrophoretic mobility zeta Smoluchowski viscosity permittivity SI",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Подвижность", "max_score": 2, "description": "μe=v/E вычислена со знаком и SI units."},
+        {"criterion_name": "ζ-потенциал", "max_score": 3, "description": "ημe/(εrε0) применено корректно."},
+        {"criterion_name": "Перевод единиц", "max_score": 2, "description": "Вязкость и остальные величины приведены к SI."},
+        {"criterion_name": "Знак и смысл", "max_score": 1, "description": "Знак согласован с направлением поля."},
+        {"criterion_name": "Применимость", "max_score": 2, "description": "Названо приближение и его ограничение."}
+      ]
+    },
+    {
+      "slug": "col-electrokinetic-model-audit",
+      "reference_sheet_slugs": ["col-02-zeta"],
+      "payload": {
+        "name": "Коллоиды · выбор электрокинетического приближения",
+        "topic": "Электрокинетические явления",
+        "difficulty": "medium",
+        "instructions": "Дай 3 коротких расчётных сценария: тонкий слой, толстый слой и промежуточный режим, явно задав отношение толщины слоя к размеру частицы или κa. Студент должен определить, где допустима формула Смолуховского, где нужна другая модель, и найти две ошибки единиц/обозначений. Не требуй знать формулу Генри, если она не дана.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "COL-02 zeta thin double layer Smoluchowski Henry Hückel applicability units",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Классификация режимов", "max_score": 4, "description": "Все сценарии отнесены к корректному режиму."},
+        {"criterion_name": "Формула Смолуховского", "max_score": 2, "description": "Её применение разрешено только для тонкого слоя."},
+        {"criterion_name": "Ошибки единиц", "max_score": 2, "description": "Найдены и исправлены обе ошибки."},
+        {"criterion_name": "Границы вывода", "max_score": 2, "description": "Не выдумана формула или параметр для промежуточного режима."}
+      ]
+    },
+    {
+      "slug": "col-dlvo-profile-interpretation",
+      "reference_sheet_slugs": ["col-00-verification", "col-03-dlvo"],
+      "payload": {
+        "name": "Коллоиды · интерпретация профиля ДЛФО",
+        "topic": "Агрегативная устойчивость",
+        "difficulty": "medium",
+        "instructions": "Дай таблицу h и U/kBT для условной системы с одним максимумом и двумя минимумами. Попроси определить барьер, первичный/вторичный минимумы, сравнить их с тепловым масштабом и сформулировать качественный вывод. Не задавай реальный электролит и не проси подобрать концентрацию для коагуляции.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "COL-03 DLVO energy barrier primary secondary minimum kBT profile",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Элементы профиля", "max_score": 3, "description": "Максимум и оба минимума найдены корректно."},
+        {"criterion_name": "Энергетический масштаб", "max_score": 2, "description": "Значения правильно сопоставлены с kBT."},
+        {"criterion_name": "Физическая интерпретация", "max_score": 3, "description": "Вывод следует из барьера и минимумов."},
+        {"criterion_name": "Границы модели", "max_score": 2, "description": "Нет перехода к реальной рецептуре или неподтверждённой кинетике."}
+      ]
+    }
+  ]
+}

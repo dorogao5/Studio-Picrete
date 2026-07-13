@@ -1,0 +1,342 @@
+{
+  "schema_version": "picrete-content-manifest-v1",
+  "content_version": "ANALYTICAL-CURATED-2026-07",
+  "assistant_scope": "analytical-chemistry-launch",
+  "course_scope": "c31f4f7a-5982-4c06-9f97-ee1f3fb58db6",
+  "source": {
+    "title": "Curated source set for analytical chemistry",
+    "authority": "unverified",
+    "visibility": "quarantine",
+    "items": [
+      {
+        "id": "zolotov-v1",
+        "title": "Основы аналитической химии, том 1",
+        "file": "/Users/doroga/Documents/projects/picrete/Аналитическая химия/Основы аналит химии 1_Золотов.pdf",
+        "sha256": "b1acd780acdf7227164646824ace3334b77c3f018a4189126ae0bf7157052b4a",
+        "pdf_pages_used": "260–266",
+        "authority": "reference",
+        "visibility": "student",
+        "manual_gate": "Gravimetric factor, analyte form and weighing form must be checked against rendered PDF page 264."
+      },
+      {
+        "id": "zolotov-v2",
+        "title": "Основы аналитической химии, том 2",
+        "file": "/Users/doroga/Documents/projects/picrete/Аналитическая химия/Основы аналит химии 2_Золотов.pdf",
+        "sha256": "2e83700fa282b03fc54781d805c8c5c69eff452e7050de492d65a4e0285b9134",
+        "pdf_pages_used": "32–40, 69–72",
+        "authority": "reference",
+        "visibility": "student",
+        "manual_gate": "Electron count, current efficiency, charge integral, cell constant and conductivity units must be checked visually; text extraction is not authoritative."
+      },
+      {
+        "id": "ifmo-intro-analysis",
+        "title": "Введение в качественный и количественный анализ химических веществ",
+        "file": "/Users/doroga/Documents/аналитическая химия/Новая папка с объектами/Введение_в_качественный_и_количественный_анализ_ifmo.pdf",
+        "sha256": "ff5b7a3cde20f7a238579b3c7d6313c755d970a267234908c8a175e3e89e07b2",
+        "pdf_pages_used": "11–12, definitions only",
+        "authority": "unverified",
+        "visibility": "quarantine",
+        "manual_gate": "Only abstract definitions of fractional/systematic analysis and selectivity may be paraphrased. Do not import reaction tables, safety text, personal data or procedures."
+      },
+      {
+        "id": "spm-lecture",
+        "title": "Сканирующая зондовая микроскопия",
+        "file": "/Users/doroga/Documents/аналитическая химия/Новая папка с объектами/16_СЗМ.pdf",
+        "sha256": "d33be4fce9454c49ec53783cd00be1fbb5ae7b7e60eb0c3e6bd171a0ea2a83a4",
+        "pdf_pages_used": "5–7",
+        "authority": "course_lecture",
+        "visibility": "student",
+        "manual_gate": "Verify Å/nm units and tip-convolution diagram visually; extracted glyph A is not accepted as Å."
+      }
+    ]
+  },
+  "exclusions": [
+    {
+      "file": "/Users/doroga/Documents/аналитическая химия/Новая папка с объектами/аналитика экз.pdf",
+      "sha256": "cf4bde11b81e14a9bb830c908eff8712dc4877dd47c1c3632f845ba3a9e78dfa",
+      "disposition": "quarantine",
+      "reason": "Unverified student compilation with corrupted formulas, unsafe historical fragments, profanity and no controlled provenance."
+    },
+    {
+      "source_id": "ifmo-intro-analysis",
+      "pdf_pages": "5–7, 17–43",
+      "disposition": "exclude_from_curated_grounding",
+      "reason": "Contains first-aid/fire advice and laboratory procedures from another institution; not a current Picrete course SOP."
+    },
+    {
+      "source_id": "ifmo-intro-analysis",
+      "pdf_pages": "10",
+      "disposition": "exclude_personal_data",
+      "reason": "The report template contains an example student name and course-specific workflow details."
+    },
+    {
+      "source_id": "spm-lecture",
+      "pdf_pages": "all text-layer formulas and unit glyphs",
+      "disposition": "manual_visual_verification_only",
+      "reason": "PDF extraction changes Å to A and damages arrows/symbols."
+    }
+  ],
+  "manual_verification": {
+    "checked_on": "2026-07-13",
+    "rendered_pdf_pages": [
+      "ifmo-intro-analysis:11–12",
+      "zolotov-v1:264",
+      "zolotov-v2:33–34",
+      "zolotov-v2:69–71",
+      "spm-lecture:6"
+    ],
+    "publish_gates": [
+      "SHA-256 matches the manifest.",
+      "Every formula is checked against the rendered PDF page.",
+      "Units are internally consistent and applicability is stated.",
+      "No laboratory procedure, emergency guidance, personal data or unverified assessment content enters the curated document.",
+      "A teacher approves the final card before student publication."
+    ]
+  },
+  "document_upload": {
+    "file": "grounding.md",
+    "title": "Аналитическая химия · качественный анализ, гравиметрия, электроанализ и СЗМ",
+    "doc_type": "methodical",
+    "authority": "course_lecture",
+    "visibility": "student",
+    "course_scope": "c31f4f7a-5982-4c06-9f97-ee1f3fb58db6",
+    "effective_version": "ANALYTICAL-CURATED-2026-07",
+    "analyze": false
+  },
+  "reference_sheet_proposals": [
+    {
+      "slug": "ana-00-verification",
+      "title": "ANA-00 · Проверка источника и границы ответа",
+      "kind": "conventions",
+      "description": "Manual-verification gate для формул, единиц, источников и самодостаточности задачи.",
+      "content_anchor": "ANA-00",
+      "source_provenance": ["Curated Picrete policy; applies to all source items in this manifest."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 200
+    },
+    {
+      "slug": "ana-01-qualitative-evidence",
+      "title": "ANA-01 · Качественный анализ и доказательство",
+      "kind": "conventions",
+      "description": "Дробный/систематический анализ, селективность, помехи и узкий вывод без процедур.",
+      "content_anchor": "ANA-01",
+      "source_provenance": ["ifmo-intro-analysis, PDF pages 11–12, definitions only; visually checked 2026-07-13."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 201
+    },
+    {
+      "slug": "ana-02-gravimetry",
+      "title": "ANA-02 · Гравиметрический фактор",
+      "kind": "formulas",
+      "description": "Определяемый компонент, гравиметрическая форма, фактор и массовая доля.",
+      "content_anchor": "ANA-02",
+      "source_provenance": ["zolotov-v1, PDF pages 260–266; factor formula visually checked on page 264."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 202
+    },
+    {
+      "slug": "ana-03-coulometry",
+      "title": "ANA-03 · Закон Фарадея и кулонометрия",
+      "kind": "formulas",
+      "description": "Интеграл тока, заряд, электронный баланс и выход по току.",
+      "content_anchor": "ANA-03",
+      "source_provenance": ["zolotov-v2, PDF pages 32–40; Faraday relation page 33, charge integral page 34."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 203
+    },
+    {
+      "slug": "ana-04-conductometry",
+      "title": "ANA-04 · Кондуктометрия и единицы",
+      "kind": "formulas",
+      "description": "Сопротивление, проводимость, константа ячейки и молярная проводимость в согласованных единицах.",
+      "content_anchor": "ANA-04",
+      "source_provenance": ["zolotov-v2, PDF pages 69–72; definitions page 69, cell-constant relation page 71."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 204
+    },
+    {
+      "slug": "ana-05-spm",
+      "title": "ANA-05 · СЗМ: масштаб, калибровка и артефакты",
+      "kind": "conventions",
+      "description": "Å/nm, X/Y/Z metadata, tip convolution и границы количественного вывода.",
+      "content_anchor": "ANA-05",
+      "source_provenance": ["spm-lecture, PDF pages 5–7; units and tip-convolution diagram visually checked on page 6."],
+      "visibility": "student",
+      "is_canonical": true,
+      "ord": 205
+    }
+  ],
+  "assistant_profile_patch": {
+    "topics_to_add": [
+      "Доказательность качественного анализа",
+      "Гравиметрический фактор и материальный баланс",
+      "Кулонометрия и закон Фарадея",
+      "Кондуктометрия и константа ячейки",
+      "СЗМ: калибровка, единицы и артефакты"
+    ],
+    "nuances_to_add": [
+      "Не переносить условия реакции, предел обнаружения или специфичность на новую матрицу без источника и заданных условий.",
+      "Гравиметрический фактор выводить из уравненной стехиометрии между определяемым компонентом и гравиметрической формой.",
+      "В кулонометрии явно проверять число электронов, интеграл тока, единицы и выход по току.",
+      "В кондуктометрии не смешивать См/м и См/см, а также моль/м³ и моль/л.",
+      "В СЗМ не отождествлять измеренную латеральную форму с истинной геометрией без оценки tip convolution."
+    ]
+  },
+  "task_templates": [
+    {
+      "slug": "ana-qualitative-evidence-audit",
+      "reference_sheet_slugs": ["ana-00-verification", "ana-01-qualitative-evidence"],
+      "payload": {
+        "name": "Аналитика · доказательство качественного вывода",
+        "topic": "Качественный анализ и ионные реакции",
+        "difficulty": "medium",
+        "instructions": "Дай абстрактную таблицу из 2–3 возможных компонентов, наблюдений и результатов уже выполненных контролей. Студент должен отделить наблюдение от интерпретации, назвать альтернативы и сформулировать узкий вывод. Не задавай реагенты, ход опыта, реальные токсичные вещества или ожидаемые эффекты как факты.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ANA-01 качественный анализ селективность помехи доказательство вывод",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Факты", "max_score": 2, "description": "Наблюдения и данные условия выписаны без добавлений."},
+        {"criterion_name": "Альтернативы и помехи", "max_score": 3, "description": "Рассмотрены все варианты, совместимые с сигналом."},
+        {"criterion_name": "Использование контроля", "max_score": 2, "description": "Контрольные данные логично исключают или сохраняют альтернативы."},
+        {"criterion_name": "Вывод", "max_score": 3, "description": "Вывод не шире имеющегося доказательства."}
+      ]
+    },
+    {
+      "slug": "ana-gravimetric-factor",
+      "reference_sheet_slugs": ["ana-02-gravimetry"],
+      "payload": {
+        "name": "Аналитика · гравиметрический фактор",
+        "topic": "Осаждение и гравиметрия",
+        "difficulty": "medium",
+        "instructions": "Сгенерируй только расчётную задачу. Дай формулы определяемого компонента и гравиметрической формы, уравненную стехиометрическую связь, молярные массы, массу формы и массу образца. Запроси Fg, массу компонента и массовую долю. Не описывай этапы выполнения гравиметрического определения.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ANA-02 гравиметрический фактор гравиметрическая форма массовая доля",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Стехиометрия", "max_score": 3, "description": "Коэффициенты a и b выведены из данной связи."},
+        {"criterion_name": "Фактор", "max_score": 2, "description": "Fg вычислен с согласованными молярными массами."},
+        {"criterion_name": "Масса и доля", "max_score": 3, "description": "Обе запрошенные величины рассчитаны корректно."},
+        {"criterion_name": "Единицы и проверка", "max_score": 2, "description": "Единицы согласованы, доля и обратный расчёт проверены."}
+      ]
+    },
+    {
+      "slug": "ana-coulometry-constant-current",
+      "reference_sheet_slugs": ["ana-03-coulometry"],
+      "payload": {
+        "name": "Аналитика · кулонометрия при постоянном токе",
+        "topic": "Потенциометрия и электроаналитика",
+        "difficulty": "medium",
+        "instructions": "Дай I, t, F, молярную массу, число электронов z и выход по току. Запроси Q, количество вещества и массу компонента. Варьируй мА/А и мин/с для проверки переводов. Не задавай устройство ячейки или режим реального электролиза.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ANA-03 закон Фарадея кулонометрия Q It число электронов выход по току",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Электронный баланс", "max_score": 2, "description": "z использовано и объяснено корректно."},
+        {"criterion_name": "Заряд", "max_score": 2, "description": "Q=It рассчитан после перевода единиц."},
+        {"criterion_name": "Количество и масса", "max_score": 4, "description": "Учтён выход по току, найдены все требуемые величины."},
+        {"criterion_name": "Проверка", "max_score": 2, "description": "Единицы и физический порядок результата проверены."}
+      ]
+    },
+    {
+      "slug": "ana-coulometry-current-profile",
+      "reference_sheet_slugs": ["ana-03-coulometry"],
+      "payload": {
+        "name": "Аналитика · заряд по профилю тока",
+        "topic": "Потенциометрия и электроаналитика",
+        "difficulty": "hard",
+        "instructions": "Дай кусочно-постоянный профиль I(t) или таблицу интервалов с током и длительностью. Попроси найти интегральный заряд, моли электронов и массу компонента по данному z и F. Все интервалы должны быть однозначными; не требуй численного интегрирования метода, не заданного в условии.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ANA-03 интеграл тока заряд кулонометрия электронный баланс",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Интегрирование профиля", "max_score": 4, "description": "Учтены все интервалы и корректно сложены заряды."},
+        {"criterion_name": "Моли электронов", "max_score": 2, "description": "Q/F вычислено с правильными единицами."},
+        {"criterion_name": "Стехиометрия и масса", "max_score": 3, "description": "z и молярная масса применены корректно."},
+        {"criterion_name": "Полнота ответа", "max_score": 1, "description": "Перечислены все запрошенные величины."}
+      ]
+    },
+    {
+      "slug": "ana-conductometry-cell-constant",
+      "reference_sheet_slugs": ["ana-04-conductometry"],
+      "payload": {
+        "name": "Аналитика · константа ячейки и проводимость",
+        "topic": "Потенциометрия и электроаналитика",
+        "difficulty": "medium",
+        "instructions": "Дай κref и Rref для вычисления Kcell, затем Rsample и при необходимости концентрацию в согласованных единицах. Запроси Kcell, κsample и Λm. Явно задай SI или систему сантиметров; не смешивай их и не описывай работу с прибором.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ANA-04 кондуктометрия сопротивление константа ячейки проводимость единицы",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Система единиц", "max_score": 2, "description": "Все величины приведены к одной системе."},
+        {"criterion_name": "Константа ячейки", "max_score": 2, "description": "Kcell=κrefRref рассчитана корректно."},
+        {"criterion_name": "Проводимости", "max_score": 4, "description": "κsample и Λm найдены со всеми единицами."},
+        {"criterion_name": "Проверка", "max_score": 2, "description": "Проверены размерность и ожидаемая обратная зависимость κ от R."}
+      ]
+    },
+    {
+      "slug": "ana-spm-evidence-audit",
+      "reference_sheet_slugs": ["ana-00-verification", "ana-05-spm"],
+      "payload": {
+        "name": "Аналитика · аудит количественного вывода СЗМ",
+        "topic": "Микроскопия и СЗМ",
+        "difficulty": "medium",
+        "instructions": "Дай метаданные условного изображения: X/Y/Z units, scan size, pixels, известный масштабный отрезок, краткое описание зонда и несколько заявленных выводов. Студент должен пересчитать Å↔nm, найти масштаб на пиксель, отметить tip-convolution и определить, какие выводы поддержаны данными. Не проси настраивать прибор.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ANA-05 СЗМ ангстрем нанометр калибровка масштаб tip convolution артефакт",
+        "validation_solver": true,
+        "validation_data_check": true
+      },
+      "recommended_rubric": [
+        {"criterion_name": "Единицы и масштаб", "max_score": 3, "description": "Å/nm и масштаб на пиксель рассчитаны корректно."},
+        {"criterion_name": "Метаданные", "max_score": 2, "description": "Названы необходимые условия интерпретации."},
+        {"criterion_name": "Артефакт зонда", "max_score": 2, "description": "Латеральная свёртка учтена без ложной коррекции."},
+        {"criterion_name": "Границы вывода", "max_score": 3, "description": "Поддержанные и неподдержанные утверждения разделены."}
+      ]
+    }
+  ]
+}
