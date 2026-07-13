@@ -10,6 +10,7 @@
 
 - `grounding.md` — student-facing разделы COL-00…COL-03;
 - `import-manifest.json` — SHA-256 источников, страницы PDF, manual-verification gates, четыре предложения карточек и пять блюпринтов с рубриками.
+- `prompts/` — точный repo snapshot трёх вручную выверенных active system prompts и их production provenance.
 
 ## Порядок импорта
 
@@ -19,7 +20,8 @@
 4. Создать карточки COL-00…COL-03 по `reference_sheet_proposals` и сохранить source provenance.
 5. Заменить `reference_sheet_slugs` блюпринтов на реальные `reference_sheet_ids`; остальные поля `payload` совместимы с `POST /api/assistants/{assistant_id}/templates`.
 6. Рубрики использовать при ревью задачи и эталона; сумма каждой равна 10.
-7. Перед student publish преподаватель подтверждает формулы, обозначения, систему единиц и область применимости модели.
+7. Создать и активировать версии промптов по инструкции `prompts/README.md`; для всех трёх ролей использовать `target_family=deepseek`.
+8. Перед student publish преподаватель подтверждает формулы, обозначения, систему единиц и область применимости модели.
 
 ## Жёсткие ограничения
 
