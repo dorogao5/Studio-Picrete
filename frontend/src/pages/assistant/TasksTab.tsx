@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Download,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
   Trash2,
   XCircle,
@@ -76,6 +78,8 @@ const FILTERS: Array<{ key: "all" | GeneratedTaskStatus; label: string }> = [
   { key: "rejected", label: "Отклонены" },
 ];
 
+const TASKS_PER_PAGE = 10;
+
 const TRANSLIT: Record<string, string> = {
   а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y",
   к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f",
@@ -104,6 +108,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [promptsError, setPromptsError] = useState("");
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<"all" | GeneratedTaskStatus>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [section, setSection] = useState<TasksSection | null>(null);
   const [templateModal, setTemplateModal] = useState<{ open: boolean; template: TaskTemplate | null }>({
     open: false,
@@ -208,6 +214,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     setSheetsError("");
     setPromptsError("");
     setError("");
+    setSearchQuery("");
+    setPage(1);
     setSection(null);
     setTemplateModal({ open: false, template: null });
     setBatchModal({ open: false, templateId: "" });
@@ -263,13 +271,29 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const approvedTasks = taskList.filter((t) => t.status === "approved");
   const approvedCount = approvedTasks.filter(hasCurrentApproval).length;
   const legacyApprovalCount = approvedTasks.length - approvedCount;
-  const filtered = filter === "all" ? taskList : taskList.filter((t) => t.status === filter);
+  const statusFiltered = filter === "all" ? taskList : taskList.filter((t) => t.status === filter);
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase("ru-RU");
+  const filtered = normalizedQuery
+    ? statusFiltered.filter((task) =>
+        [task.statement, task.topic, task.model_used].some((value) =>
+          value?.toLocaleLowerCase("ru-RU").includes(normalizedQuery),
+        ),
+      )
+    : statusFiltered;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / TASKS_PER_PAGE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * TASKS_PER_PAGE;
+  const visibleTasks = filtered.slice(pageStart, pageStart + TASKS_PER_PAGE);
   const activeSection = section ?? (taskList.length > 0 ? "bank" : "templates");
   const sections: Array<{ key: TasksSection; label: string; count: number }> = [
     { key: "templates", label: "Блюпринты", count: templates.length },
     { key: "batches", label: "Партии", count: batches.length },
     { key: "bank", label: "Банк задач", count: taskList.length },
   ];
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter, searchQuery, assistant.id, taskList.length]);
 
   const approveAllValidated = async () => {
     const validated = taskList.filter((t) => t.status === "validated" && t.validation_ready);
@@ -414,7 +438,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         <section className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="text-sm font-semibold">Банк задач</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {validatedCount > 0 && (
               <Button variant="secondary" onClick={approveAllValidated} loading={bulkLoading}>
                 <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить все прошедшие проверку ({validatedCount})
@@ -424,6 +448,23 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
               <Download className="h-3.5 w-3.5" /> Экспорт в Picrete
             </Button>
           </div>
+        </div>
+
+        <div role="search" className="w-full sm:max-w-sm">
+          <label className="relative block">
+            <span className="sr-only">Поиск по банку задач</span>
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Поиск по условию, теме или модели"
+              className="min-w-0 pl-9"
+            />
+          </label>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -451,14 +492,54 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           <Spinner />
         ) : filtered.length === 0 ? (
           <EmptyState
-            title={filter === "all" ? "Задач пока нет" : "Нет задач с таким статусом"}
-            hint={filter === "all" ? "Создайте блюпринт и сгенерируйте партию — задачи попадут сюда после автопроверки" : undefined}
+            title={
+              normalizedQuery
+                ? "По вашему запросу ничего не найдено"
+                : filter === "all"
+                  ? "Задач пока нет"
+                  : "Нет задач с таким статусом"
+            }
+            hint={
+              normalizedQuery
+                ? "Попробуйте изменить запрос или выбрать другой статус"
+                : filter === "all"
+                  ? "Создайте блюпринт и сгенерируйте партию — задачи попадут сюда после автопроверки"
+                  : undefined
+            }
           />
         ) : (
-          <div className="space-y-2">
-            {filtered.map((task) => (
-              <TaskCard key={task.id} task={task} assistantId={assistant.id} onChanged={reloadTasks} />
-            ))}
+          <div className="min-w-0 space-y-3">
+            <div className="min-w-0 space-y-2">
+              {visibleTasks.map((task) => (
+                <TaskCard key={task.id} task={task} assistantId={assistant.id} onChanged={reloadTasks} />
+              ))}
+            </div>
+            <nav
+              aria-label="Страницы банка задач"
+              className="flex min-w-0 flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <p className="text-xs tabular-nums text-muted-foreground" aria-live="polite">
+                {pageStart + 1}–{Math.min(pageStart + TASKS_PER_PAGE, filtered.length)} из {filtered.length}
+              </p>
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+                <Button
+                  variant="secondary"
+                  className="w-full sm:w-auto"
+                  disabled={currentPage === 1}
+                  onClick={() => setPage((previous) => Math.max(1, previous - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" /> Назад
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="w-full sm:w-auto"
+                  disabled={currentPage === pageCount}
+                  onClick={() => setPage((previous) => Math.min(pageCount, previous + 1))}
+                >
+                  Вперёд <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </nav>
           </div>
         )}
         </section>
