@@ -65,6 +65,7 @@ def test_advisory_tutor_model_requires_explicit_preview() -> None:
 def _validation_kwargs() -> dict:
     return {
         "statement": "Определите искомую массу продукта по приведённым в условии данным.",
+        "reference_solution": "По приведённым данным получаем итоговый результат m = 5 г.",
         "reference_answer": "m = 5 г",
         "rubric": [{"criterion_name": "Расчёт", "max_score": 10}],
         "max_score": 10,
@@ -85,6 +86,16 @@ def test_validation_without_solver_never_turns_green(monkeypatch) -> None:
     assert result["verdict"] == "needs_review"
     assert result["model_policy"]["decision_capable"] is False
     assert any("отключена" in reason for reason in result["reasons"])
+
+
+def test_validation_without_data_check_never_turns_green(monkeypatch) -> None:
+    monkeypatch.setattr(validation, "current_model_use_policy", _policy)
+
+    result = asyncio.run(validation.run_validation(**_validation_kwargs(), run_data=False, run_solver=False))
+
+    assert result["verdict"] == "needs_review"
+    assert result["data"]["status"] == "skipped"
+    assert any("происхождения данных отключена" in reason for reason in result["reasons"])
 
 
 @pytest.mark.parametrize("model_id", ["deepseek-v4-flash", "unknown-local-model"])

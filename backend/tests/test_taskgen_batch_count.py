@@ -68,7 +68,7 @@ def test_refill_attempts_are_bounded_and_short_batch_is_failed(monkeypatch) -> N
         generation_errors=errors,
     )
     assert batch.status == "failed"
-    assert "сохранено 1 из 3" in batch.error
+    assert "готово 1 из 3" in batch.error
     assert batch.progress == {"stage": "Неполная партия", "done": 1, "total": 3}
     assert batch.finished_at is not None
 

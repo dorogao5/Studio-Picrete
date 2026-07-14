@@ -61,18 +61,27 @@ def current_validation() -> dict:
     assert model_use.decision_capable
     return {
         "verdict": "validated",
+        "answer_format": "numeric",
         "policy_version": VALIDATION_POLICY_VERSION,
         "model_policy": model_use.as_dict(),
+        "solver": {"status": "match", "comparison": {"verdict": "match"}},
+        "verifier": {"status": "match", "comparison": {"verdict": "match"}},
+        "cross_comparison": {"verdict": "match"},
+        "reference_solution_check": {"verdict": "match"},
+        "data": {"status": "ok", "unknown_numbers": [], "unknown_sources": []},
+        "sanity": {"issues": []},
+        "dedup": {"duplicate": False, "similarity": 0.1},
+        "reasons": [],
     }
 
 
-def complete_approval(*, basis: str = "policy_validated") -> dict:
+def complete_approval() -> dict:
     validation = current_validation()
     validation["approval"] = {
-        "basis": basis,
+        "basis": "teacher_override",
         "reviewed_by": "teacher-1",
         "reviewed_at": "2026-07-13T00:00:00+00:00",
-        "reason": "Проверено вручную по методичке" if basis == "teacher_override" else "",
+        "reason": "Проверено вручную по методичке",
         "policy_version": VALIDATION_POLICY_VERSION,
     }
     return validation
@@ -98,7 +107,7 @@ def call_update(monkeypatch, task, body):
 
 def test_unvalidated_task_requires_teacher_reason(monkeypatch) -> None:
     task = generated_task()
-    with pytest.raises(HTTPException, match="причину ручного одобрения"):
+    with pytest.raises(HTTPException, match="исключение из автоматической политики"):
         call_update(monkeypatch, task, {"status": "approved"})
 
 
@@ -117,14 +126,13 @@ def test_teacher_override_is_recorded(monkeypatch) -> None:
     assert db.commits == 1
 
 
-def test_current_policy_validation_can_be_approved_directly(monkeypatch) -> None:
+def test_current_policy_validation_does_not_need_teacher_approval(monkeypatch) -> None:
     task = generated_task(
         status="validated",
         validation=current_validation(),
     )
-    result, _db = call_update(monkeypatch, task, {"status": "approved"})
-
-    assert result.validation["approval"]["basis"] == "policy_validated"
+    with pytest.raises(HTTPException, match="исключение из автоматической политики"):
+        call_update(monkeypatch, task, {"status": "approved"})
 
 
 def test_editing_content_invalidates_previous_approval(monkeypatch) -> None:
@@ -175,9 +183,7 @@ def test_revalidation_atomically_clears_previous_approval(monkeypatch) -> None:
     monkeypatch.setattr(tasks_api, "run_validation", fake_validation)
     db = FakeDb()
 
-    result = asyncio.run(
-        tasks_api.revalidate_task("assistant", task.id, RevalidateRequest(), db)
-    )
+    result = asyncio.run(tasks_api.revalidate_task("assistant", task.id, RevalidateRequest(), db))
 
     assert result.status == "needs_review"
     assert result.approved is False
@@ -195,7 +201,7 @@ def test_explicit_export_rejects_unapproved_tasks(monkeypatch) -> None:
         return SimpleNamespace(discipline="Химия")
 
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
-    with pytest.raises(HTTPException, match="сначала одобрите"):
+    with pytest.raises(HTTPException, match="требуют автоматической перепроверки"):
         asyncio.run(
             tasks_api.export_tasks(
                 "assistant",
@@ -212,7 +218,7 @@ def test_export_rejects_legacy_approval_without_audit_record(monkeypatch) -> Non
         return SimpleNamespace(discipline="Химия")
 
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
-    with pytest.raises(HTTPException, match="подтвердите одобрение"):
+    with pytest.raises(HTTPException, match="требуют автоматической перепроверки"):
         asyncio.run(
             tasks_api.export_tasks(
                 "assistant",
@@ -225,8 +231,8 @@ def test_export_rejects_legacy_approval_without_audit_record(monkeypatch) -> Non
 @pytest.mark.parametrize(
     "validation",
     [
-        {"approval": {"basis": "policy_validated"}},
-        {"approval": "policy_validated"},
+        {"approval": {"basis": "teacher_override"}},
+        {"approval": "teacher_override"},
         ["malformed"],
     ],
 )
@@ -237,7 +243,7 @@ def test_export_rejects_incomplete_or_malformed_audit(monkeypatch, validation) -
         return SimpleNamespace(discipline="Химия")
 
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
-    with pytest.raises(HTTPException, match="подтвердите одобрение"):
+    with pytest.raises(HTTPException, match="требуют автоматической перепроверки"):
         asyncio.run(
             tasks_api.export_tasks(
                 "assistant",
@@ -254,7 +260,7 @@ def test_default_export_rejects_inconsistent_approval_state(monkeypatch) -> None
         return SimpleNamespace(discipline="Химия")
 
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
-    with pytest.raises(HTTPException, match="сначала одобрите"):
+    with pytest.raises(HTTPException, match="требуют автоматической перепроверки"):
         asyncio.run(
             tasks_api.export_tasks(
                 "assistant",
@@ -280,3 +286,53 @@ def test_export_accepts_complete_current_approval(monkeypatch) -> None:
     )
 
     assert result["paragraphs"][0]["tasks"][0]["text"] == "Условие"
+
+
+def test_export_accepts_complete_automatic_evidence_without_human_approval(monkeypatch) -> None:
+    task = generated_task(status="validated", validation=current_validation(), approved=False)
+
+    async def fake_assistant(*_args):
+        return SimpleNamespace(discipline="Химия")
+
+    monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    result = asyncio.run(
+        tasks_api.export_tasks(
+            "assistant",
+            TaskExportRequest(task_ids=[task.id], mode="bank"),
+            FakeDb([task]),
+        )
+    )
+
+    assert result["paragraphs"][0]["tasks"][0]["text"] == "Условие"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("solver", {"status": "match"}),
+        ("verifier", {"status": "uncertain", "comparison": {"verdict": "uncertain"}}),
+        ("cross_comparison", {"verdict": "uncertain"}),
+        ("reference_solution_check", {"verdict": "incomplete"}),
+        ("data", {"status": "skipped", "unknown_numbers": [], "unknown_sources": []}),
+        ("sanity", {"issues": ["Пустая рубрика"]}),
+        ("dedup", {"duplicate": True}),
+        ("reasons", ["Есть блокирующая причина"]),
+    ],
+)
+def test_incomplete_or_failed_evidence_never_auto_exports(monkeypatch, field, value) -> None:
+    validation = current_validation()
+    validation[field] = value
+    task = generated_task(status="validated", validation=validation, approved=False)
+
+    async def fake_assistant(*_args):
+        return SimpleNamespace(discipline="Химия")
+
+    monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    with pytest.raises(HTTPException, match="требуют автоматической перепроверки"):
+        asyncio.run(
+            tasks_api.export_tasks(
+                "assistant",
+                TaskExportRequest(task_ids=[task.id], mode="bank"),
+                FakeDb([task]),
+            )
+        )

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { exportReadyTaskIds } from "../src/lib/taskExport.ts";
 
-test("exports only tasks with a complete current approval", () => {
+test("exports only tasks admitted by the current automatic or manual policy", () => {
   const taskIds = exportReadyTaskIds([
     { id: "ready-1", export_ready: true },
     { id: "legacy-approved", export_ready: false },

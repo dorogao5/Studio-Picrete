@@ -1,7 +1,7 @@
 import json
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
@@ -418,9 +418,10 @@ def _mark_batch_finished(
 
     batch.status = "failed"
     detail = generation_errors[-1][:400] if generation_errors else "модель вернула меньше валидных задач"
+    candidate_count = getattr(batch, "generated_count", generated_count)
     batch.error = (
-        f"Неполная партия: сохранено {generated_count} из {requested_count} задач после "
-        f"{MAX_REFILL_ATTEMPTS} попыток восполнения. Последняя причина: {detail}"
+        f"Неполная партия: готово {generated_count} из {requested_count}; "
+        f"проверено кандидатов: {candidate_count}. Последняя причина: {detail}"
     )
     batch.progress = {
         "stage": "Неполная партия",
@@ -445,7 +446,7 @@ async def _validate_batch(
                 select(GeneratedTask.statement)
                 .where(
                     GeneratedTask.assistant_id == batch.assistant_id,
-                    or_(GeneratedTask.batch_id.is_(None), GeneratedTask.batch_id != batch.id),
+                    GeneratedTask.id.not_in([task.id for task in created]),
                 )
                 .order_by(GeneratedTask.created_at.desc())
                 .limit(50)
@@ -461,6 +462,7 @@ async def _validate_batch(
         neighbours = [other.statement for other in created if other is not task]
         validation = await run_validation(
             statement=task.statement,
+            reference_solution=task.reference_solution,
             reference_answer=task.answer,
             rubric=task.rubric,
             max_score=task.max_score,
@@ -476,9 +478,15 @@ async def _validate_batch(
             run_data=merged["validation_data_check"],
         )
         task.validation = validation
-        task.status = validation["verdict"]
         if validation["verdict"] == "validated":
+            task.status = "validated"
             batch.validated_count += 1
+        else:
+            validation = dict(validation)
+            validation["candidate_disposition"] = "discarded"
+            task.validation = validation
+            task.status = "rejected"
+        task.approved = False
         await db.commit()
 
 
@@ -554,40 +562,107 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         raise llm.LlmError(" || ".join(gen_errors[:3]))
 
     grounding_meta = build_grounding_meta(sheets, grounding_text, grounding_query)
-    created: list[GeneratedTask] = []
-    for item in items:
-        task = task_from_item(
-            item,
-            assistant_id=batch.assistant_id,
-            template_id=batch.template_id,
-            batch_id=batch.id,
-            topic=merged["topic"],
-            difficulty=merged["difficulty"],
-            model_used=f"{provider.name}/{model.model_id}",
-            grounding_meta=grounding_meta,
-            template_rubric=merged.get("rubric", []),
-        )
-        if task is not None:
-            db.add(task)
-            created.append(task)
+
+    async def persist_candidates(candidate_items: list[dict]) -> list[GeneratedTask]:
+        persisted: list[GeneratedTask] = []
+        for item in candidate_items:
+            task = task_from_item(
+                item,
+                assistant_id=batch.assistant_id,
+                template_id=batch.template_id,
+                batch_id=batch.id,
+                topic=merged["topic"],
+                difficulty=merged["difficulty"],
+                model_used=f"{provider.name}/{model.model_id}",
+                grounding_meta=grounding_meta,
+                template_rubric=merged.get("rubric", []),
+            )
+            if task is not None:
+                db.add(task)
+                persisted.append(task)
+        batch.generated_count += len(persisted)
+        await db.commit()
+        return persisted
+
+    created = await persist_candidates(items)
     if not created:
         raise GenerationError("Модель не вернула ни одной валидной задачи")
-    batch.generated_count = len(created)
-    await db.commit()
 
-    if bool(params.get("validate_tasks", True)):
-        solver_provider, solver_model = provider, model
-        if params.get("solver_model_entry_id"):
-            solver_provider, solver_model = await _resolve_batch_model(db, str(params["solver_model_entry_id"]))
+    validation_enabled = bool(params.get("validate_tasks", True))
+    solver_provider, solver_model = provider, model
+    if params.get("solver_model_entry_id"):
+        solver_provider, solver_model = await _resolve_batch_model(db, str(params["solver_model_entry_id"]))
+    if validation_enabled:
         await _validate_batch(
             db, batch, created, merged, solver_provider, solver_model, grounding_text, sheets_to_text(sheets)
         )
 
-    total = len(created)
+    # Пользователь заказывает готовые задачи, а не число сырых ответов модели.
+    # Непрошедший кандидат сохраняется для аудита как rejected и автоматически
+    # заменяется новым в пределах ограниченного бюджета.
+    candidate_budget = min(count * 3, count + 20)
+    while validation_enabled and batch.validated_count < count and batch.generated_count < candidate_budget:
+        missing = count - batch.validated_count
+        remaining_budget = candidate_budget - batch.generated_count
+        refill_count = min(missing, remaining_budget)
+        await _set_progress(
+            db,
+            batch,
+            f"Восполнение: готово {batch.validated_count}/{count}",
+            batch.validated_count,
+            count,
+        )
+        refill_items, refill_errors = await _generate_batch_items(
+            provider,
+            model,
+            assistant,
+            system_prompt,
+            merged=merged,
+            params=params,
+            count=refill_count,
+            grounding_text=grounding_text,
+            existing_statements=list(existing) + [task.statement for task in created],
+        )
+        gen_errors.extend(refill_errors)
+        if not refill_items:
+            break
+        refill = await persist_candidates(refill_items)
+        if not refill:
+            break
+        created.extend(refill)
+        await _validate_batch(
+            db, batch, refill, merged, solver_provider, solver_model, grounding_text, sheets_to_text(sheets)
+        )
+
+    rejected = [task for task in created if task.status == "rejected"]
+    failure_counts: dict[str, int] = {}
+    for task in rejected:
+        validation = task.validation or {}
+        if (validation.get("dedup") or {}).get("duplicate"):
+            code = "duplicate"
+        elif (validation.get("data") or {}).get("status") != "ok":
+            code = "source_data"
+        elif (validation.get("sanity") or {}).get("issues"):
+            code = "task_contract"
+        elif (validation.get("reference_solution_check") or {}).get("verdict") != "match":
+            code = "reference_solution"
+        else:
+            code = "solution_disagreement"
+        failure_counts[code] = failure_counts.get(code, 0) + 1
+    batch.params = {
+        **(batch.params or {}),
+        "quality_summary": {
+            "candidate_count": batch.generated_count,
+            "ready_count": batch.validated_count,
+            "discarded_count": len(rejected),
+            "discarded_by_reason": failure_counts,
+            "candidate_budget": candidate_budget,
+        },
+    }
     _mark_batch_finished(
         batch,
         requested_count=count,
-        generated_count=total,
+        generated_count=batch.validated_count if validation_enabled else batch.generated_count,
         generation_errors=gen_errors,
     )
     await db.commit()

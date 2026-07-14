@@ -173,6 +173,11 @@ export const tasksApi = {
     api.get<GenerationBatch>(`/assistants/${assistantId}/tasks/batches/${batchId}`).then((r) => r.data),
   revalidate: (assistantId: string, taskId: string, body: { solver_model_entry_id?: string | null } = {}) =>
     api.post<GeneratedTask>(`/assistants/${assistantId}/tasks/${taskId}/revalidate`, body).then((r) => r.data),
+  createRevalidationBatch: (
+    assistantId: string,
+    body: { task_ids?: string[]; solver_model_entry_id?: string | null } = {},
+  ) =>
+    api.post<GenerationBatch>(`/assistants/${assistantId}/tasks/revalidation-batches`, body).then((r) => r.data),
   exportTasks: (
     assistantId: string,
     body: { task_ids?: string[]; mode: "bank" | "variants"; source_code?: string; source_title?: string; version?: string },

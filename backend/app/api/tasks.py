@@ -1,5 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.assistants import get_assistant_or_404, resolve_model
@@ -12,6 +12,7 @@ from app.schemas import (
     GenerationBatchOut,
     GenerationBatchRequest,
     RevalidateRequest,
+    RevalidationBatchRequest,
     TaskExportRequest,
     TaskGenerateRequest,
     TaskTemplateCreate,
@@ -20,7 +21,9 @@ from app.schemas import (
 )
 from app.security import get_current_user
 from app.services.export import build_bank_export, build_variants_export
-from app.services.task_approval import has_complete_approval, validation_is_current_decision
+from app.services.model_policy import ModelUsePolicyError, require_decision_model
+from app.services.task_approval import task_is_export_ready
+from app.services.task_revalidation import run_revalidation_batch
 from app.services.taskgen import (
     GenerationError,
     build_generation_grounding,
@@ -145,13 +148,17 @@ async def generate(
     )
 
     existing = (
-        await db.execute(
-            select(GeneratedTask.statement)
-            .where(GeneratedTask.assistant_id == assistant_id)
-            .order_by(GeneratedTask.created_at.desc())
-            .limit(8)
+        (
+            await db.execute(
+                select(GeneratedTask.statement)
+                .where(GeneratedTask.assistant_id == assistant_id)
+                .order_by(GeneratedTask.created_at.desc())
+                .limit(8)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     try:
         items = await generate_tasks(
@@ -210,10 +217,23 @@ async def create_batch(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> GenerationBatch:
-    await get_assistant_or_404(assistant_id, db)
+    assistant = await get_assistant_or_404(assistant_id, db)
+    if not body.validate_tasks:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Партия банка задач всегда проходит автоматический контроль; для экспериментов используйте песочницу",
+        )
     provider, model = await resolve_model(db, body.model_entry_id)
-    if body.solver_model_entry_id:
-        await resolve_model(db, body.solver_model_entry_id)
+    solver_entry_id = (
+        body.solver_model_entry_id or getattr(assistant, "default_grader_model_id", None) or body.model_entry_id
+    )
+    solver_model = model
+    if solver_entry_id != body.model_entry_id:
+        _, solver_model = await resolve_model(db, solver_entry_id)
+    try:
+        require_decision_model(solver_model)
+    except ModelUsePolicyError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err))
     if body.template_id:
         await _get_template_or_404(db, assistant_id, body.template_id)
     try:
@@ -222,6 +242,7 @@ async def create_batch(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
 
     params = body.model_dump()
+    params["solver_model_entry_id"] = solver_entry_id
     # Freeze the active version before the background job is queued. If no active
     # generator prompt exists, None intentionally preserves the built-in fallback.
     params["prompt_version_id"] = prompt_version.id if prompt_version else None
@@ -244,9 +265,7 @@ async def create_batch(
 
 
 @router.get("/assistants/{assistant_id}/tasks/batches", response_model=list[GenerationBatchOut])
-async def list_batches(
-    assistant_id: str, limit: int = 10, db: AsyncSession = Depends(get_db)
-) -> list[GenerationBatch]:
+async def list_batches(assistant_id: str, limit: int = 10, db: AsyncSession = Depends(get_db)) -> list[GenerationBatch]:
     await get_assistant_or_404(assistant_id, db)
     return list(
         (
@@ -260,13 +279,94 @@ async def list_batches(
     )
 
 
+@router.post(
+    "/assistants/{assistant_id}/tasks/revalidation-batches",
+    response_model=GenerationBatchOut,
+)
+async def create_revalidation_batch(
+    assistant_id: str,
+    body: RevalidationBatchRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GenerationBatch:
+    assistant = await get_assistant_or_404(assistant_id, db)
+    running = list(
+        (
+            await db.execute(
+                select(GenerationBatch).where(
+                    GenerationBatch.assistant_id == assistant_id,
+                    GenerationBatch.status == "running",
+                )
+            )
+        ).scalars()
+    )
+    for batch in running:
+        if (batch.params or {}).get("operation") == "revalidation":
+            return batch
+
+    solver_entry_id = (
+        body.solver_model_entry_id or assistant.default_grader_model_id or assistant.default_generator_model_id
+    )
+    if not solver_entry_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Не настроена контрольная модель для автоматической перепроверки",
+        )
+    provider, model = await resolve_model(db, solver_entry_id)
+    try:
+        require_decision_model(model)
+    except ModelUsePolicyError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err))
+
+    query = select(GeneratedTask).where(
+        GeneratedTask.assistant_id == assistant_id,
+        GeneratedTask.status != "rejected",
+    )
+    requested_ids = list(dict.fromkeys(body.task_ids))
+    if requested_ids:
+        query = query.where(GeneratedTask.id.in_(requested_ids))
+    tasks = list((await db.execute(query.order_by(GeneratedTask.created_at))).scalars())
+    if requested_ids and len(tasks) != len(requested_ids):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Часть выбранных задач не найдена")
+    tasks = [task for task in tasks if not task_is_export_ready(task)]
+    if not tasks:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Все выбранные задачи уже готовы по текущей политике",
+        )
+    if len(tasks) > 100:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "За один запуск можно перепроверить не более 100 задач",
+        )
+
+    params = {
+        "operation": "revalidation",
+        "task_ids": [task.id for task in tasks],
+        "solver_model_entry_id": model.id,
+    }
+    batch = GenerationBatch(
+        assistant_id=assistant_id,
+        status="running",
+        params=params,
+        model_used=f"{provider.name}/{model.model_id}",
+        requested_count=len(tasks),
+        progress={"stage": "В очереди на перепроверку", "done": 0, "total": len(tasks)},
+        created_by=user.id,
+    )
+    db.add(batch)
+    await db.commit()
+    await db.refresh(batch)
+    background.add_task(run_revalidation_batch, batch.id)
+    return batch
+
+
 @router.get("/assistants/{assistant_id}/tasks/batches/{batch_id}", response_model=GenerationBatchOut)
 async def get_batch(assistant_id: str, batch_id: str, db: AsyncSession = Depends(get_db)) -> GenerationBatch:
     batch = (
         await db.execute(
-            select(GenerationBatch).where(
-                GenerationBatch.id == batch_id, GenerationBatch.assistant_id == assistant_id
-            )
+            select(GenerationBatch).where(GenerationBatch.id == batch_id, GenerationBatch.assistant_id == assistant_id)
         )
     ).scalar_one_or_none()
     if batch is None:
@@ -293,9 +393,7 @@ async def revalidate_task(
     merged = merge_template_params(template, topic=task.topic, difficulty=task.difficulty, instructions="")
 
     solver_entry_id = (
-        body.solver_model_entry_id
-        or assistant.default_grader_model_id
-        or assistant.default_generator_model_id
+        body.solver_model_entry_id or assistant.default_grader_model_id or assistant.default_generator_model_id
     )
 
     solver_provider = solver_model = None
@@ -313,16 +411,21 @@ async def revalidate_task(
         db, assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query
     )
     existing = (
-        await db.execute(
-            select(GeneratedTask.statement)
-            .where(GeneratedTask.assistant_id == assistant_id, GeneratedTask.id != task.id)
-            .order_by(GeneratedTask.created_at.desc())
-            .limit(50)
+        (
+            await db.execute(
+                select(GeneratedTask.statement)
+                .where(GeneratedTask.assistant_id == assistant_id, GeneratedTask.id != task.id)
+                .order_by(GeneratedTask.created_at.desc())
+                .limit(50)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     validation = await run_validation(
         statement=task.statement,
+        reference_solution=task.reference_solution,
         reference_answer=task.answer,
         rubric=task.rubric,
         max_score=task.max_score,
@@ -354,27 +457,22 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
     if body.task_ids:
         query = query.where(GeneratedTask.id.in_(body.task_ids))
     else:
-        query = query.where(or_(GeneratedTask.approved.is_(True), GeneratedTask.status == "approved"))
+        query = query.where(GeneratedTask.status.in_(("validated", "approved")))
     tasks = list((await db.execute(query.order_by(GeneratedTask.created_at))).scalars())
     if not tasks:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "Нет задач для экспорта — одобрите задачи или передайте task_ids"
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Нет готовых задач для экспорта — запустите автоматическую проверку или передайте task_ids",
         )
     if body.task_ids:
         requested_ids = set(body.task_ids)
         if len(tasks) != len(requested_ids):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Часть выбранных задач не найдена")
-    unapproved = [task for task in tasks if not task.approved or task.status != "approved"]
-    if unapproved:
+    not_ready = [task for task in tasks if not task_is_export_ready(task)]
+    if not_ready:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"Экспорт остановлен: сначала одобрите задачи ({len(unapproved)})",
-        )
-    unaudited = [task for task in tasks if not has_complete_approval(task.validation)]
-    if unaudited:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"Экспорт остановлен: подтвердите одобрение по текущей политике ({len(unaudited)})",
+            f"Экспорт остановлен: {len(not_ready)} задач требуют автоматической перепроверки или решения преподавателя",
         )
     source_title = body.source_title or assistant.discipline
     if body.mode == "bank":
@@ -382,9 +480,7 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
     template_ids = {task.template_id for task in tasks if task.template_id}
     tolerance_by_template: dict[str, float] = {}
     if template_ids:
-        templates = (
-            await db.execute(select(TaskTemplate).where(TaskTemplate.id.in_(template_ids)))
-        ).scalars()
+        templates = (await db.execute(select(TaskTemplate).where(TaskTemplate.id.in_(template_ids)))).scalars()
         tolerance_by_template = {template.id: template.numeric_tolerance_pct for template in templates}
     return build_variants_export(tasks, tolerance_by_template)
 
@@ -423,14 +519,13 @@ async def update_task(
         data["approved"] = False
     elif requested_status == "approved":
         validation = dict(task.validation) if isinstance(task.validation, dict) else {}
-        policy_validated = validation_is_current_decision(validation)
-        if not policy_validated and len(approval_reason) < 10:
+        if len(approval_reason) < 10:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Задача не подтверждена текущей политикой: укажите причину ручного одобрения (не менее 10 символов)",
+                "Ручное принятие — исключение из автоматической политики: укажите причину (не менее 10 символов)",
             )
         validation["approval"] = {
-            "basis": "policy_validated" if policy_validated else "teacher_override",
+            "basis": "teacher_override",
             "reviewed_by": user.id,
             "reviewed_at": utcnow().isoformat(),
             "reason": approval_reason,

@@ -21,7 +21,7 @@ SOLVER_VERIFIER_SYSTEM_PROMPT = """Вы — второй независимый 
 запрошенные величины и выводы с единицами. Используйте только данные условия и приложенного контекста.
 Ответ — строго JSON: {"solution": "независимая проверка по шагам", "answer": "полный финальный ответ"}."""
 
-VALIDATION_POLICY_VERSION = "dual-independent-solver-v3-model-policy"
+VALIDATION_POLICY_VERSION = "evidence-gate-v4-blind-cross-check"
 
 ANSWER_FORMAT_HINTS = {
     "numeric": "число с единицами измерения",
@@ -65,6 +65,7 @@ _KNOWN_UNITS = {
     "кдж",
     "кдж/моль",
     "км",
+    "кл",
     "кпа",
     "л",
     "м",
@@ -119,6 +120,26 @@ class _NumberOccurrence:
     end: int
     unit: str | None
     unit_end: int | None
+    label: str | None
+
+
+_EXPLICIT_LABEL_RE = re.compile(r"([a-zа-яёζδφ][\wа-яёζδφ]*)\s*=\s*$", re.IGNORECASE)
+_CLAIM_SPLIT_RE = re.compile(r"[;\n.!?]+")
+_CLAIM_STOPWORDS = {
+    "and",
+    "or",
+    "а",
+    "в",
+    "и",
+    "или",
+    "итог",
+    "ответ",
+    "равен",
+    "равна",
+    "равно",
+    "составляет",
+    "это",
+}
 
 
 def normalize_numeric_text(text: str) -> str:
@@ -172,6 +193,12 @@ def _unit_after(normalized: str, number_end: int) -> tuple[str | None, int | Non
     return _canonical_unit(match.group(1)), match.end()
 
 
+def _explicit_label_before(normalized: str, number_start: int) -> str | None:
+    segment = re.split(r"[;\n,.!?]", normalized[:number_start])[-1]
+    match = _EXPLICIT_LABEL_RE.search(segment)
+    return match.group(1).casefold() if match else None
+
+
 def _number_occurrences(text: str) -> tuple[str, list[_NumberOccurrence]]:
     normalized = normalize_numeric_text(text)
     occurrences: list[_NumberOccurrence] = []
@@ -190,6 +217,7 @@ def _number_occurrences(text: str) -> tuple[str, list[_NumberOccurrence]]:
                 end=match.end(),
                 unit=unit,
                 unit_end=unit_end,
+                label=_explicit_label_before(normalized, match.start()),
             )
         )
     return normalized, occurrences
@@ -323,9 +351,29 @@ def _drop_context_groups(
 
 
 def _occurrences_match(reference: _NumberOccurrence, solver: _NumberOccurrence, rel: float) -> bool:
-    # Preserve the legacy numeric match so a same number with a wrong prefix is diagnosed
-    # as a missing unit, then additionally accept physically equal SI-prefixed values.
-    return _close(reference.value, solver.value, rel) or _same_physical_value(reference, solver, rel)
+    numeric_match = _close(reference.value, solver.value, rel) or _same_physical_value(reference, solver, rel)
+    if not numeric_match:
+        return False
+    if reference.label and solver.label and reference.label != solver.label:
+        return False
+    if reference.unit is None:
+        return True
+    return reference.unit == solver.unit or _same_physical_value(reference, solver, rel)
+
+
+def _required_text_claims(text: str) -> list[tuple[str, frozenset[str]]]:
+    claims: list[tuple[str, frozenset[str]]] = []
+    normalized = normalize_numeric_text(text)
+    for raw_clause in _CLAIM_SPLIT_RE.split(normalized):
+        clause = raw_clause.strip()
+        if not clause or _number_tokens(clause):
+            continue
+        words = [word.casefold() for word in _WORD_RE.findall(clause)]
+        words = [word for word in words if len(word) > 1 and word not in _CLAIM_STOPWORDS]
+        stems = frozenset(_ru_stemmer.stemWords(words))
+        if stems:
+            claims.append((clause, stems))
+    return claims
 
 
 def _unit_has_equivalent_value(
@@ -383,6 +431,15 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
         reference_groups = [[occurrence.value for occurrence in group] for group in ref_grouped]
         missing_groups = [[occurrence.value for occurrence in group] for group in missing_occurrence_groups]
         missing: list[float | list[float]] = [group[0] if len(group) == 1 else group for group in missing_groups]
+        reference_occurrences = [occurrence for group in ref_grouped for occurrence in group]
+        unexpected_solver_numbers = [
+            solver_filtered[index].value
+            for index in unmatched_solver
+            if not any(
+                _occurrences_match(reference_occurrence, solver_filtered[index], rel)
+                for reference_occurrence in reference_occurrences
+            )
+        ]
         result.update(
             reference_number=ref_filtered[-1],
             solver_number=solver_filtered_values[-1],
@@ -393,21 +450,29 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
             required_count=len(reference_groups),
             missing_reference_numbers=missing,
             missing_reference_groups=missing_groups,
+            unexpected_solver_numbers=unexpected_solver_numbers,
         )
         reference_units = extract_units(ref_text)
         solver_units = extract_units(solver_text)
-        reference_occurrences = [occurrence for group in ref_grouped for occurrence in group]
         missing_units = sorted(
-            unit
-            for unit in reference_units - solver_units
-            if not _unit_has_equivalent_value(unit, reference_occurrences, solver_filtered, rel)
+            {
+                occurrence.unit
+                for group in missing_occurrence_groups
+                for occurrence in group
+                if occurrence.unit is not None
+            }
         )
+        solver_stems = set(_ru_stemmer.stemWords([word.casefold() for word in _WORD_RE.findall(solver_text)]))
+        missing_text_claims = [
+            claim for claim, stems in _required_text_claims(ref_text) if not stems.issubset(solver_stems)
+        ]
         result.update(
             reference_units=sorted(reference_units),
             solver_units=sorted(solver_units),
             missing_reference_units=missing_units,
+            missing_text_claims=missing_text_claims,
         )
-        if missing_units:
+        if missing_units or missing_text_claims or unexpected_solver_numbers:
             result["verdict"] = "incomplete" if matched else "mismatch"
         else:
             result["verdict"] = "match" if not missing else ("incomplete" if matched else "mismatch")
@@ -521,6 +586,8 @@ def sanity_check(task: dict) -> dict:
     statement = str(task.get("statement") or "").strip()
     if len(statement) < 30:
         issues.append("Условие подозрительно короткое (меньше 30 символов)")
+    if len(str(task.get("reference_solution") or "").strip()) < 20:
+        issues.append("Эталонное решение отсутствует или слишком короткое")
     rubric = task.get("rubric") or []
     try:
         max_score = float(task.get("max_score") or 0)
@@ -539,8 +606,8 @@ def sanity_check(task: dict) -> dict:
                 continue
         if abs(total - max_score) > 0.01:
             issues.append(f"Сумма баллов рубрики ({total:g}) не совпадает с max_score ({max_score:g})")
-    if task.get("answer_format") == "numeric" and not str(task.get("answer") or "").strip():
-        issues.append("Для числовой задачи не указан ответ")
+    if not str(task.get("answer") or "").strip():
+        issues.append("Не указан финальный ответ")
     return {"issues": issues}
 
 
@@ -642,6 +709,7 @@ def _append_solver_reason(reasons: list[str], label: str, report: dict) -> None:
 async def run_validation(
     *,
     statement: str,
+    reference_solution: str = "",
     reference_answer: str,
     rubric: list,
     max_score: float,
@@ -670,10 +738,13 @@ async def run_validation(
             reasons.append("Числа не из справочника: " + ", ".join(data["unknown_numbers"][:10]))
         if data["unknown_sources"]:
             reasons.append("Неизвестные источники данных: " + ", ".join(data["unknown_sources"][:10]))
+    else:
+        reasons.append("Проверка происхождения данных отключена — автоматический допуск невозможен")
 
     sanity = sanity_check(
         {
             "statement": statement,
+            "reference_solution": reference_solution,
             "rubric": rubric,
             "max_score": max_score,
             "answer": reference_answer,
@@ -699,7 +770,9 @@ async def run_validation(
             reasons.append("Модель-решатель не настроена")
         else:
             model_name = f"{solver_provider.name}/{solver_model.model_id}"
-            solved = await solver_check(solver_provider, solver_model, statement, grounding, answer_format)
+            # Проверяем ровно то условие, которое увидит студент. Скрытый grounding
+            # используется для аудита источников, но не должен делать неполную задачу решаемой.
+            solved = await solver_check(solver_provider, solver_model, statement, "", answer_format)
             compared = (
                 compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
                 if solved["status"] != "error"
@@ -715,7 +788,7 @@ async def run_validation(
                     solver_provider,
                     solver_model,
                     statement,
-                    grounding,
+                    "",
                     answer_format,
                     system_prompt=SOLVER_VERIFIER_SYSTEM_PROMPT,
                 )
@@ -727,11 +800,35 @@ async def run_validation(
                 verifier = _solver_report(verified, reference_answer, model_name, verified_comparison)
                 _append_solver_reason(reasons, "Независимый аудитор", verifier)
 
+    cross_comparison = (
+        compare_answers(solver.get("answer", ""), verifier.get("answer", ""), tolerance_pct, context=statement)
+        if solver.get("status") == "match" and verifier.get("status") == "match"
+        else {"verdict": "skipped"}
+    )
+    if cross_comparison["verdict"] != "match":
+        reasons.append("Контрольные решения не совпали друг с другом полностью")
+
+    reference_solution_check = compare_answers(
+        reference_answer,
+        reference_solution,
+        tolerance_pct,
+        context=statement,
+    )
+    if reference_solution_check["verdict"] != "match":
+        reasons.append("Эталонное решение не содержит полный финальный ответ")
+
     semantic_validation_complete = (
-        run_solver and model_use.decision_capable and solver["status"] == "match" and verifier["status"] == "match"
+        run_solver
+        and model_use.decision_capable
+        and solver["status"] == "match"
+        and verifier["status"] == "match"
+        and cross_comparison["verdict"] == "match"
+        and reference_solution_check["verdict"] == "match"
     )
     needs_review = (
         not semantic_validation_complete
+        or not run_data
+        or data["status"] != "ok"
         or solver["status"] in ("mismatch", "incomplete", "uncertain", "error")
         or verifier["status"] in ("mismatch", "incomplete", "uncertain", "error")
         or bool(data["unknown_numbers"])
@@ -744,9 +841,12 @@ async def run_validation(
         "model_policy": model_use.as_dict(),
         "solver": solver,
         "verifier": verifier,
+        "cross_comparison": cross_comparison,
+        "reference_solution_check": reference_solution_check,
         "data": data,
         "sanity": sanity,
         "dedup": dedup,
+        "answer_format": answer_format,
         "verdict": "needs_review" if needs_review else "validated",
         "reasons": reasons,
     }

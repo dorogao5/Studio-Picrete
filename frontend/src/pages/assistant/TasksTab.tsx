@@ -38,6 +38,7 @@ import { modelOptions } from "./PromptsTab";
 
 type Tone = "default" | "success" | "warning" | "destructive" | "info" | "accent";
 type TasksSection = "templates" | "batches" | "bank";
+type TaskFilter = "all" | "ready" | GeneratedTaskStatus;
 
 const KIND_LABELS: Record<TaskKind, string> = {
   calculation: "Расчётная задача",
@@ -66,18 +67,17 @@ const SHEET_KIND_LABELS: Record<string, string> = {
 
 const STATUS_META: Record<GeneratedTaskStatus, { label: string; tone: Tone }> = {
   draft: { label: "черновик", tone: "default" },
-  validated: { label: "прошла проверку", tone: "info" },
+  validated: { label: "готова автоматически", tone: "success" },
   needs_review: { label: "требует внимания", tone: "warning" },
-  approved: { label: "одобрена", tone: "success" },
+  approved: { label: "принята вручную", tone: "info" },
   rejected: { label: "отклонена", tone: "destructive" },
 };
 
-const FILTERS: Array<{ key: "all" | GeneratedTaskStatus; label: string }> = [
+const FILTERS: Array<{ key: TaskFilter; label: string }> = [
+  { key: "ready", label: "Готовы" },
+  { key: "needs_review", label: "Требуют внимания" },
   { key: "all", label: "Все" },
   { key: "draft", label: "Черновики" },
-  { key: "validated", label: "Прошли проверку" },
-  { key: "needs_review", label: "Требуют внимания" },
-  { key: "approved", label: "Одобрены" },
   { key: "rejected", label: "Отклонены" },
 ];
 
@@ -95,10 +95,6 @@ function slugify(text: string): string {
   return out.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "course";
 }
 
-function hasCurrentApproval(task: GeneratedTask): boolean {
-  return task.export_ready === true;
-}
-
 export default function TasksTab({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [tasks, setTasks] = useState<GeneratedTask[] | null>(null);
@@ -110,7 +106,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [sheetsError, setSheetsError] = useState("");
   const [promptsError, setPromptsError] = useState("");
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState<"all" | GeneratedTaskStatus>("all");
+  const [filter, setFilter] = useState<TaskFilter>("ready");
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const [section, setSection] = useState<TasksSection | null>(null);
@@ -120,7 +116,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   });
   const [batchModal, setBatchModal] = useState<{ open: boolean; templateId: string }>({ open: false, templateId: "" });
   const [exportOpen, setExportOpen] = useState(false);
-  const [bulkLoading, setBulkLoading] = useState(false);
+  const [revalidationLoading, setRevalidationLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const assistantIdRef = useRef(assistant.id);
   const sheetsRequestRef = useRef(0);
@@ -217,12 +213,14 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     setSheetsError("");
     setPromptsError("");
     setError("");
+    setFilter("ready");
     setSearchQuery("");
     setPage(1);
     setSection(null);
     setTemplateModal({ open: false, template: null });
     setBatchModal({ open: false, templateId: "" });
     setExportOpen(false);
+    setRevalidationLoading(false);
     setInitialLoading(true);
     void Promise.all([
       tasksApi.templates(requestedAssistantId),
@@ -270,12 +268,25 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   }, [batches, assistant.id]);
 
   const taskList = tasks ?? [];
-  const validatedCount = taskList.filter((t) => t.status === "validated" && t.validation_ready).length;
-  const approvedTasks = taskList.filter((t) => t.status === "approved");
   const exportTaskIds = exportReadyTaskIds(taskList);
-  const legacyApprovalCount = approvedTasks.filter((task) => !hasCurrentApproval(task)).length;
+  const autoReadyCount = taskList.filter((task) => task.status === "validated" && task.export_ready).length;
+  const manualReadyCount = taskList.filter((task) => task.status === "approved" && task.export_ready).length;
+  const attentionCount = taskList.filter(
+    (task) => !task.export_ready && task.status !== "rejected",
+  ).length;
+  const attentionTaskIds = taskList
+    .filter((task) => !task.export_ready && task.status !== "rejected")
+    .map((task) => task.id);
+  const runningRevalidation = batches.find(
+    (batch) => batch.status === "running" && batch.params.operation === "revalidation",
+  );
   const excludedExportCount = taskList.length - exportTaskIds.length;
-  const statusFiltered = filter === "all" ? taskList : taskList.filter((t) => t.status === filter);
+  const statusFiltered =
+    filter === "all"
+      ? taskList
+      : filter === "ready"
+        ? taskList.filter((task) => task.export_ready)
+        : taskList.filter((task) => task.status === filter);
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase("ru-RU");
   const filtered = normalizedQuery
     ? statusFiltered.filter((task) =>
@@ -299,18 +310,18 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     setPage(1);
   }, [filter, searchQuery, assistant.id, taskList.length]);
 
-  const approveAllValidated = async () => {
-    const validated = taskList.filter((t) => t.status === "validated" && t.validation_ready);
-    if (validated.length === 0) return;
-    if (!confirm(`Одобрить задачи, прошедшие проверку (${validated.length} шт.)?`)) return;
-    setBulkLoading(true);
+  const revalidateAttentionQueue = async () => {
+    if (attentionTaskIds.length === 0) return;
+    setRevalidationLoading(true);
+    setError("");
     try {
-      await Promise.all(validated.map((t) => tasksApi.update(assistant.id, t.id, { status: "approved" })));
+      const batch = await tasksApi.createRevalidationBatch(assistant.id, { task_ids: attentionTaskIds });
+      setBatches((previous) => [batch, ...previous.filter((item) => item.id !== batch.id)]);
+      setSection("batches");
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
-      await reloadTasks();
-      setBulkLoading(false);
+      setRevalidationLoading(false);
     }
   };
 
@@ -443,9 +454,15 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="text-sm font-semibold">Банк задач</h2>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            {validatedCount > 0 && (
-              <Button variant="secondary" onClick={approveAllValidated} loading={bulkLoading}>
-                <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить все прошедшие проверку ({validatedCount})
+            {attentionCount > 0 && (
+              <Button
+                variant="secondary"
+                loading={revalidationLoading}
+                disabled={Boolean(runningRevalidation)}
+                onClick={revalidateAttentionQueue}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {runningRevalidation ? "Перепроверка выполняется" : `Перепроверить очередь (${attentionCount})`}
               </Button>
             )}
             <Button variant="secondary" onClick={() => setExportOpen(true)}>
@@ -453,6 +470,29 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             </Button>
           </div>
         </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Card className="p-3.5">
+            <p className="text-xs font-medium text-muted-foreground">Готовы к использованию</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{exportTaskIds.length}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Автоматически: {autoReadyCount} · приняты как исключение: {manualReadyCount}
+            </p>
+          </Card>
+          <Card className={attentionCount > 0 ? "border-warning/35 p-3.5" : "p-3.5"}>
+            <p className="text-xs font-medium text-muted-foreground">Требуют решения</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{attentionCount}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Здесь только расхождения, устаревшие проверки и незавершённые черновики
+            </p>
+          </Card>
+        </div>
+
+        <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+          Задача становится готовой без ручного подтверждения, только если два контрольных запуска DeepSeek Pro,
+          сверка ответа и единиц, источники, рубрика и проверка на дубликаты дали согласованный результат.
+          Любое расхождение остаётся в очереди внимания.
+        </p>
 
         <div role="search" className="w-full sm:max-w-sm">
           <label className="relative block">
@@ -473,7 +513,12 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
 
         <div className="flex items-center gap-2 flex-wrap">
           {FILTERS.map((f) => {
-            const count = f.key === "all" ? taskList.length : taskList.filter((t) => t.status === f.key).length;
+            const count =
+              f.key === "all"
+                ? taskList.length
+                : f.key === "ready"
+                  ? exportTaskIds.length
+                  : taskList.filter((task) => task.status === f.key).length;
             return (
               <button
                 key={f.key}
@@ -499,14 +544,18 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             title={
               normalizedQuery
                 ? "По вашему запросу ничего не найдено"
-                : filter === "all"
+                : filter === "ready"
+                  ? "Готовых задач пока нет"
+                  : filter === "all"
                   ? "Задач пока нет"
                   : "Нет задач с таким статусом"
             }
             hint={
               normalizedQuery
                 ? "Попробуйте изменить запрос или выбрать другой статус"
-                : filter === "all"
+                : filter === "ready"
+                  ? "Запустите перепроверку банка или сгенерируйте партию по сертифицированному блюпринту"
+                  : filter === "all"
                   ? "Создайте блюпринт и сгенерируйте партию — задачи попадут сюда после автопроверки"
                   : undefined
             }
@@ -629,7 +678,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           assistant={assistant}
           taskIds={exportTaskIds}
           excludedCount={excludedExportCount}
-          legacyApprovalCount={legacyApprovalCount}
+          attentionCount={attentionCount}
+          autoReadyCount={autoReadyCount}
+          manualReadyCount={manualReadyCount}
           onClose={() => setExportOpen(false)}
         />
       )}
@@ -639,6 +690,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
 
 function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: TaskTemplate[] }) {
   const template = templates.find((t) => t.id === batch.template_id);
+  const isRevalidation = batch.params.operation === "revalidation";
   const total = batch.progress.total ?? batch.requested_count;
   const done = batch.progress.done ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
@@ -649,7 +701,9 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
           {batch.status === "running" && <Badge tone="info">выполняется</Badge>}
           {batch.status === "completed" && <Badge tone="success">завершена</Badge>}
           {batch.status === "failed" && <Badge tone="destructive">ошибка</Badge>}
-          <span className="text-sm truncate">{template ? template.name : "без блюпринта"}</span>
+          <span className="text-sm truncate">
+            {isRevalidation ? "Перепроверка банка" : template ? template.name : "без блюпринта"}
+          </span>
           <span className="text-xs text-muted-foreground">{batch.model_used}</span>
         </div>
         <span className="text-xs text-muted-foreground shrink-0">{new Date(batch.created_at).toLocaleString("ru-RU")}</span>
@@ -669,7 +723,9 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
       )}
       {batch.status === "completed" && (
         <p className="mt-1.5 text-xs text-muted-foreground">
-          сгенерировано: {batch.generated_count} из {batch.requested_count} · прошли проверку: {batch.validated_count}
+          {isRevalidation
+            ? `проверено: ${batch.generated_count} · готовы: ${batch.validated_count} · требуют внимания: ${Math.max(0, batch.generated_count - batch.validated_count)}`
+            : `готовы: ${batch.validated_count} из ${batch.requested_count} · проверено кандидатов: ${batch.generated_count} · отброшено: ${Math.max(0, batch.generated_count - batch.validated_count)}`}
         </p>
       )}
       {batch.status === "failed" && batch.error && <p className="mt-1.5 text-xs text-destructive">{batch.error}</p>}
@@ -684,6 +740,9 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5 flex-wrap">
+        {task.status === "validated" && task.export_ready && (
+          <Badge tone="success">Все обязательные проверки пройдены</Badge>
+        )}
         {v.solver?.status === "match" && <Badge tone="success">Решатель: совпал ✓</Badge>}
         {v.solver?.status === "mismatch" && <Badge tone="destructive">Решатель: расходится</Badge>}
         {v.solver?.status === "uncertain" && <Badge tone="warning">Решатель: не уверен</Badge>}
@@ -696,6 +755,16 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
         {v.verifier?.status === "uncertain" && <Badge tone="warning">Аудитор: не уверен</Badge>}
         {v.verifier?.status === "error" && <Badge tone="destructive">Аудитор: ошибка</Badge>}
         {v.verifier?.status === "skipped" && <Badge>Аудитор: пропущен</Badge>}
+        {v.cross_comparison?.verdict === "match" && <Badge tone="success">Контрольные ответы согласованы</Badge>}
+        {v.cross_comparison && v.cross_comparison.verdict !== "match" && (
+          <Badge tone="warning">Контрольные ответы расходятся</Badge>
+        )}
+        {v.reference_solution_check?.verdict === "match" && (
+          <Badge tone="success">Эталон содержит полный ответ</Badge>
+        )}
+        {v.reference_solution_check && v.reference_solution_check.verdict !== "match" && (
+          <Badge tone="warning">Эталон неполон</Badge>
+        )}
         {v.data?.status === "ok" && <Badge tone="success">Данные: ок</Badge>}
         {v.data?.status === "warn" && <Badge tone="warning">Данные: есть числа не из справочников</Badge>}
         {v.data?.status === "skipped" && <Badge>Данные: пропущено</Badge>}
@@ -715,7 +784,7 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
         <div className="rounded-md border border-border bg-muted/20 p-2.5 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={v.approval.basis === "teacher_override" ? "warning" : "success"}>
-              {v.approval.basis === "teacher_override" ? "Одобрено преподавателем вручную" : "Одобрено после автопроверки"}
+              {v.approval.basis === "teacher_override" ? "Принято преподавателем как исключение" : "Старая запись об одобрении"}
             </Badge>
             {v.approval.reviewed_at && (
               <span className="text-muted-foreground">{new Date(v.approval.reviewed_at).toLocaleString("ru-RU")}</span>
@@ -737,8 +806,8 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
   const [approvalReason, setApprovalReason] = useState("");
   const [error, setError] = useState("");
   const status = STATUS_META[task.status] ?? STATUS_META.draft;
-  const hasRecordedApproval = hasCurrentApproval(task);
-  const hasCurrentValidation = task.validation_ready === true;
+  const isAutoReady = task.status === "validated" && task.export_ready;
+  const isManualReady = task.status === "approved" && task.export_ready;
 
   const setStatus = async (next: GeneratedTaskStatus, approvalReasonOverride = "") => {
     setUpdatingStatus(true);
@@ -836,42 +905,39 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
 
       <ErrorNote message={error} />
       <div className="mt-3 flex items-center gap-1 flex-wrap">
-        {task.status !== "approved" ? (
-          hasCurrentValidation ? (
-            <Button
-              variant="secondary"
-              loading={updatingStatus}
-              disabled={revalidating}
-              onClick={() => setStatus("approved")}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" /> Одобрить
-            </Button>
-          ) : (
-            <Button
-              variant="secondary"
-              disabled={updatingStatus || revalidating}
-              onClick={() => setApprovalOpen((open) => !open)}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" /> Ручное одобрение
-            </Button>
-          )
-        ) : (
+        {isAutoReady && (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Готова к Picrete
+          </span>
+        )}
+        {isManualReady && (
           <>
-            {!hasRecordedApproval && (
-              <Button
-                variant="secondary"
-                disabled={updatingStatus || revalidating}
-                onClick={() =>
-                  hasCurrentValidation ? setStatus("approved") : setApprovalOpen((open) => !open)
-                }
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" /> Зафиксировать одобрение
-              </Button>
-            )}
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Принята как исключение
+            </span>
             <Button variant="ghost" loading={updatingStatus} disabled={revalidating} onClick={() => setStatus("draft")}>
               <RefreshCw className="h-3.5 w-3.5" /> Вернуть в черновики
             </Button>
           </>
+        )}
+        {task.status === "needs_review" && !isManualReady && (
+          <Button
+            variant="secondary"
+            disabled={updatingStatus || revalidating}
+            onClick={() => setApprovalOpen((open) => !open)}
+          >
+            Принять как исключение
+          </Button>
+        )}
+        {(task.status === "draft" || (task.status === "approved" && !isManualReady)) && (
+          <Button variant="secondary" loading={revalidating} disabled={updatingStatus} onClick={revalidate}>
+            <RefreshCw className="h-3.5 w-3.5" /> Проверить автоматически
+          </Button>
+        )}
+        {task.status === "rejected" && (
+          <Button variant="ghost" loading={updatingStatus} disabled={revalidating} onClick={() => setStatus("draft")}>
+            Вернуть в черновики
+          </Button>
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {task.status !== "rejected" && (
@@ -922,15 +988,11 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           </button>
         </div>
       </div>
-      {approvalOpen && (task.status !== "approved" || !hasRecordedApproval) && (
+      {approvalOpen && task.status === "needs_review" && (
         <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
-          <p className="text-sm font-medium">
-            {task.status === "approved" ? "Подтвердите старое одобрение" : "Почему задачу можно принять без зелёной автопроверки?"}
-          </p>
+          <p className="text-sm font-medium">Почему задачу нужно принять вопреки автоматической проверке?</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {task.status === "approved"
-              ? "У этой задачи нет записи о проверке. Сверьте условие, решение, ответ и рубрику — причина сохранится в истории."
-              : "Причина сохранится в истории задачи. Перед одобрением проверьте условие, решение, ответ и рубрику."}
+            Это исключение из автоматической политики. Причина и автор решения сохранятся в истории задачи.
           </p>
           <Textarea
             className="mt-3"
@@ -948,7 +1010,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
               disabled={approvalReason.trim().length < 10}
               onClick={() => setStatus("approved", approvalReason.trim())}
             >
-              Подтвердить одобрение
+              Принять как исключение
             </Button>
             <Button
               variant="ghost"
@@ -1307,8 +1369,6 @@ function BatchLaunchModal({
   const [topic, setTopic] = useState("");
   const [difficulty, setDifficulty] = useState(initialTemplateId ? "" : "medium");
   const [count, setCount] = useState(5);
-  const [temperature, setTemperature] = useState(0.7);
-  const [validateTasks, setValidateTasks] = useState(true);
   const [instructions, setInstructions] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1325,9 +1385,9 @@ function BatchLaunchModal({
         topic,
         difficulty,
         count,
-        temperature,
+        temperature: 0.7,
         instructions,
-        validate_tasks: validateTasks,
+        validate_tasks: true,
       });
       onLaunched(batch);
     } catch (err) {
@@ -1368,8 +1428,8 @@ function BatchLaunchModal({
           </Select>
         </Field>
         <Field
-          label="Решатель"
-          hint="DeepSeek Pro решает задачу дважды независимо. Flash — только предварительная проверка и не даёт зелёный статус."
+          label="Контрольная модель"
+          hint="DeepSeek Pro выполняет два слепых контрольных запуска. Flash может использоваться только для предварительного просмотра и не допускает задачу в банк."
         >
           <Select value={solverId} onChange={(e) => setSolverId(e.target.value)}>
             <option value="">— та же модель —</option>
@@ -1414,33 +1474,17 @@ function BatchLaunchModal({
             </Select>
           </Field>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Сколько задач (1–20)">
-            <Input type="number" min={1} max={20} value={count} onChange={(e) => setCount(Number(e.target.value))} />
-          </Field>
-          <Field label="Temperature">
-            <Input
-              type="number"
-              min={0}
-              max={2}
-              step={0.1}
-              value={temperature}
-              onChange={(e) => setTemperature(Number(e.target.value))}
-            />
-          </Field>
-        </div>
+        <Field label="Сколько готовых задач нужно (1–20)">
+          <Input type="number" min={1} max={20} value={count} onChange={(e) => setCount(Number(e.target.value))} />
+        </Field>
         <Field label="Доп. инструкции">
           <Textarea rows={2} value={instructions} onChange={(e) => setInstructions(e.target.value)} />
         </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={validateTasks}
-            onChange={(e) => setValidateTasks(e.target.checked)}
-            className="h-4 w-4 accent-accent"
-          />
-          Автопроверка после генерации (решатель, сверка данных, sanity, дедуп)
-        </label>
+        <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+          Платформа сама проверит каждый кандидат: решаемость без скрытых данных, полный ответ и единицы,
+          источники, рубрику и дубликаты. Готовые задачи попадут в банк без ручного подтверждения;
+          расхождения будут отделены от них.
+        </p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
@@ -1459,13 +1503,17 @@ function ExportModal({
   assistant,
   taskIds,
   excludedCount,
-  legacyApprovalCount,
+  attentionCount,
+  autoReadyCount,
+  manualReadyCount,
   onClose,
 }: {
   assistant: Assistant;
   taskIds: string[];
   excludedCount: number;
-  legacyApprovalCount: number;
+  attentionCount: number;
+  autoReadyCount: number;
+  manualReadyCount: number;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"bank" | "variants">("bank");
@@ -1539,20 +1587,18 @@ function ExportModal({
           <Input value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} />
         </Field>
         <p className="text-xs text-muted-foreground">
-          В файл войдут задачи с актуальным одобрением: {taskIds.length} шт.
+          В файл войдут готовые задачи: {taskIds.length} шт. Автоматически допущены: {autoReadyCount};
+          приняты преподавателем как исключение: {manualReadyCount}.
         </p>
         {excludedCount > 0 && (
           <p className="rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-foreground">
-            Исключены из файла: {excludedCount} шт.
-            {legacyApprovalCount > 0
-              ? ` Из них ${legacyApprovalCount} — старые одобрения без записи о проверке.`
-              : ""}{" "}
-            Черновики и задачи без актуального одобрения в экспорт не попадут.
+            Не войдут в файл: {excludedCount} шт. Из них требуют решения: {attentionCount}. Черновики,
+            отклонённые задачи и задачи без полного набора доказательств не экспортируются.
           </p>
         )}
         {taskIds.length === 0 && (
           <p className="text-xs text-muted-foreground">
-            Сначала проверьте и одобрите хотя бы одну задачу в банке.
+            Пока нет ни одной задачи, прошедшей полный автоматический контроль или принятой как исключение.
           </p>
         )}
         <ErrorNote message={error} />

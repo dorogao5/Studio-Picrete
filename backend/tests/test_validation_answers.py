@@ -52,8 +52,55 @@ def test_lexically_similar_text_never_auto_approves_semantic_answer() -> None:
 def test_equal_number_with_wrong_unit_never_matches() -> None:
     result = compare_answers("m = 5 г", "m = 5 кг", tolerance_pct=2)
 
-    assert result["verdict"] == "incomplete"
+    assert result["verdict"] != "match"
     assert result["missing_reference_units"] == ["г"]
+
+
+def test_units_are_bound_to_their_quantities_not_compared_as_a_global_set() -> None:
+    result = compare_answers(
+        "m = 5 г; V = 3 мл",
+        "m = 5 мл; V = 3 г",
+        tolerance_pct=2,
+    )
+
+    assert result["verdict"] != "match"
+
+
+def test_coulombs_never_match_seconds() -> None:
+    result = compare_answers("Q = 225 Кл", "Q = 225 с", tolerance_pct=2)
+
+    assert result["verdict"] != "match"
+
+
+def test_unexpected_final_quantity_prevents_automatic_match() -> None:
+    result = compare_answers("m = 5 г", "m = 5 г; V = 3 мл", tolerance_pct=2)
+
+    assert result["verdict"] != "match"
+    assert result["unexpected_solver_numbers"] == [3.0]
+
+
+def test_explicit_quantity_labels_prevent_same_unit_value_swaps() -> None:
+    result = compare_answers(
+        "m_start = 5 г; m_end = 3 г",
+        "m_start = 3 г; m_end = 5 г",
+        tolerance_pct=2,
+    )
+
+    assert result["verdict"] != "match"
+
+
+@pytest.mark.parametrize(
+    ("reference", "solver"),
+    [
+        ("pH = 2; среда кислая", "pH = 2; среда щелочная"),
+        ("ζ = -60 мВ; приближение применимо", "ζ = -60 мВ; приближение неприменимо"),
+    ],
+)
+def test_numeric_match_does_not_hide_contradictory_text_claim(reference: str, solver: str) -> None:
+    result = compare_answers(reference, solver, tolerance_pct=2)
+
+    assert result["verdict"] != "match"
+    assert result["missing_text_claims"]
 
 
 def test_equivalent_litre_notation_is_normalized() -> None:
@@ -122,7 +169,7 @@ def test_alternative_number_still_requires_reference_unit() -> None:
         tolerance_pct=0.01,
     )
 
-    assert result["verdict"] == "incomplete"
+    assert result["verdict"] != "match"
     assert result["missing_reference_units"] == ["см"]
 
 

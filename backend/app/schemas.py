@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
-from app.services.task_approval import has_complete_approval, validation_is_current_decision
+from app.services.task_approval import has_complete_approval, task_is_export_ready, validation_is_current_decision
 
 
 class ORMModel(BaseModel):
@@ -300,9 +300,7 @@ class TaskTemplateUpdate(BaseModel):
 
     @field_validator("rubric")
     @classmethod
-    def validate_rubric(
-        cls, value: list[TemplateRubricCriterion] | None
-    ) -> list[TemplateRubricCriterion] | None:
+    def validate_rubric(cls, value: list[TemplateRubricCriterion] | None) -> list[TemplateRubricCriterion] | None:
         return None if value is None else _validate_template_rubric(value)
 
 
@@ -338,7 +336,7 @@ class GeneratedTaskOut(ORMModel):
     @computed_field
     @property
     def export_ready(self) -> bool:
-        return self.status == "approved" and self.approved and has_complete_approval(self.validation)
+        return task_is_export_ready(self)
 
 
 class GeneratedTaskUpdate(BaseModel):
@@ -393,6 +391,11 @@ class GenerationBatchOut(ORMModel):
 
 
 class RevalidateRequest(BaseModel):
+    solver_model_entry_id: str | None = None
+
+
+class RevalidationBatchRequest(BaseModel):
+    task_ids: list[str] = Field(default_factory=list, max_length=100)
     solver_model_entry_id: str | None = None
 
 
@@ -484,9 +487,7 @@ class ReferenceSheetCreate(BaseModel):
     description: str = ""
     content_markdown: str = ""
     source_document_id: str | None = None
-    visibility: str = Field(
-        default="student", pattern="^(student|teacher_only|assessment_private|quarantine)$"
-    )
+    visibility: str = Field(default="student", pattern="^(student|teacher_only|assessment_private|quarantine)$")
     is_canonical: bool = True
     ord: int = 0
 
@@ -496,9 +497,7 @@ class ReferenceSheetUpdate(BaseModel):
     kind: str | None = Field(default=None, pattern="^(data_table|glossary|conventions|formulas|other)$")
     description: str | None = None
     content_markdown: str | None = None
-    visibility: str | None = Field(
-        default=None, pattern="^(student|teacher_only|assessment_private|quarantine)$"
-    )
+    visibility: str | None = Field(default=None, pattern="^(student|teacher_only|assessment_private|quarantine)$")
     is_canonical: bool | None = None
     ord: int | None = None
 

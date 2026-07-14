@@ -168,10 +168,14 @@ interface ValidationSolverResult {
 export interface TaskValidation {
   solver?: ValidationSolverResult;
   verifier?: ValidationSolverResult;
-  data?: { status?: "ok" | "warn" | "skipped"; unknown_numbers?: string[] };
+  cross_comparison?: { verdict?: "match" | "mismatch" | "incomplete" | "uncertain" | "skipped" };
+  reference_solution_check?: { verdict?: "match" | "mismatch" | "incomplete" | "uncertain" };
+  data?: { status?: "ok" | "warn" | "skipped"; unknown_numbers?: string[]; unknown_sources?: string[] };
   sanity?: { issues?: string[] };
   dedup?: { duplicate?: boolean; similarity?: number };
   verdict?: "validated" | "needs_review";
+  answer_format?: AnswerFormat;
+  candidate_disposition?: "discarded";
   reasons?: string[];
   model_policy?: { tier?: string; decision_capable?: boolean; policy_version?: string };
   approval?: {
