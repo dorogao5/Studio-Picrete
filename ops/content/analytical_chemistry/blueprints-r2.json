@@ -1,0 +1,165 @@
+{
+  "schema_version": "picrete-typed-blueprints-v1",
+  "content_version": "ANALYTICAL-CURATED-2026-07-R3",
+  "validator_version": "chemistry-evidence-v2",
+  "admission_contract": {
+    "certification": "one_time_per_source_and_blueprint_version",
+    "per_task_teacher_approval": false,
+    "automatic_gate_requires": [
+      "immutable content fingerprint and frozen validation contract",
+      "certified source/profile digests",
+      "required deterministic check returns pass",
+      "no deterministic fail, warning, indeterminate or error",
+      "two independent decision-grade DeepSeek solutions agree",
+      "subject critic passes self-containment, reference consistency, chemistry, units and applicability",
+      "rubric and final answer are structurally consistent"
+    ],
+    "on_exception": "needs_review_with_machine_readable_reason"
+  },
+  "contracts": [
+    {
+      "template_slug": "ana-dilution-single-stage",
+      "chemistry_check": "chemistry.dilution",
+      "core_invariant": "c1*V1 equals c2*V2 for one conserved analyte and one dilution stage.",
+      "chemistry_facts_schema": {
+        "block": "dilution",
+        "required": ["c1", "v1", "c2", "v2"],
+        "types": {
+          "c1": "amount or mass concentration measurement with unit",
+          "v1": "volume measurement with unit",
+          "c2": "same concentration dimension as c1",
+          "v2": "volume measurement with unit"
+        }
+      },
+      "coverage_boundary": "No reaction, density correction or chained aliquot may be hidden inside this typed core; more complex sample preparation requires a different certified blueprint.",
+      "gold_case_ids": ["ana-dilution-pass", "ana-dilution-mutation"]
+    },
+    {
+      "template_slug": "ana-titration-equivalence-stoichiometry",
+      "chemistry_check": "analytical.titration",
+      "core_invariant": "Analyte and titrant extents at equivalence agree under one explicitly named factor convention.",
+      "chemistry_facts_schema": {
+        "block": "titration",
+        "required": ["analyte", "titrant"],
+        "side_required": ["concentration", "volume"],
+        "side_factor_one_of": ["equivalent_factor", "stoichiometric_coefficient"],
+        "types": {
+          "concentration": "amount concentration measurement with unit",
+          "volume": "volume measurement with unit",
+          "equivalent_factor": "positive finite number",
+          "stoichiometric_coefficient": "positive finite number"
+        }
+      },
+      "coverage_boundary": "The check verifies equivalence stoichiometry, not indicator choice, activity corrections, endpoint bias or a laboratory procedure. These require explicit data and semantic review.",
+      "gold_case_ids": ["ana-titration-pass", "ana-titration-coefficient-mutation"]
+    },
+    {
+      "template_slug": "ana-gravimetric-factor",
+      "chemistry_check": "analytical.gravimetry",
+      "core_invariant": "Fg=(nu_analyte*M_analyte)/(nu_weighing_form*M_weighing_form) and m_analyte=Fg*m_weighing_form agree with one explicit stoichiometric relation.",
+      "chemistry_facts_schema": {
+        "block": "gravimetry",
+        "required": ["analyte_stoichiometric_coefficient", "weighing_form_stoichiometric_coefficient", "analyte_molar_mass", "weighing_form_molar_mass", "gravimetric_factor", "weighing_form_mass", "analyte_mass"],
+        "types": {
+          "analyte_stoichiometric_coefficient": "positive finite number",
+          "weighing_form_stoichiometric_coefficient": "positive finite number",
+          "analyte_molar_mass": "positive molar-mass measurement with unit, stated numerically in the task",
+          "weighing_form_molar_mass": "positive molar-mass measurement with unit, stated numerically in the task",
+          "gravimetric_factor": "positive finite dimensionless number",
+          "weighing_form_mass": "positive mass measurement with unit, stated numerically in the task",
+          "analyte_mass": "positive mass measurement with unit"
+        }
+      },
+      "coverage_boundary": "The check validates the factor and analyte-mass chain only. Identity and purity of the weighing form, completeness of precipitation/ignition, sample mass, mass fraction and uncertainty still require explicit task data and independent solver/critic review.",
+      "gold_case_ids": ["ana-gravimetry-pass", "ana-gravimetry-stoichiometry-mutation"]
+    },
+    {
+      "template_slug": "ana-conductometry-cell-constant",
+      "chemistry_check": "analytical.conductometry",
+      "core_invariant": "G=1/R and kappa=K_cell*G agree after converting resistance, conductance, inverse-length and conductivity units.",
+      "chemistry_facts_schema": {
+        "block": "conductometry",
+        "required": ["resistance", "conductance", "cell_constant", "conductivity"],
+        "types": {
+          "resistance": "positive resistance measurement with unit; either R or matching G is stated numerically in the task",
+          "conductance": "positive conductance measurement with unit; either G or matching R is stated numerically in the task",
+          "cell_constant": "positive inverse-length measurement with unit, stated numerically in the task",
+          "conductivity": "positive conductivity measurement with unit"
+        }
+      },
+      "coverage_boundary": "The check validates one certified cell constant and the R/G/kappa chain. It does not derive K_cell from a reference solution, verify temperature compensation, electrode polarization, concentration dependence or molar conductivity.",
+      "gold_case_ids": ["ana-conductometry-pass", "ana-conductometry-unit-scale-mutation"]
+    },
+    {
+      "template_slug": "ana-coulometry-constant-current",
+      "chemistry_check": "analytical.faraday",
+      "core_invariant": "Q=I*t, n_e=Q/F and m=M*Q*eta/(zF) agree, and the numeric F used by the solution is explicitly visible in the task statement.",
+      "chemistry_facts_schema": {
+        "block": "faraday",
+        "required": ["current", "time", "charge", "faraday_constant", "electron_amount", "mass", "molar_mass", "electrons", "current_efficiency"],
+        "types": {
+          "current": "current measurement with unit",
+          "time": "time measurement with unit",
+          "charge": "charge measurement with unit",
+          "faraday_constant": "positive charge-per-amount measurement with C/mol unit, stated numerically in the task",
+          "electron_amount": "amount measurement with unit",
+          "mass": "mass measurement with unit",
+          "molar_mass": "molar-mass measurement with unit",
+          "electrons": "positive finite stoichiometric electron count",
+          "current_efficiency": "fraction in (0,1]"
+        }
+      },
+      "coverage_boundary": "The module accepts no hidden Faraday constant: F=96485.33212 C/mol must be explicit in the statement and structured facts. The electrochemical identity of the reaction and z still require an explicit equation and agent criticism.",
+      "gold_case_ids": ["ana-faraday-pass", "ana-faraday-efficiency-mutation"]
+    },
+    {
+      "template_slug": "ana-coulometry-current-profile",
+      "chemistry_check": "analytical.faraday",
+      "core_invariant": "The final Q and n_e/mass relations agree after the profile has been integrated, using the numeric F explicitly visible in the task statement.",
+      "chemistry_facts_schema": {
+        "block": "faraday",
+        "required": ["charge", "faraday_constant", "electron_amount"],
+        "optional": ["mass", "molar_mass", "electrons", "current_efficiency"],
+        "types": {
+          "charge": "charge measurement with unit",
+          "faraday_constant": "positive charge-per-amount measurement with C/mol unit, stated numerically in the task",
+          "electron_amount": "amount measurement with unit",
+          "mass": "mass measurement with unit",
+          "molar_mass": "molar-mass measurement with unit",
+          "electrons": "positive finite number",
+          "current_efficiency": "fraction in (0,1]"
+        }
+      },
+      "coverage_boundary": "F=96485.33212 C/mol must be explicit in the statement and structured facts. The current validator does not recompute a piecewise integral from an interval array. Independent solvers and the critic must recompute every interval; the deterministic core checks only downstream Faraday relations. A task may not claim deterministic coverage of the integration itself.",
+      "gold_case_ids": ["ana-faraday-pass", "ana-faraday-efficiency-mutation"]
+    },
+    {
+      "template_slug": "ana-calibration-inverse-range",
+      "chemistry_check": "analytical.calibration",
+      "core_invariant": "For y=a*c+b, c=(signal-intercept)/slope and c lies inside the certified range.",
+      "chemistry_facts_schema": {
+        "block": "calibration",
+        "required": ["slope", "intercept", "signal", "concentration", "calibration_range"],
+        "types": {
+          "slope": "finite non-zero number",
+          "intercept": "finite number",
+          "signal": "finite number",
+          "concentration": "finite number in the same numeric scale as calibration_range",
+          "calibration_range": "two finite numeric bounds"
+        }
+      },
+      "coverage_boundary": "The check verifies inversion and flags extrapolation. It does not independently fit raw calibration points, validate weighting, blank correction, heteroscedasticity or detection limits.",
+      "gold_case_ids": ["ana-calibration-pass", "ana-calibration-extrapolation-mutation"]
+    }
+  ],
+  "semantic_only_blueprints": [
+    {
+      "template_slug": "ana-qualitative-evidence-audit",
+      "reason": "No deterministic engine decides selectivity or matrix interference."
+    },
+    {
+      "template_slug": "ana-spm-evidence-audit",
+      "reason": "No SPM calibration/artifact deterministic engine is implemented."
+    }
+  ]
+}

@@ -60,14 +60,14 @@ export default function Providers() {
 
   return (
     <div className="max-w-4xl space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Провайдеры LLM</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold">Провайдеры моделей</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Подключения к Yandex AI Studio, DeepSeek, Alibaba Model Studio и другим OpenAI-совместимым API
           </p>
         </div>
-        <Button onClick={() => setAddOpen(true)}>
+        <Button className="w-full sm:w-auto" onClick={() => setAddOpen(true)}>
           <Plus className="h-4 w-4" /> Добавить
         </Button>
       </div>
@@ -169,10 +169,10 @@ function ProviderCard({
   };
 
   return (
-    <Card className="p-5 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+    <Card className="space-y-4 p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-semibold">{provider.name}</h2>
             {provider.purpose === "architect" ? (
               <Badge tone="accent">архитектор промптов</Badge>
@@ -182,18 +182,24 @@ function ProviderCard({
             {provider.has_api_key ? <Badge tone="success">ключ задан</Badge> : <Badge tone="warning">нет ключа</Badge>}
             <BalanceChip balance={balance} />
           </div>
-          <p className="text-xs text-muted-foreground font-mono mt-1">{provider.base_url}</p>
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{provider.base_url}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={onTest} loading={testing}>
+        <div className="flex gap-2 sm:shrink-0">
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={onTest} loading={testing}>
             <RefreshCw className="h-3.5 w-3.5" /> Проверить
           </Button>
           <Button
             variant="destructive"
+            aria-label={`Удалить провайдера «${provider.name}»`}
             onClick={async () => {
               if (confirm(`Удалить провайдера «${provider.name}»?`)) {
-                await providersApi.remove(provider.id);
-                onChanged();
+                setError("");
+                try {
+                  await providersApi.remove(provider.id);
+                  onChanged();
+                } catch (err) {
+                  setError(apiErrorMessage(err));
+                }
               }
             }}
           >
@@ -213,17 +219,18 @@ function ProviderCard({
         </div>
       )}
 
-      <div className="flex gap-2 items-end">
-        <Field label={provider.has_api_key ? "Заменить API-ключ" : "API-ключ"}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1">
+          <Field label={provider.has_api_key ? "Заменить API-ключ" : "API-ключ"}>
           <Input
             type="password"
             value={keyInput}
             onChange={(e) => setKeyInput(e.target.value)}
             placeholder="вставьте ключ"
-            className="w-72"
           />
-        </Field>
-        <Button variant="secondary" onClick={saveKey} disabled={!keyInput.trim()}>
+          </Field>
+        </div>
+        <Button variant="secondary" className="w-full sm:w-auto" onClick={saveKey} disabled={!keyInput.trim()}>
           Сохранить
         </Button>
       </div>
@@ -233,18 +240,26 @@ function ProviderCard({
         {provider.models.length === 0 && <p className="text-xs text-muted-foreground mb-2">Модели не добавлены</p>}
         <div className="space-y-1.5">
           {provider.models.map((model) => (
-            <div key={model.id} className="flex items-center justify-between rounded-md border border-border px-3 py-1.5">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm font-mono truncate">{model.model_id}</span>
+            <div key={model.id} className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 break-all font-mono text-sm">{model.model_id}</span>
                 <Badge>{model.family}</Badge>
                 {model.supports_vision && <Badge tone="info">vision</Badge>}
                 {model.supports_json && <Badge tone="success">json</Badge>}
               </div>
               <button
-                className="text-muted-foreground hover:text-destructive p-1"
+                type="button"
+                aria-label={`Удалить модель «${model.model_id}»`}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                 onClick={async () => {
-                  await providersApi.removeModel(provider.id, model.id);
-                  onChanged();
+                  if (!confirm(`Удалить модель «${model.model_id}»?`)) return;
+                  setError("");
+                  try {
+                    await providersApi.removeModel(provider.id, model.id);
+                    onChanged();
+                  } catch (err) {
+                    setError(apiErrorMessage(err));
+                  }
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -252,14 +267,14 @@ function ProviderCard({
             </div>
           ))}
         </div>
-        <div className="flex gap-2 mt-2">
+        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
           <Input
             value={newModelId}
             onChange={(e) => setNewModelId(e.target.value)}
             placeholder="model id, напр. deepseek-v4-flash"
             className="font-mono"
           />
-          <Select value={newFamily} onChange={(e) => setNewFamily(e.target.value)} className="w-40">
+          <Select value={newFamily} onChange={(e) => setNewFamily(e.target.value)}>
             {FAMILIES.map((f) => (
               <option key={f} value={f}>
                 {f}
@@ -267,7 +282,7 @@ function ProviderCard({
             ))}
           </Select>
           <Button variant="secondary" onClick={addModel} disabled={!newModelId.trim()}>
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4" /> Добавить
           </Button>
         </div>
       </div>

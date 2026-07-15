@@ -1,0 +1,97 @@
+{
+  "schema_version": "picrete-source-curation-plan-v1",
+  "plan_version": "ITMO-QUAL-QUANT-2023-CURATION-R2",
+  "release_content_version": "ANALYTICAL-CURATED-2026-07-R3",
+  "source": {
+    "id": "ifmo-intro-analysis",
+    "title": "Введение в качественный и количественный анализ химических веществ",
+    "institution": "Университет ИТМО",
+    "publication_year": 2023,
+    "local_file": "/Users/doroga/Documents/аналитическая химия/Новая папка с объектами/Введение_в_качественный_и_количественный_анализ_ifmo.pdf",
+    "sha256": "ff5b7a3cde20f7a238579b3c7d6313c755d970a267234908c8a175e3e89e07b2",
+    "pages": 46,
+    "provenance": "official_institutional_publication",
+    "course_authority": "not_yet_established",
+    "status": "pending_course_binding_and_versioned_protocol"
+  },
+  "current_certified_use": {
+    "pdf_pages": "11–12",
+    "scope": "Abstract definitions of fractional/systematic analysis and selectivity only.",
+    "student_visibility": "paraphrase_in_curated_grounding",
+    "forbidden_expansion": [
+      "specific reaction tables",
+      "laboratory operations",
+      "reagent quantities or concentrations",
+      "safety, fire, first-aid or waste instructions",
+      "personal data and report workflow from another course",
+      "unverified numerical examples"
+    ]
+  },
+  "binding_record_required": {
+    "fields": [
+      "picrete_course_scope",
+      "responsible_course_owner",
+      "approved_protocol_id",
+      "approved_protocol_version",
+      "effective_from",
+      "effective_to_or_superseded_by",
+      "local_safety_document_ids",
+      "mapped_laboratory_work_ids",
+      "source_page_ranges_per_work",
+      "certification_timestamp",
+      "certified_source_sha256"
+    ],
+    "rule": "Official publication provenance does not substitute for current-course or current-protocol approval. No operational fragment becomes student-visible until every field is populated and the version is effective."
+  },
+  "curation_stages": [
+    {
+      "stage": "inventory",
+      "output": "Page-level map: definitions, theory, calculations, procedures, safety, personal data and assessment material.",
+      "automatic_publish": false
+    },
+    {
+      "stage": "visual_transcription",
+      "output": "Formula/unit transcription from rendered pages with source anchors and SHA-256.",
+      "automatic_publish": false,
+      "fail_closed_on": ["damaged subscript", "damaged charge", "ambiguous coefficient", "missing unit", "text-layer/image disagreement"]
+    },
+    {
+      "stage": "course_and_protocol_binding",
+      "output": "Versioned mapping to a current Picrete course and approved laboratory protocol.",
+      "automatic_publish": false
+    },
+    {
+      "stage": "typed_blueprint_certification",
+      "output": "Frozen task contract, rubric, source set, supported chemistry_check and gold/mutation suite.",
+      "automatic_publish": false
+    },
+    {
+      "stage": "automatic_task_admission",
+      "output": "Tasks admitted without per-item teacher approval only when the full evidence gate passes.",
+      "automatic_publish": true,
+      "required_evidence": [
+        "current source/protocol/blueprint fingerprint",
+        "deterministic check PASS where supported",
+        "two independent decision-grade DeepSeek solutions agree",
+        "subject critic passes chemistry, units, applicability and self-containment",
+        "no quarantined fragment in data_used"
+      ]
+    }
+  ],
+  "candidate_page_policy": {
+    "pages_5_7": "exclude: first-aid/fire guidance from another institution",
+    "page_10": "exclude personal data and foreign course workflow",
+    "pages_11_12": "certified definitions only",
+    "pages_17_43": "quarantine pending course/protocol binding; do not infer current procedure",
+    "all_formulas": "rendered-page visual verification required"
+  },
+  "exam_compilation": {
+    "file": "/Users/doroga/Documents/аналитическая химия/Новая папка с объектами/аналитика экз.pdf",
+    "sha256": "cf4bde11b81e14a9bb830c908eff8712dc4877dd47c1c3632f845ba3a9e78dfa",
+    "status": "discovery_only_quarantine",
+    "eligible_for_grounding": false,
+    "eligible_for_examples": false,
+    "eligible_for_answer_keys": false,
+    "reason": "Corrupted formulas, unsafe historical fragments, profanity and no controlled provenance/key. Only coarse topic inventory is permitted."
+  }
+}

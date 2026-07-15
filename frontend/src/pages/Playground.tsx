@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
@@ -41,6 +41,7 @@ import type {
 } from "../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Tabs, Textarea } from "../components/ui";
 import MathText from "../components/MathText";
+import { taskIsAutoReady, taskIsManualReady } from "../lib/taskExport";
 import { modelOptions } from "./assistant/PromptsTab";
 
 type RubricCriterion = GeneratedTask["rubric"][number];
@@ -151,7 +152,7 @@ export default function Playground() {
       <Tabs
         tabs={[
           { key: "compare", label: "Сравнение моделей" },
-          { key: "pipeline", label: "Пайплайн E2E" },
+          { key: "pipeline", label: "Проверка работы" },
           { key: "tutor", label: "Разбор со студентом" },
           { key: "history", label: "История" },
         ]}
@@ -180,20 +181,35 @@ function useSolutionInput() {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputGeneration = useRef(0);
+
+  const reset = useCallback(() => {
+    inputGeneration.current += 1;
+    setOcrText("");
+    setImageIds([]);
+    setOcrLoading(false);
+    setOcrError("");
+    if (fileRef.current) fileRef.current.value = "";
+  }, []);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    const generation = inputGeneration.current;
     setOcrLoading(true);
     setOcrError("");
     try {
       const result = await playgroundApi.ocr(Array.from(files));
+      if (generation !== inputGeneration.current) return;
       setOcrText((prev) => (prev ? `${prev}\n\n---\n\n${result.ocr_text}` : result.ocr_text));
       setImageIds((prev) => [...prev, ...result.image_ids]);
     } catch (err) {
+      if (generation !== inputGeneration.current) return;
       setOcrError(apiErrorMessage(err));
     } finally {
-      setOcrLoading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      if (generation === inputGeneration.current) {
+        setOcrLoading(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }
     }
   };
 
@@ -224,7 +240,7 @@ function useSolutionInput() {
     </div>
   );
 
-  return { ocrText, imageIds, node };
+  return { ocrText, imageIds, node, reset };
 }
 
 function ManualRubricEditor({
@@ -402,7 +418,7 @@ function TaskPicker({
           <option value="">{loadingTasks ? "— загружаем банк задач —" : "— ввести условие вручную —"}</option>
           {tasks.map((t) => (
             <option key={t.id} value={t.id}>
-              {(t.approved ? "✓ " : "") + t.statement.slice(0, 90)}
+              {(t.export_ready ? "✓ " : "") + t.statement.slice(0, 90)}
             </option>
           ))}
         </Select>
@@ -428,8 +444,14 @@ function TaskPicker({
       {taskId && selectedTask && (
         <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={selectedTask.approved ? "success" : "default"}>
-              {selectedTask.approved ? "Одобрена" : "Не одобрена"}
+            <Badge tone={selectedTask.export_ready ? "success" : selectedTask.status === "rejected" ? "destructive" : "warning"}>
+              {taskIsAutoReady(selectedTask)
+                ? "Готова автоматически"
+                : taskIsManualReady(selectedTask)
+                  ? "Принята как исключение"
+                  : selectedTask.status === "rejected"
+                    ? "Отклонена контролем"
+                    : "Требует внимания"}
             </Badge>
             <span className="text-xs text-muted-foreground">
               {selectedTask.topic || "Без темы"} · максимум {selectedTask.max_score} баллов
@@ -488,6 +510,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
 
   useEffect(() => {
     const nextRubric = rubricFromAssistant(assistant);
+    solution.reset();
     setPromptVersionId("");
     setTaskId("");
     setTaskText("");
@@ -502,7 +525,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
       const active = list.find((p) => p.role === "grader" && p.status === "active");
       if (active) setPromptVersionId(active.id);
     });
-  }, [assistant.id]);
+  }, [assistant.id, solution.reset]);
 
   const toggleModel = (id: string) => {
     setSelectedModels((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : prev.length < 6 ? [...prev, id] : prev));
@@ -629,7 +652,10 @@ function ResultsGrid({ run }: { run: PlaygroundRun }) {
 
   return (
     <div>
-      <h2 className="text-sm font-semibold mb-2">Результаты — отметьте, какая модель проверила лучше</h2>
+      <h2 className="text-sm font-semibold mb-1">Калибровка проверяющих</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Необязательный стенд: отметьте наиболее корректный разбор, когда настраиваете сценарий. Для каждой студенческой работы это делать не нужно.
+      </p>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {results.map((result) => (
           <ResultCard key={result.id} result={result} assistantId={run.assistant_id} onFeedback={sendFeedback} />
@@ -671,9 +697,6 @@ function ResultCard({
               {output.total_score ?? "?"}
               <span className="text-xs font-normal text-muted-foreground"> / {output.max_score ?? "?"}</span>
             </p>
-            {typeof output.confidence === "number" && (
-              <p className="text-xs text-muted-foreground">уверенность {(output.confidence * 100).toFixed(0)}%</p>
-            )}
           </div>
         ) : (
           <Badge tone="destructive">ошибка</Badge>
@@ -717,7 +740,14 @@ function ResultCard({
         <div className="flex items-center justify-between">
           <div className="flex gap-0.5">
             {[1, 2, 3, 4, 5].map((star) => (
-              <button key={star} onClick={() => onFeedback(result.id, { rating: star })}>
+              <button
+                key={star}
+                type="button"
+                aria-label={`Оценить ответ на ${star} из 5`}
+                aria-pressed={result.rating === star}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                onClick={() => onFeedback(result.id, { rating: star })}
+              >
                 <Star
                   className={`h-4 w-4 ${
                     result.rating && star <= result.rating ? "fill-warning text-warning" : "text-muted-foreground"
@@ -731,7 +761,7 @@ function ResultCard({
             onClick={() => onFeedback(result.id, { is_winner: !result.is_winner })}
             className="!px-2.5 !py-1 text-xs"
           >
-            <Crown className="h-3.5 w-3.5" /> {result.is_winner ? "Лучшая" : "Отметить лучшей"}
+            <Crown className="h-3.5 w-3.5" /> {result.is_winner ? "Эталонная" : "Сделать эталоном"}
           </Button>
         </div>
         <div className="flex gap-2">
@@ -840,6 +870,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
   useEffect(() => {
     let cancelled = false;
     const nextRubric = rubricFromAssistant(assistant);
+    solution.reset();
     setTaskId("");
     setTaskText("");
     setReferenceSolution("");
@@ -865,7 +896,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
     return () => {
       cancelled = true;
     };
-  }, [assistant.id]);
+  }, [assistant.id, solution.reset]);
 
   const execute = async () => {
     if (rubricError) return;
@@ -894,11 +925,11 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
     <div className="space-y-5">
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="p-5 space-y-4">
-          <h2 className="text-sm font-semibold">Пайплайн и задача</h2>
-          <Field label="Пайплайн">
+          <h2 className="text-sm font-semibold">Сценарий и задача</h2>
+          <Field label="Сценарий проверки">
             <Select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
               {pipelines === null && <option value="">— загружаем пайплайны —</option>}
-              {pipelines?.length === 0 && <option value="">— создайте пайплайн у ассистента —</option>}
+              {pipelines?.length === 0 && <option value="">— создайте сценарий у ассистента —</option>}
               {pipelines?.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({p.steps.length} шагов)
@@ -926,7 +957,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
           <h2 className="text-sm font-semibold">Решение студента</h2>
           {solution.node}
           <p className="text-xs text-muted-foreground">
-            Фото распознаётся при загрузке; пайплайн использует отредактированный текст и не оплачивает повторный OCR.
+            Фото распознаётся при загрузке; сценарий использует исправленный текст и не запускает OCR повторно.
           </p>
         </Card>
       </div>
@@ -942,9 +973,9 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
           (!solution.ocrText.trim() && solution.imageIds.length === 0)
         }
       >
-        <Play className="h-4 w-4" /> Запустить пайплайн
+        <Play className="h-4 w-4" /> Запустить сценарий
       </Button>
-      {running && <p className="text-xs text-muted-foreground">Шаги выполняются последовательно, OCR может занять пару минут...</p>}
+      {running && <p className="text-xs text-muted-foreground">Проверка выполняется; распознавание фото может занять пару минут…</p>}
 
       {run && <PipelineRunView run={run} />}
     </div>
@@ -952,6 +983,14 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
 }
 
 function PipelineRunView({ run }: { run: PipelineRun }) {
+  const stepLabel = (step: PipelineRun["steps_log"][number]): string => {
+    const roleLabel = step.output?.role_label;
+    if (step.type === "grade" && typeof roleLabel === "string" && roleLabel) return roleLabel;
+    if (step.type === "ocr") return "Распознавание работы";
+    if (step.type === "consensus") return "Сверка результатов";
+    return step.title || "Этап проверки";
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -963,9 +1002,9 @@ function PipelineRunView({ run }: { run: PipelineRun }) {
         <Card key={step.index} className="p-4">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">
-              {step.index + 1}. {step.type}
+              {step.index + 1}. {stepLabel(step)}
             </span>
-            {step.status === "completed" ? <Badge tone="success">ok</Badge> : <Badge tone="destructive">fail</Badge>}
+            {step.status === "completed" ? <Badge tone="success">готово</Badge> : <Badge tone="destructive">ошибка</Badge>}
             <span className="text-xs text-muted-foreground">{(step.duration_ms / 1000).toFixed(1)} с</span>
           </div>
           <StepOutput step={step} />
@@ -1009,10 +1048,21 @@ function StepOutput({ step }: { step: PipelineRun["steps_log"][number] }) {
   return (
     <div className="mt-2 text-xs space-y-1">
       <p>
-        Средний балл: <span className="font-semibold">{String(output.average_score)}</span> · разброс {String(output.spread)} (
+        Сводный балл: <span className="font-semibold">{String(output.average_score)}</span> · расхождение {String(output.spread)} (
         {String(output.spread_pct)}%)
       </p>
-      {Boolean(output.needs_teacher_review) && <Badge tone="warning">требует проверки преподавателем</Badge>}
+      {Boolean(output.needs_teacher_review) ? (
+        <Badge tone="warning">адресное исключение</Badge>
+      ) : (
+        <Badge tone="success">проверки согласованы</Badge>
+      )}
+      {Array.isArray(output.review_reasons) && output.review_reasons.length > 0 && (
+        <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+          {output.review_reasons.map((reason, index) => (
+            <li key={index}>{String(reason)}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -210,7 +210,7 @@ export default function Layout() {
               Общее
             </p>
             <SideLink to="/disciplines" icon={LayoutGrid} label="Все дисциплины" />
-            <SideLink to="/providers" icon={Plug} label="Провайдеры LLM" />
+            <SideLink to="/providers" icon={Plug} label="Провайдеры моделей" />
             {me?.role === "admin" && <SideLink to="/users" icon={Users} label="Доступы" />}
           </div>
         </nav>

@@ -17,6 +17,7 @@ from app.schemas import (
     KnowledgeChunkOut,
     KnowledgeDocumentDetailOut,
     KnowledgeDocumentOut,
+    KnowledgeDocumentUpdate,
     ReferenceSheetCreate,
     ReferenceSheetOut,
     ReferenceSheetUpdate,
@@ -26,12 +27,14 @@ from app.schemas import (
 )
 from app.security import get_current_user
 from app.services import kb, storage
+from app.services.evidence_invalidation import invalidate_task_evidence
 
 router = APIRouter(tags=["kb"], dependencies=[Depends(get_current_user)])
 
 DOC_TYPES = {"rpd", "notes", "textbook", "problem_book", "reference", "methodical", "other"}
 AUTHORITIES = {"course_policy", "course_lecture", "reference", "unverified"}
 VISIBILITIES = {"student", "teacher_only", "assessment_private", "quarantine"}
+TRUSTED_STUDENT_AUTHORITIES = {"course_policy", "course_lecture", "reference"}
 
 
 async def _get_document_or_404(db: AsyncSession, assistant_id: str, document_id: str) -> KnowledgeDocument:
@@ -56,6 +59,21 @@ async def _get_sheet_or_404(db: AsyncSession, assistant_id: str, sheet_id: str) 
     if sheet is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Справочный материал не найден")
     return sheet
+
+
+def _ensure_student_sheet_source_allowed(source: KnowledgeDocument | None, visibility: str) -> None:
+    if source is None or visibility != "student":
+        return
+    if source.authority not in TRUSTED_STUDENT_AUTHORITIES or source.visibility != "student":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Карточку для ассистента студента можно связать только с проверенным student-visible источником",
+        )
+    if source.status != "parsed":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Источник карточки ещё не разобран",
+        )
 
 
 async def _attach_chunk_counts(db: AsyncSession, documents: Iterable[KnowledgeDocument]) -> list[KnowledgeDocument]:
@@ -170,6 +188,43 @@ async def get_document(
     return (await _attach_chunk_counts(db, [document]))[0]
 
 
+@router.patch(
+    "/assistants/{assistant_id}/kb/documents/{document_id}",
+    response_model=KnowledgeDocumentOut,
+)
+async def update_document(
+    assistant_id: str,
+    document_id: str,
+    body: KnowledgeDocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeDocument:
+    document = await _get_document_or_404(db, assistant_id, document_id)
+    payload = body.model_dump(exclude_unset=True)
+    if not payload:
+        return (await _attach_chunk_counts(db, [document]))[0]
+
+    next_authority = str(payload.get("authority", document.authority))
+    next_visibility = str(payload.get("visibility", document.visibility))
+    if next_authority == "unverified" and next_visibility == "student":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Непроверенный источник нельзя открыть ассистенту студента — выберите карантин или подтвердите источник",
+        )
+
+    for field, value in payload.items():
+        if isinstance(value, str):
+            value = value.strip()
+        setattr(document, field, value)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Изменилась версия или область действия источника — автоматические доказательства нужно пересобрать",
+    )
+    await db.commit()
+    await db.refresh(document)
+    return (await _attach_chunk_counts(db, [document]))[0]
+
+
 @router.get("/assistants/{assistant_id}/kb/documents/{document_id}/chunks", response_model=list[KnowledgeChunkOut])
 async def list_chunks(
     assistant_id: str, document_id: str, db: AsyncSession = Depends(get_db)
@@ -193,6 +248,11 @@ async def reparse_document(
     await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id))
     document.status = "uploaded"
     document.error = ""
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Источник курса переразобран — автоматические доказательства нужно пересобрать",
+    )
     await db.commit()
     await db.refresh(document)
     background_tasks.add_task(kb.ingest_document, document_id)
@@ -211,6 +271,11 @@ async def delete_document(assistant_id: str, document_id: str, db: AsyncSession 
             await storage.delete_object(document.s3_key)
         except Exception:
             pass  # осиротевший объект приберёт ночной бэкап-скрипт
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Источник курса удалён — автоматические доказательства нужно пересобрать",
+    )
     await db.delete(document)
     await db.commit()
     return {"ok": True}
@@ -307,6 +372,7 @@ async def create_sheet(
     source_document = None
     if body.source_document_id:
         source_document = await _get_document_or_404(db, assistant_id, body.source_document_id)
+    _ensure_student_sheet_source_allowed(source_document, body.visibility)
 
     title = body.title.strip()
     content = body.content_markdown.strip()
@@ -331,6 +397,11 @@ async def create_sheet(
         existing.ord = body.ord
         if body.source_document_id:
             existing.source_document_id = body.source_document_id
+        await invalidate_task_evidence(
+            db,
+            assistant_id,
+            reason="Изменилась справочная карточка — автоматические доказательства нужно пересобрать",
+        )
         await db.commit()
         await db.refresh(existing)
         return existing
@@ -346,6 +417,11 @@ async def create_sheet(
         content_markdown=content,
     )
     db.add(sheet)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Добавлена справочная карточка — автоматические доказательства нужно пересобрать",
+    )
     await db.commit()
     await db.refresh(sheet)
     return sheet
@@ -381,6 +457,11 @@ async def create_sheet_from_chunks(
         created_by=user.id,
     )
     db.add(sheet)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Добавлена справочная карточка — автоматические доказательства нужно пересобрать",
+    )
     await db.commit()
     await db.refresh(sheet)
     return sheet
@@ -391,8 +472,19 @@ async def update_sheet(
     assistant_id: str, sheet_id: str, body: ReferenceSheetUpdate, db: AsyncSession = Depends(get_db)
 ) -> ReferenceSheet:
     sheet = await _get_sheet_or_404(db, assistant_id, sheet_id)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    payload = body.model_dump(exclude_unset=True)
+    source_document = None
+    next_source_id = payload.get("source_document_id", sheet.source_document_id)
+    if next_source_id:
+        source_document = await _get_document_or_404(db, assistant_id, str(next_source_id))
+    _ensure_student_sheet_source_allowed(source_document, str(payload.get("visibility", sheet.visibility)))
+    for field, value in payload.items():
         setattr(sheet, field, value)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Изменилась справочная карточка — автоматические доказательства нужно пересобрать",
+    )
     await db.commit()
     await db.refresh(sheet)
     return sheet
@@ -401,6 +493,11 @@ async def update_sheet(
 @router.delete("/assistants/{assistant_id}/sheets/{sheet_id}")
 async def delete_sheet(assistant_id: str, sheet_id: str, db: AsyncSession = Depends(get_db)) -> dict:
     sheet = await _get_sheet_or_404(db, assistant_id, sheet_id)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        reason="Справочная карточка удалена — автоматические доказательства нужно пересобрать",
+    )
     await db.delete(sheet)
     await db.commit()
     return {"ok": True}

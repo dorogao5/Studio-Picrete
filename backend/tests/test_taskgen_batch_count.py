@@ -11,7 +11,12 @@ MERGED = {
     "answer_format": "numeric",
     "instructions": "",
     "example_tasks": [],
+    "chemistry_check": "auto",
 }
+
+
+def valid_item(statement: str) -> dict:
+    return {"statement": statement, "data_used": [], "chemistry_facts": {}}
 
 
 def run_collection(count: int):
@@ -33,7 +38,7 @@ def test_refills_items_missing_from_model_chunks(monkeypatch) -> None:
 
     async def one_at_a_time(*args, count: int, **kwargs) -> list[dict]:
         requested.append(count)
-        return [{"statement": f"Задача {len(requested)}"}]
+        return [valid_item(f"Задача {len(requested)}")]
 
     monkeypatch.setattr(taskgen, "generate_tasks", one_at_a_time)
     items, errors = asyncio.run(run_collection(4))
@@ -50,8 +55,8 @@ def test_refill_attempts_are_bounded_and_short_batch_is_failed(monkeypatch) -> N
         nonlocal calls
         calls += 1
         if calls == 1:
-            return [{"statement": "Единственная валидная задача"}]
-        return [{"statement": ""}]
+            return [valid_item("Единственная валидная задача")]
+        return [valid_item("")]
 
     monkeypatch.setattr(taskgen, "generate_tasks", mostly_invalid)
     items, errors = asyncio.run(run_collection(3))
@@ -86,3 +91,21 @@ def test_exact_batch_is_the_only_successful_completion() -> None:
     assert batch.status == "completed"
     assert batch.error == ""
     assert batch.progress == {"stage": "Готово", "done": 3, "total": 3}
+
+
+def test_refills_items_missing_structured_evidence(monkeypatch) -> None:
+    calls = 0
+
+    async def missing_then_complete(*args, **kwargs) -> list[dict]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [{"statement": "Нет evidence"}]
+        return [valid_item("Полный evidence-контракт")]
+
+    monkeypatch.setattr(taskgen, "generate_tasks", missing_then_complete)
+    items, errors = asyncio.run(run_collection(1))
+
+    assert [item["statement"] for item in items] == ["Полный evidence-контракт"]
+    assert calls == 2
+    assert any("data_used" in error for error in errors)

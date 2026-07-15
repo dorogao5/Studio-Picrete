@@ -69,7 +69,9 @@ def _validation_kwargs() -> dict:
         "reference_answer": "m = 5 г",
         "rubric": [{"criterion_name": "Расчёт", "max_score": 10}],
         "max_score": 10,
-        "answer_format": "numeric",
+        # These tests isolate model-role policy. Numeric chemistry admission is
+        # covered separately by test_chemistry_admission.py.
+        "answer_format": "text",
         "tolerance_pct": 2,
         "grounding": "",
         "sheets_text": "",
@@ -132,9 +134,10 @@ def test_advisory_or_unknown_solver_never_turns_green(monkeypatch, model_id: str
     assert calls == [model_id]
 
 
-def test_decision_solver_requires_two_matching_passes(monkeypatch) -> None:
+def test_decision_solver_requires_two_matching_passes_and_critic(monkeypatch) -> None:
     policy = _policy()
     calls: list[str] = []
+    critic_calls: list[str] = []
 
     async def fake_solver(_provider, model, *_args, **_kwargs):
         calls.append(model.model_id)
@@ -147,8 +150,25 @@ def test_decision_solver_requires_two_matching_passes(monkeypatch) -> None:
             "tokens_total": 10,
         }
 
+    async def fake_critic(_provider, model, **_kwargs):
+        critic_calls.append(model.model_id)
+        return {
+            "status": "pass",
+            "checks": {
+                "statement_self_contained": True,
+                "reference_consistent": True,
+                "solver_matches_reference": True,
+                "verifier_matches_reference": True,
+                "solver_agreement": True,
+                "structured_facts_grounded": True,
+                "units_and_chemistry_consistent": True,
+            },
+            "issues": [],
+        }
+
     monkeypatch.setattr(validation, "current_model_use_policy", lambda: policy)
     monkeypatch.setattr(validation, "solver_check", fake_solver)
+    monkeypatch.setattr(validation, "critic_check", fake_critic)
     provider = Provider(id="provider-1", name="DeepSeek", base_url="https://example.test")
 
     result = asyncio.run(
@@ -162,4 +182,186 @@ def test_decision_solver_requires_two_matching_passes(monkeypatch) -> None:
     assert result["verdict"] == "validated"
     assert result["model_policy"]["tier"] == "decision"
     assert result["solver"]["status"] == result["verifier"]["status"] == "match"
+    assert result["critic"]["status"] == "pass"
     assert calls == ["deepseek-v4-pro", "deepseek-v4-pro"]
+    assert critic_calls == ["deepseek-v4-pro"]
+
+
+def test_decision_solver_is_not_green_when_critic_finds_a_problem(monkeypatch) -> None:
+    policy = _policy()
+
+    async def fake_solver(*_args, **_kwargs):
+        return {
+            "status": "ok",
+            "solution": "Одинаковое, но ошибочное решение",
+            "answer": "m = 5 г",
+            "error": "",
+            "duration_ms": 1,
+            "tokens_total": 10,
+        }
+
+    async def fake_critic(*_args, **_kwargs):
+        return {
+            "status": "fail",
+            "checks": {
+                "statement_self_contained": True,
+                "reference_consistent": False,
+                "solver_matches_reference": True,
+                "verifier_matches_reference": True,
+                "solver_agreement": True,
+                "structured_facts_grounded": True,
+                "units_and_chemistry_consistent": False,
+            },
+            "issues": ["В эталоне нарушен материальный баланс"],
+        }
+
+    monkeypatch.setattr(validation, "current_model_use_policy", lambda: policy)
+    monkeypatch.setattr(validation, "solver_check", fake_solver)
+    monkeypatch.setattr(validation, "critic_check", fake_critic)
+    provider = Provider(id="provider-1", name="DeepSeek", base_url="https://example.test")
+
+    result = asyncio.run(
+        validation.run_validation(
+            **_validation_kwargs(),
+            solver_provider=provider,
+            solver_model=_model("deepseek-v4-pro"),
+        )
+    )
+
+    assert result["verdict"] == "needs_review"
+    assert any("материальный баланс" in reason for reason in result["reasons"])
+
+
+def test_text_paraphrases_can_be_admitted_only_by_full_semantic_critic(monkeypatch) -> None:
+    policy = _policy()
+    answers = iter(
+        [
+            (
+                "Рост концентрации электролита усиливает экранирование зарядов и сжимает диффузную часть ДЭС.",
+                "При росте ионной силы экранирование усиливается, поэтому двойной электрический слой становится тоньше.",
+            ),
+            (
+                "Из определения длины Дебая следует её обратная зависимость от квадратного корня ионной силы.",
+                "Большая ионная сила означает меньшую дебаевскую длину и более сильное экранирование.",
+            ),
+        ]
+    )
+
+    async def fake_solver(*_args, **_kwargs):
+        solution, answer = next(answers)
+        return {
+            "status": "ok",
+            "solution": solution,
+            "answer": answer,
+            "error": "",
+            "duration_ms": 1,
+            "tokens_total": 10,
+        }
+
+    async def fake_critic(*_args, **_kwargs):
+        return {
+            "status": "pass",
+            "checks": {
+                "statement_self_contained": True,
+                "reference_consistent": True,
+                "solver_matches_reference": True,
+                "verifier_matches_reference": True,
+                "solver_agreement": True,
+                "structured_facts_grounded": True,
+                "units_and_chemistry_consistent": True,
+            },
+            "issues": [],
+        }
+
+    monkeypatch.setattr(validation, "current_model_use_policy", lambda: policy)
+    monkeypatch.setattr(validation, "solver_check", fake_solver)
+    monkeypatch.setattr(validation, "critic_check", fake_critic)
+    provider = Provider(id="provider-1", name="DeepSeek", base_url="https://example.test")
+    kwargs = {
+        **_validation_kwargs(),
+        "statement": (
+            "Объясните, как увеличение ионной силы раствора влияет на длину Дебая "
+            "и экранирование заряда в рамках модели двойного электрического слоя."
+        ),
+        "reference_solution": (
+            "Дебаевская длина обратно пропорциональна квадратному корню из ионной силы. "
+            "Поэтому добавление электролита усиливает экранирование и сжимает диффузный слой."
+        ),
+        "reference_answer": (
+            "Увеличение ионной силы уменьшает длину Дебая, усиливает экранирование "
+            "и сжимает двойной электрический слой."
+        ),
+    }
+
+    result = asyncio.run(
+        validation.run_validation(
+            **kwargs,
+            solver_provider=provider,
+            solver_model=_model("deepseek-v4-pro"),
+        )
+    )
+
+    assert result["verdict"] == "validated"
+    assert result["reasons"] == []
+    for field in ("solver", "verifier"):
+        assert result[field]["status"] == "match"
+        assert result[field]["comparison"]["previous_verdict"] == "uncertain"
+        assert result[field]["comparison"]["basis"] == "subject_critic_semantic_entailment"
+    assert result["cross_comparison"]["verdict"] == "match"
+    assert result["cross_comparison"]["previous_verdict"] == "uncertain"
+    assert result["reference_solution_check"]["basis"] == "subject_critic_semantic_entailment"
+
+
+def test_text_paraphrases_stay_blocked_when_critic_omits_reference_entailment(monkeypatch) -> None:
+    policy = _policy()
+
+    async def fake_solver(*_args, **_kwargs):
+        return {
+            "status": "ok",
+            "solution": "Объяснение через усиление экранирования и уменьшение толщины диффузного слоя.",
+            "answer": "Электролит усиливает экранирование, поэтому диффузный слой сжимается.",
+            "error": "",
+            "duration_ms": 1,
+            "tokens_total": 10,
+        }
+
+    async def incomplete_critic(*_args, **_kwargs):
+        return {
+            "status": "pass",
+            "checks": {
+                "statement_self_contained": True,
+                "reference_consistent": True,
+                "solver_matches_reference": True,
+                # verifier_matches_reference is deliberately absent.
+                "solver_agreement": True,
+                "structured_facts_grounded": True,
+                "units_and_chemistry_consistent": True,
+            },
+            "issues": [],
+        }
+
+    monkeypatch.setattr(validation, "current_model_use_policy", lambda: policy)
+    monkeypatch.setattr(validation, "solver_check", fake_solver)
+    monkeypatch.setattr(validation, "critic_check", incomplete_critic)
+    provider = Provider(id="provider-1", name="DeepSeek", base_url="https://example.test")
+    kwargs = {
+        **_validation_kwargs(),
+        "statement": (
+            "Объясните, как увеличение ионной силы раствора влияет на длину Дебая "
+            "и экранирование заряда в двойном электрическом слое."
+        ),
+        "reference_solution": "Рост ионной силы уменьшает длину Дебая и усиливает экранирование заряда.",
+        "reference_answer": "Длина Дебая уменьшается, а экранирование усиливается.",
+    }
+
+    result = asyncio.run(
+        validation.run_validation(
+            **kwargs,
+            solver_provider=provider,
+            solver_model=_model("deepseek-v4-pro"),
+        )
+    )
+
+    assert result["verdict"] == "needs_review"
+    assert result["solver"]["status"] == "uncertain"
+    assert result["cross_comparison"]["verdict"] == "match"

@@ -189,6 +189,11 @@ export const kbApi = {
     api.get<KnowledgeDocument[]>(`/assistants/${assistantId}/kb/documents`).then((r) => r.data),
   document: (assistantId: string, documentId: string) =>
     api.get<KnowledgeDocumentDetail>(`/assistants/${assistantId}/kb/documents/${documentId}`).then((r) => r.data),
+  updateDocument: (
+    assistantId: string,
+    documentId: string,
+    body: Partial<Pick<KnowledgeDocument, "title" | "authority" | "visibility" | "course_scope" | "effective_version">>,
+  ) => api.patch<KnowledgeDocument>(`/assistants/${assistantId}/kb/documents/${documentId}`, body).then((r) => r.data),
   upload: (
     assistantId: string,
     file: File,

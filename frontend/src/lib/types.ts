@@ -136,6 +136,19 @@ export interface RubricCriterion {
   description: string;
 }
 
+export type ChemistryCheckId =
+  | "auto"
+  | "chemistry.stoichiometry"
+  | "chemistry.dilution"
+  | "analytical.titration"
+  | "analytical.faraday"
+  | "analytical.calibration"
+  | "analytical.gravimetry"
+  | "analytical.conductometry"
+  | "colloid.bet"
+  | "colloid.smoluchowski"
+  | "colloid.dlvo";
+
 export interface TaskTemplate {
   id: string;
   assistant_id: string;
@@ -153,6 +166,7 @@ export interface TaskTemplate {
   kb_query: string;
   validation_solver: boolean;
   validation_data_check: boolean;
+  chemistry_check: ChemistryCheckId;
 }
 
 export type GeneratedTaskStatus = "draft" | "validated" | "needs_review" | "approved" | "rejected";
@@ -169,8 +183,38 @@ export interface TaskValidation {
   solver?: ValidationSolverResult;
   verifier?: ValidationSolverResult;
   cross_comparison?: { verdict?: "match" | "mismatch" | "incomplete" | "uncertain" | "skipped" };
+  critic?: {
+    status?: "pass" | "fail" | "error" | "skipped";
+    checks?: Record<string, boolean>;
+    issues?: string[];
+    model?: string;
+  };
+  chemistry?: {
+    validation_version?: string;
+    discipline?: "general_inorganic" | "analytical" | "colloid" | "unknown";
+    deterministic_pass?: boolean;
+    applicable_count?: number;
+    admission_effect?: "pass" | "limited" | "block";
+    admission_reason?: string;
+    coverage_before_admission?: "limited";
+    required_check_ids?: string[];
+    required_not_passed?: string[];
+    blocking_codes?: string[];
+    indeterminate_codes?: string[];
+    warning_codes?: string[];
+    facts_source?: string;
+    facts_extraction?: { status?: "ok" | "error" | "not_needed" | "skipped"; error?: string; model?: string };
+    results?: Array<{
+      check_id: string;
+      state: "pass" | "fail" | "warning" | "indeterminate" | "not_applicable" | "error";
+      message: string;
+      evidence?: Record<string, unknown>;
+      blocking?: boolean;
+    }>;
+  };
   reference_solution_check?: { verdict?: "match" | "mismatch" | "incomplete" | "uncertain" };
   data?: { status?: "ok" | "warn" | "skipped"; unknown_numbers?: string[]; unknown_sources?: string[] };
+  source_lineage?: { status?: "ok" | "warn" | "skipped"; unbound_sources?: string[] };
   sanity?: { issues?: string[] };
   dedup?: { duplicate?: boolean; similarity?: number };
   verdict?: "validated" | "needs_review";
@@ -184,6 +228,8 @@ export interface TaskValidation {
     reviewed_at?: string;
     reason?: string;
     policy_version?: string;
+    schema_version?: string;
+    content_fingerprint?: string;
   };
 }
 
@@ -202,7 +248,14 @@ export interface GeneratedTask {
   model_used: string;
   status: GeneratedTaskStatus;
   validation: TaskValidation;
-  grounding: { sheets?: Array<{ id: string; title: string }>; kb_chunks?: number };
+  grounding: {
+    sheets?: Array<{ id: string; title: string }>;
+    kb_chunks?: number;
+    data_used?: Array<{ sheet_title: string; values: string[] }>;
+    chemistry_facts?: Record<string, Record<string, unknown>>;
+    chemistry_facts_source?: string;
+    validation_contract?: Record<string, unknown>;
+  };
   approved: boolean;
   approval_ready: boolean;
   validation_ready: boolean;

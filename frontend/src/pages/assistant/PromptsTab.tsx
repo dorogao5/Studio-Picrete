@@ -10,6 +10,9 @@ export function modelOptions(providers: Provider[], productionOnly: boolean) {
     .flatMap((p) =>
       p.models.filter((m) => m.enabled).map((m) => ({
         id: m.id,
+        modelId: m.model_id,
+        displayName: m.display_name,
+        notes: m.notes,
         label: `${p.name} · ${m.display_name || m.model_id}`,
         family: m.family,
         vision: m.supports_vision,

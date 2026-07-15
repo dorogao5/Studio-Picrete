@@ -35,7 +35,14 @@ def build_bank_export(
 def build_variants_export(tasks: list[GeneratedTask], tolerance_by_template: dict[str, float]) -> dict:
     items = []
     for task in tasks:
-        tolerance_pct = tolerance_by_template.get(task.template_id or "", 0.0)
+        validation = task.validation if isinstance(task.validation, dict) else {}
+        validation_config = validation.get("validation_config")
+        if not isinstance(validation_config, dict):
+            validation_config = {}
+        try:
+            tolerance_pct = float(validation_config.get("tolerance_pct"))
+        except (TypeError, ValueError):
+            tolerance_pct = tolerance_by_template.get(task.template_id or "", 0.0)
         numbers = extract_numbers(task.answer)
         answer_tolerance = abs(numbers[-1]) * tolerance_pct / 100 if numbers and tolerance_pct else 0.0
         items.append(

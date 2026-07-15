@@ -131,6 +131,7 @@ class TaskTemplate(Base):
     kb_query: Mapped[str] = mapped_column(String(512), default="")
     validation_solver: Mapped[bool] = mapped_column(Boolean, default=True)
     validation_data_check: Mapped[bool] = mapped_column(Boolean, default=True)
+    chemistry_check: Mapped[str] = mapped_column(String(64), default="auto")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

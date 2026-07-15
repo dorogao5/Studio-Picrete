@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -15,10 +15,19 @@ import {
   XCircle,
 } from "lucide-react";
 import { apiErrorMessage, promptsApi, sheetsApi, tasksApi } from "../../lib/api";
-import { exportReadyTaskIds } from "../../lib/taskExport";
+import { isKnownAdvisoryModel } from "../../lib/modelPolicy";
+import {
+  exportReadyTaskIds,
+  nextRevalidationTaskIds,
+  REVALIDATION_TASK_LIMIT,
+  taskIsAutoReady,
+  taskIsManualReady,
+  taskNeedsAttention,
+} from "../../lib/taskExport";
 import type {
   AnswerFormat,
   Assistant,
+  ChemistryCheckId,
   ExampleTask,
   GeneratedTask,
   GeneratedTaskStatus,
@@ -38,7 +47,7 @@ import { modelOptions } from "./PromptsTab";
 
 type Tone = "default" | "success" | "warning" | "destructive" | "info" | "accent";
 type TasksSection = "templates" | "batches" | "bank";
-type TaskFilter = "all" | "ready" | GeneratedTaskStatus;
+type TaskFilter = "all" | "ready" | "attention" | "draft" | "rejected";
 
 const KIND_LABELS: Record<TaskKind, string> = {
   calculation: "Расчётная задача",
@@ -57,6 +66,57 @@ const FORMAT_LABELS: Record<AnswerFormat, string> = {
 
 const DIFF_LABELS: Record<string, string> = { easy: "лёгкая", medium: "средняя", hard: "сложная" };
 
+const CHEMISTRY_CHECK_LABELS: Record<ChemistryCheckId, string> = {
+  auto: "Определять автоматически",
+  "chemistry.stoichiometry": "Стехиометрия и лимитирующий реагент",
+  "chemistry.dilution": "Материальный баланс разбавления",
+  "analytical.titration": "Эквивалентность титрования",
+  "analytical.faraday": "Закон Фарадея",
+  "analytical.calibration": "Калибровочная зависимость",
+  "analytical.gravimetry": "Гравиметрический фактор",
+  "analytical.conductometry": "Кондуктометрия",
+  "colloid.bet": "Модель БЭТ",
+  "colloid.smoluchowski": "Уравнение Смолуховского",
+  "colloid.dlvo": "Модель ДЛФО",
+};
+
+const CHEMISTRY_EVIDENCE_LABELS: Record<string, string> = {
+  "chemistry.units": "Единицы и размерности",
+  "chemistry.reaction_balance": "Баланс уравнений",
+  "chemistry.scale_compatibility": "Совместимость химических шкал",
+  "chemistry.stoichiometry": "Стехиометрия",
+  "chemistry.dilution": "Материальный баланс разбавления",
+  "analytical.titration": "Эквивалентность титрования",
+  "analytical.faraday": "Закон Фарадея",
+  "analytical.calibration": "Калибровочная зависимость",
+  "analytical.gravimetry": "Гравиметрический материальный баланс",
+  "analytical.conductometry": "Сопротивление, постоянная ячейки и проводимость",
+  "colloid.bet": "Модель БЭТ",
+  "colloid.smoluchowski": "Уравнение Смолуховского",
+  "colloid.dlvo": "Модель ДЛФО",
+  "chemistry.core_calculation_uncovered": "Основной расчёт не покрыт",
+  "chemistry.facts_schema": "Структура расчёта",
+};
+
+const chemistryChecksForDiscipline = (discipline: string): ChemistryCheckId[] => {
+  const normalized = discipline.toLocaleLowerCase("ru-RU");
+  const common: ChemistryCheckId[] = ["auto", "chemistry.stoichiometry", "chemistry.dilution"];
+  if (normalized.includes("аналит")) {
+    return [
+      ...common,
+      "analytical.titration",
+      "analytical.faraday",
+      "analytical.calibration",
+      "analytical.gravimetry",
+      "analytical.conductometry",
+    ];
+  }
+  if (normalized.includes("коллоид") || normalized.includes("поверхност")) {
+    return ["auto", "colloid.bet", "colloid.smoluchowski", "colloid.dlvo"];
+  }
+  return common;
+};
+
 const SHEET_KIND_LABELS: Record<string, string> = {
   data_table: "Таблица данных",
   glossary: "Глоссарий",
@@ -65,17 +125,9 @@ const SHEET_KIND_LABELS: Record<string, string> = {
   other: "Другое",
 };
 
-const STATUS_META: Record<GeneratedTaskStatus, { label: string; tone: Tone }> = {
-  draft: { label: "черновик", tone: "default" },
-  validated: { label: "готова автоматически", tone: "success" },
-  needs_review: { label: "требует внимания", tone: "warning" },
-  approved: { label: "принята вручную", tone: "info" },
-  rejected: { label: "отклонена", tone: "destructive" },
-};
-
 const FILTERS: Array<{ key: TaskFilter; label: string }> = [
   { key: "ready", label: "Готовы" },
-  { key: "needs_review", label: "Требуют внимания" },
+  { key: "attention", label: "Требуют внимания" },
   { key: "all", label: "Все" },
   { key: "draft", label: "Черновики" },
   { key: "rejected", label: "Отклонены" },
@@ -93,6 +145,19 @@ function slugify(text: string): string {
   let out = "";
   for (const ch of text.toLowerCase()) out += TRANSLIT[ch] ?? ch;
   return out.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "course";
+}
+
+function taskStatusMeta(task: GeneratedTask): { label: string; tone: Tone } {
+  if (taskIsAutoReady(task)) return { label: "готова автоматически", tone: "success" };
+  if (taskIsManualReady(task)) return { label: "принята как исключение", tone: "info" };
+  if (taskNeedsAttention(task)) {
+    if (task.status === "validated" || task.status === "approved") {
+      return { label: "нужна перепроверка", tone: "warning" };
+    }
+    if (task.status === "draft") return { label: "не проверена", tone: "default" };
+    return { label: "требует внимания", tone: "warning" };
+  }
+  return { label: "отклонена", tone: "destructive" };
 }
 
 export default function TasksTab({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
@@ -269,14 +334,12 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
 
   const taskList = tasks ?? [];
   const exportTaskIds = exportReadyTaskIds(taskList);
-  const autoReadyCount = taskList.filter((task) => task.status === "validated" && task.export_ready).length;
-  const manualReadyCount = taskList.filter((task) => task.status === "approved" && task.export_ready).length;
-  const attentionCount = taskList.filter(
-    (task) => !task.export_ready && task.status !== "rejected",
-  ).length;
-  const attentionTaskIds = taskList
-    .filter((task) => !task.export_ready && task.status !== "rejected")
-    .map((task) => task.id);
+  const autoReadyCount = taskList.filter(taskIsAutoReady).length;
+  const manualReadyCount = taskList.filter(taskIsManualReady).length;
+  const attentionTasks = taskList.filter(taskNeedsAttention);
+  const attentionCount = attentionTasks.length;
+  const nextAttentionTaskIds = nextRevalidationTaskIds(attentionTasks);
+  const attentionAfterNextBatch = Math.max(0, attentionCount - nextAttentionTaskIds.length);
   const runningRevalidation = batches.find(
     (batch) => batch.status === "running" && batch.params.operation === "revalidation",
   );
@@ -286,7 +349,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
       ? taskList
       : filter === "ready"
         ? taskList.filter((task) => task.export_ready)
-        : taskList.filter((task) => task.status === filter);
+        : filter === "attention"
+          ? attentionTasks
+          : taskList.filter((task) => task.status === filter);
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase("ru-RU");
   const filtered = normalizedQuery
     ? statusFiltered.filter((task) =>
@@ -311,11 +376,11 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   }, [filter, searchQuery, assistant.id, taskList.length]);
 
   const revalidateAttentionQueue = async () => {
-    if (attentionTaskIds.length === 0) return;
+    if (nextAttentionTaskIds.length === 0) return;
     setRevalidationLoading(true);
     setError("");
     try {
-      const batch = await tasksApi.createRevalidationBatch(assistant.id, { task_ids: attentionTaskIds });
+      const batch = await tasksApi.createRevalidationBatch(assistant.id, { task_ids: nextAttentionTaskIds });
       setBatches((previous) => [batch, ...previous.filter((item) => item.id !== batch.id)]);
       setSection("batches");
     } catch (err) {
@@ -341,7 +406,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             type="button"
             aria-pressed={activeSection === item.key}
             onClick={() => setSection(item.key)}
-            className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-medium transition-colors sm:text-sm ${
+            className={`flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-medium transition-colors sm:text-sm ${
               activeSection === item.key
                 ? "bg-card text-foreground shadow-soft"
                 : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
@@ -382,10 +447,14 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                         примеров: {template.example_tasks.length} · справочников: {template.reference_sheet_ids.length}
                       </span>
                     </div>
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Предметный контроль: {CHEMISTRY_CHECK_LABELS[template.chemistry_check ?? "auto"]}
+                    </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
-                      className="p-1 text-muted-foreground hover:text-foreground"
+                      type="button"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                       title="Редактировать"
                       aria-label={`Редактировать блюпринт «${template.name}»`}
                       onClick={() => openTemplateModal(template)}
@@ -393,7 +462,8 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      className="p-1 text-muted-foreground hover:text-destructive"
+                      type="button"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       title="Удалить"
                       aria-label={`Удалить блюпринт «${template.name}»`}
                       onClick={async () => {
@@ -455,15 +525,26 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           <h2 className="text-sm font-semibold">Банк задач</h2>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {attentionCount > 0 && (
-              <Button
-                variant="secondary"
-                loading={revalidationLoading}
-                disabled={Boolean(runningRevalidation)}
-                onClick={revalidateAttentionQueue}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                {runningRevalidation ? "Перепроверка выполняется" : `Перепроверить очередь (${attentionCount})`}
-              </Button>
+              <div className="min-w-0">
+                <Button
+                  variant="secondary"
+                  loading={revalidationLoading}
+                  disabled={Boolean(runningRevalidation)}
+                  onClick={revalidateAttentionQueue}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {runningRevalidation
+                    ? "Перепроверка выполняется"
+                    : attentionCount > REVALIDATION_TASK_LIMIT
+                      ? `Перепроверить следующие ${REVALIDATION_TASK_LIMIT}`
+                      : `Перепроверить ${attentionCount}`}
+                </Button>
+                {attentionAfterNextBatch > 0 && !runningRevalidation && (
+                  <p className="mt-1 text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
+                    За один запуск — {nextAttentionTaskIds.length}; затем останется {attentionAfterNextBatch}
+                  </p>
+                )}
+              </div>
             )}
             <Button variant="secondary" onClick={() => setExportOpen(true)}>
               <Download className="h-3.5 w-3.5" /> Экспорт в Picrete
@@ -489,9 +570,10 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         </div>
 
         <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          Задача становится готовой без ручного подтверждения, только если два контрольных запуска DeepSeek Pro,
-          сверка ответа и единиц, источники, рубрика и проверка на дубликаты дали согласованный результат.
-          Любое расхождение остаётся в очереди внимания.
+          Задача становится готовой без ручного подтверждения, только если два независимых решения DeepSeek Pro,
+          предметный критик, сверка ответа и единиц, источники, рубрика и проверка на дубликаты дали согласованный результат.
+          Кандидаты, не прошедшие этот контур, отбрасываются и не попадают в очередь преподавателя.
+          Очередь внимания содержит только сохранённые задачи, которым нужна повторная проверка или решение об исключении.
         </p>
 
         <div role="search" className="w-full sm:max-w-sm">
@@ -518,14 +600,16 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                 ? taskList.length
                 : f.key === "ready"
                   ? exportTaskIds.length
-                  : taskList.filter((task) => task.status === f.key).length;
+                  : f.key === "attention"
+                    ? attentionCount
+                    : taskList.filter((task) => task.status === f.key).length;
             return (
               <button
                 key={f.key}
                 type="button"
                 aria-pressed={filter === f.key}
                 onClick={() => setFilter(f.key)}
-                className={`rounded-full px-3 py-1 text-xs font-medium border ${
+                className={`min-h-10 rounded-full border px-3 py-1 text-xs font-medium ${
                   filter === f.key
                     ? "border-accent bg-accent/10 text-accent"
                     : "border-border text-muted-foreground hover:bg-muted"
@@ -694,6 +778,12 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
   const total = batch.progress.total ?? batch.requested_count;
   const done = batch.progress.done ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const rawQuality = batch.params.quality_summary;
+  const quality = rawQuality && typeof rawQuality === "object" && !Array.isArray(rawQuality)
+    ? rawQuality as Record<string, unknown>
+    : {};
+  const qualityCount = (key: string, fallback: number) =>
+    typeof quality[key] === "number" ? quality[key] as number : fallback;
   return (
     <Card className="p-3.5">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -711,20 +801,28 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
       {batch.status === "running" && (
         <div className="mt-2 space-y-1.5">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{batch.progress.stage || "запуск..."}</span>
+            <span aria-live="polite">{batch.progress.stage || "запуск..."}</span>
             <span>
               {done}/{total}
             </span>
           </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            role="progressbar"
+            aria-label={isRevalidation ? "Ход перепроверки банка" : "Ход генерации партии"}
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={done}
+            aria-valuetext={`${done} из ${total}`}
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+          >
             <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
           </div>
         </div>
       )}
       {batch.status === "completed" && (
-        <p className="mt-1.5 text-xs text-muted-foreground">
+        <p className="mt-1.5 text-xs text-muted-foreground" role="status" aria-live="polite">
           {isRevalidation
-            ? `проверено: ${batch.generated_count} · готовы: ${batch.validated_count} · требуют внимания: ${Math.max(0, batch.generated_count - batch.validated_count)}`
+            ? `проверено: ${batch.generated_count} · готовы: ${qualityCount("ready_count", batch.validated_count)} · исключены: ${qualityCount("discarded_count", 0)} · требуют внимания: ${qualityCount("attention_count", Math.max(0, batch.generated_count - batch.validated_count))}`
             : `готовы: ${batch.validated_count} из ${batch.requested_count} · проверено кандидатов: ${batch.generated_count} · отброшено: ${Math.max(0, batch.generated_count - batch.validated_count)}`}
         </p>
       )}
@@ -733,64 +831,161 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
   );
 }
 
-function ValidationReport({ task }: { task: GeneratedTask }) {
-  const v: TaskValidation = task.validation ?? {};
-  const hasReport = Boolean(v.solver || v.verifier || v.data || v.sanity || v.dedup || v.approval);
-  if (!hasReport) return <p className="text-xs text-muted-foreground">Проверка не выполнялась</p>;
+type EvidenceState = "success" | "warning" | "error" | "neutral";
+
+function EvidenceMark({ state }: { state: EvidenceState }) {
+  if (state === "success") return <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden />;
+  if (state === "error") return <XCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />;
+  if (state === "warning") return <XCircle className="h-4 w-4 shrink-0 text-warning" aria-hidden />;
+  return <span className="h-4 w-4 shrink-0 text-center text-muted-foreground" aria-hidden>—</span>;
+}
+
+function EvidenceGroup({ title, summary, state, children }: {
+  title: string;
+  summary: string;
+  state: EvidenceState;
+  children?: ReactNode;
+}) {
+  return (
+    <details className="group border-t border-border first:border-t-0" open={state === "error" || state === "warning"}>
+      <summary className="flex min-h-12 cursor-pointer list-none items-start gap-2.5 py-3 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+        <EvidenceMark state={state} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium leading-4">{title}</span>
+          <span className="mt-1 block text-xs leading-4 text-muted-foreground">{summary}</span>
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
+      </summary>
+      {children && <div className="pb-3 pl-6 pr-6 text-xs text-muted-foreground">{children}</div>}
+    </details>
+  );
+}
+
+function ChemistryEvidence({ chemistry }: { chemistry: NonNullable<TaskValidation["chemistry"]> }) {
+  const results = chemistry.results ?? [];
+  const applicable = results.filter((result) => result.state !== "not_applicable");
+  const notApplicable = results.filter((result) => result.state === "not_applicable");
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {task.status === "validated" && task.export_ready && (
-          <Badge tone="success">Все обязательные проверки пройдены</Badge>
-        )}
-        {v.solver?.status === "match" && <Badge tone="success">Решатель: совпал ✓</Badge>}
-        {v.solver?.status === "mismatch" && <Badge tone="destructive">Решатель: расходится</Badge>}
-        {v.solver?.status === "uncertain" && <Badge tone="warning">Решатель: не уверен</Badge>}
-        {v.solver?.status === "incomplete" && <Badge tone="warning">Решатель: ответ неполный</Badge>}
-        {v.solver?.status === "error" && <Badge tone="destructive">Решатель: ошибка</Badge>}
-        {v.solver?.status === "skipped" && <Badge>Решатель: пропущен</Badge>}
-        {v.verifier?.status === "match" && <Badge tone="success">Аудитор: совпал ✓</Badge>}
-        {v.verifier?.status === "mismatch" && <Badge tone="destructive">Аудитор: расходится</Badge>}
-        {v.verifier?.status === "incomplete" && <Badge tone="warning">Аудитор: ответ неполный</Badge>}
-        {v.verifier?.status === "uncertain" && <Badge tone="warning">Аудитор: не уверен</Badge>}
-        {v.verifier?.status === "error" && <Badge tone="destructive">Аудитор: ошибка</Badge>}
-        {v.verifier?.status === "skipped" && <Badge>Аудитор: пропущен</Badge>}
-        {v.cross_comparison?.verdict === "match" && <Badge tone="success">Контрольные ответы согласованы</Badge>}
-        {v.cross_comparison && v.cross_comparison.verdict !== "match" && (
-          <Badge tone="warning">Контрольные ответы расходятся</Badge>
-        )}
-        {v.reference_solution_check?.verdict === "match" && (
-          <Badge tone="success">Эталон содержит полный ответ</Badge>
-        )}
-        {v.reference_solution_check && v.reference_solution_check.verdict !== "match" && (
-          <Badge tone="warning">Эталон неполон</Badge>
-        )}
-        {v.data?.status === "ok" && <Badge tone="success">Данные: ок</Badge>}
-        {v.data?.status === "warn" && <Badge tone="warning">Данные: есть числа не из справочников</Badge>}
-        {v.data?.status === "skipped" && <Badge>Данные: пропущено</Badge>}
-        {v.sanity && ((v.sanity.issues?.length ?? 0) === 0 ? <Badge tone="success">Sanity: ок</Badge> : <Badge tone="warning">Sanity: есть замечания</Badge>)}
-        {v.dedup?.duplicate && <Badge tone="warning">Дубликат</Badge>}
+      {applicable.map((result) => {
+        const state: EvidenceState = result.state === "pass" ? "success" : result.state === "warning" ? "warning" : "error";
+        return (
+          <div key={result.check_id} className="flex items-start gap-2 rounded-md bg-muted/35 px-2.5 py-2">
+            <EvidenceMark state={state} />
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">{CHEMISTRY_EVIDENCE_LABELS[result.check_id] ?? result.check_id}</p>
+              <p className="mt-0.5 leading-4">{result.message}</p>
+            </div>
+          </div>
+        );
+      })}
+      {applicable.length === 0 && <p>Для этого задания не найдено проверяемого предметного инварианта.</p>}
+      {notApplicable.length > 0 && (
+        <details>
+          <summary className="min-h-10 cursor-pointer py-2 text-muted-foreground">
+            Ещё {notApplicable.length} неприменимых проверок
+          </summary>
+          <ul className="space-y-1 pl-4">
+            {notApplicable.map((result) => (
+              <li key={result.check_id}>{CHEMISTRY_EVIDENCE_LABELS[result.check_id] ?? result.check_id}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function ValidationReport({ task }: { task: GeneratedTask }) {
+  const v: TaskValidation = task.validation ?? {};
+  const hasReport = Boolean(v.solver || v.verifier || v.critic || v.chemistry || v.data || v.sanity || v.dedup || v.approval);
+  if (!hasReport) return <p className="text-xs text-muted-foreground">Проверка не выполнялась</p>;
+  const solutionsPass = v.solver?.status === "match" && v.verifier?.status === "match"
+    && v.cross_comparison?.verdict === "match" && v.critic?.status === "pass";
+  const chemistryEffect = v.chemistry?.admission_effect;
+  const chemistryState: EvidenceState = chemistryEffect === "pass" ? "success"
+    : chemistryEffect === "block" ? "error" : chemistryEffect === "limited" ? "warning" : "neutral";
+  const requiredChecks = v.chemistry?.required_check_ids ?? [];
+  const passedRequired = requiredChecks.filter((checkId) =>
+    v.chemistry?.results?.some((result) => result.check_id === checkId && result.state === "pass"),
+  ).length;
+  const firstChemistryProblem = v.chemistry?.admission_reason
+    ?? v.chemistry?.results?.find((result) => ["fail", "warning", "indeterminate", "error"].includes(result.state))?.message;
+  const dataPass = v.data?.status === "ok" && v.source_lineage?.status === "ok"
+    && !(v.data.unknown_numbers?.length || v.data.unknown_sources?.length || v.source_lineage.unbound_sources?.length);
+  const integrityPass = v.reference_solution_check?.verdict === "match"
+    && (v.sanity?.issues?.length ?? 0) === 0 && v.dedup?.duplicate === false;
+  const manualException = task.export_ready && v.approval?.basis === "teacher_override";
+
+  return (
+    <div className="space-y-2">
+      <div className={`rounded-lg border px-3 py-2.5 ${task.export_ready ? "border-success/35 bg-success/5" : "border-border bg-muted/20"}`}>
+        <div className="flex items-start gap-2">
+          <EvidenceMark state={task.export_ready ? "success" : "error"} />
+          <div>
+            <p className="text-sm font-semibold">
+              {manualException ? "Принята как ручное исключение" : task.export_ready ? "Допущена автоматически" : "Не допущена"}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {manualException
+                ? v.approval?.reason ?? "Преподаватель зафиксировал обоснованное исключение из автоматической политики"
+                : task.export_ready
+                ? "Доказательства согласованы; ручное подтверждение не требуется"
+                : v.reasons?.[0] ?? "Есть незавершённые обязательные проверки"}
+            </p>
+          </div>
+        </div>
       </div>
-      {(v.reasons?.length ?? 0) > 0 && (
-        <ul className="list-disc pl-4 space-y-0.5">
-          {v.reasons!.map((reason, i) => (
-            <li key={i} className="text-xs text-muted-foreground break-words">
-              <MathText inline>{reason}</MathText>
-            </li>
-          ))}
-        </ul>
+      <div className="rounded-lg border border-border px-3">
+        <EvidenceGroup
+          title="Независимое решение"
+          state={solutionsPass ? "success" : "error"}
+          summary={solutionsPass ? "Два решения и предметный критик согласованы" : "Контрольные решения не дали единого доказательства"}
+        >
+          <p>Основной решатель: {v.solver?.status ?? "не запускался"}; аудитор: {v.verifier?.status ?? "не запускался"}; критик: {v.critic?.status ?? "не запускался"}.</p>
+        </EvidenceGroup>
+        <EvidenceGroup
+          title="Химическая корректность"
+          state={chemistryState}
+          summary={chemistryEffect === "pass"
+            ? `${passedRequired} из ${requiredChecks.length} обязательных проверок подтверждены`
+            : firstChemistryProblem ?? "Детерминированное покрытие ограничено"}
+        >
+          {v.chemistry ? <ChemistryEvidence chemistry={v.chemistry} /> : <p>Предметный пакет ещё не запускался.</p>}
+        </EvidenceGroup>
+        <EvidenceGroup
+          title="Данные и источники"
+          state={dataPass ? "success" : "error"}
+          summary={dataPass ? "Числа и ссылки подтверждены" : "Происхождение данных подтверждено не полностью"}
+        >
+          {(v.data?.unknown_numbers?.length ?? 0) > 0 && <p>Не подтверждены числа: {v.data!.unknown_numbers!.join(", ")}</p>}
+          {(v.data?.unknown_sources?.length ?? 0) > 0 && <p>Не найдены источники: {v.data!.unknown_sources!.join(", ")}</p>}
+          {(v.source_lineage?.unbound_sources?.length ?? 0) > 0 && (
+            <p>Нет связи с исходным документом: {v.source_lineage!.unbound_sources!.join(", ")}</p>
+          )}
+        </EvidenceGroup>
+        <EvidenceGroup
+          title="Эталон, рубрика и дубликаты"
+          state={integrityPass ? "success" : "error"}
+          summary={integrityPass ? "Эталон полный, рубрика согласована, дубликатов нет" : "Структурная проверка задания не завершена"}
+        >
+          {(v.sanity?.issues ?? []).map((issue, index) => <p key={index}>{issue}</p>)}
+          {v.dedup?.duplicate && <p>Найдено сходство с существующим заданием.</p>}
+          {v.reference_solution_check?.verdict !== "match" && <p>Эталонное решение не содержит полный финальный ответ.</p>}
+        </EvidenceGroup>
+      </div>
+      {(v.reasons?.length ?? 0) > 1 && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="min-h-10 cursor-pointer py-2">Все причины ({v.reasons!.length})</summary>
+          <ul className="list-disc space-y-0.5 pl-5">
+            {v.reasons!.map((reason, index) => <li key={index}><MathText inline>{reason}</MathText></li>)}
+          </ul>
+        </details>
       )}
       {v.approval && (
-        <div className="rounded-md border border-border bg-muted/20 p-2.5 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={v.approval.basis === "teacher_override" ? "warning" : "success"}>
-              {v.approval.basis === "teacher_override" ? "Принято преподавателем как исключение" : "Старая запись об одобрении"}
-            </Badge>
-            {v.approval.reviewed_at && (
-              <span className="text-muted-foreground">{new Date(v.approval.reviewed_at).toLocaleString("ru-RU")}</span>
-            )}
-          </div>
-          {v.approval.reason && <p className="mt-1.5 text-muted-foreground">{v.approval.reason}</p>}
+        <div className="rounded-md border border-warning/35 bg-warning/5 p-2.5 text-xs">
+          <p className="font-medium">{task.export_ready ? "Принято преподавателем как исключение" : "Ручное решение требует обновления"}</p>
+          {v.approval.reason && <p className="mt-1 text-muted-foreground">{v.approval.reason}</p>}
         </div>
       )}
     </div>
@@ -798,6 +993,8 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
 }
 
 function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assistantId: string; onChanged: () => void }) {
+  const detailsId = useId();
+  const approvalId = useId();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [revalidating, setRevalidating] = useState(false);
@@ -805,9 +1002,10 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalReason, setApprovalReason] = useState("");
   const [error, setError] = useState("");
-  const status = STATUS_META[task.status] ?? STATUS_META.draft;
-  const isAutoReady = task.status === "validated" && task.export_ready;
-  const isManualReady = task.status === "approved" && task.export_ready;
+  const status = taskStatusMeta(task);
+  const needsAttention = taskNeedsAttention(task);
+  const isAutoReady = taskIsAutoReady(task);
+  const isManualReady = taskIsManualReady(task);
 
   const setStatus = async (next: GeneratedTaskStatus, approvalReasonOverride = "") => {
     setUpdatingStatus(true);
@@ -843,9 +1041,14 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
         <Badge tone={status.tone}>{status.label}</Badge>
         <Badge tone="info">{DIFF_LABELS[task.difficulty] ?? task.difficulty}</Badge>
         {task.topic && <span className="text-xs text-muted-foreground">{task.topic}</span>}
-        <span className="text-xs text-muted-foreground">· {task.model_used}</span>
       </div>
-      <button className="flex items-start gap-2 w-full text-left" onClick={() => setExpanded(!expanded)}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        className="flex min-h-10 w-full items-start gap-2 rounded-md py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        onClick={() => setExpanded(!expanded)}
+      >
         {expanded ? (
           <ChevronDown className="h-4 w-4 shrink-0 mt-0.5" />
         ) : (
@@ -855,9 +1058,23 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           <MathText inline>{task.statement}</MathText>
         </span>
       </button>
+      {task.validation?.chemistry && (
+        <div className="ml-6 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <EvidenceMark state={task.validation.chemistry.admission_effect === "pass"
+            ? "success"
+            : task.validation.chemistry.admission_effect === "limited" ? "warning" : "error"} />
+          <span>
+            {task.validation.chemistry.admission_effect === "pass"
+              ? `Предметный контроль: подтверждено ${task.validation.chemistry.required_check_ids?.length ?? 0}`
+              : task.validation.chemistry.admission_effect === "limited"
+                ? "Общие химические проверки пройдены; специальный расчётный инвариант не требуется"
+              : task.validation.chemistry.admission_reason ?? "Предметный контроль требует внимания"}
+          </span>
+        </div>
+      )}
 
       {expanded && (
-        <div className="mt-3 ml-6 space-y-3 text-sm">
+        <div id={detailsId} className="mt-3 ml-6 space-y-3 text-sm">
           <div>
             <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Эталонное решение</p>
             <MathText className="text-muted-foreground">{task.reference_solution || "—"}</MathText>
@@ -920,18 +1137,20 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
             </Button>
           </>
         )}
+        {needsAttention && (
+          <Button variant="secondary" loading={revalidating} disabled={updatingStatus} onClick={revalidate}>
+            <RefreshCw className="h-3.5 w-3.5" /> Перепроверить автоматически
+          </Button>
+        )}
         {task.status === "needs_review" && !isManualReady && (
           <Button
-            variant="secondary"
+            variant="ghost"
+            aria-expanded={approvalOpen}
+            aria-controls={approvalId}
             disabled={updatingStatus || revalidating}
             onClick={() => setApprovalOpen((open) => !open)}
           >
             Принять как исключение
-          </Button>
-        )}
-        {(task.status === "draft" || (task.status === "approved" && !isManualReady)) && (
-          <Button variant="secondary" loading={revalidating} disabled={updatingStatus} onClick={revalidate}>
-            <RefreshCw className="h-3.5 w-3.5" /> Проверить автоматически
           </Button>
         )}
         {task.status === "rejected" && (
@@ -942,7 +1161,8 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
         <div className="ml-auto flex items-center gap-0.5">
           {task.status !== "rejected" && (
             <button
-              className="p-1.5 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              type="button"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               title="Отклонить"
               aria-label="Отклонить задачу"
               disabled={updatingStatus || revalidating}
@@ -951,17 +1171,21 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
               <XCircle className="h-4 w-4" />
             </button>
           )}
+          {!needsAttention && task.status !== "rejected" && (
+            <button
+              type="button"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+              title="Перепроверить автопроверкой"
+              aria-label="Перепроверить задачу"
+              disabled={revalidating || updatingStatus}
+              onClick={revalidate}
+            >
+              {revalidating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </button>
+          )}
           <button
-            className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
-            title="Перепроверить автопроверкой"
-            aria-label="Перепроверить задачу"
-            disabled={revalidating || updatingStatus}
-            onClick={revalidate}
-          >
-            {revalidating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </button>
-          <button
-            className="p-1.5 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             title="Редактировать"
             aria-label="Редактировать задачу"
             disabled={updatingStatus || revalidating}
@@ -970,7 +1194,8 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
             <Pencil className="h-4 w-4" />
           </button>
           <button
-            className="p-1.5 text-muted-foreground hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
             title="Удалить"
             aria-label="Удалить задачу"
             disabled={updatingStatus || revalidating}
@@ -989,7 +1214,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
         </div>
       </div>
       {approvalOpen && task.status === "needs_review" && (
-        <div className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
+        <div id={approvalId} className="mt-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
           <p className="text-sm font-medium">Почему задачу нужно принять вопреки автоматической проверке?</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Это исключение из автоматической политики. Причина и автор решения сохранятся в истории задачи.
@@ -1134,6 +1359,7 @@ function TemplateModal({
   const [examples, setExamples] = useState<ExampleTask[]>(template?.example_tasks ?? []);
   const [validationSolver, setValidationSolver] = useState(template?.validation_solver ?? true);
   const [validationDataCheck, setValidationDataCheck] = useState(template?.validation_data_check ?? true);
+  const [chemistryCheck, setChemistryCheck] = useState<ChemistryCheckId>(template?.chemistry_check ?? "auto");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const rubricError = rubricValidationError(rubric);
@@ -1162,6 +1388,7 @@ function TemplateModal({
         kb_query: kbQuery,
         validation_solver: validationSolver,
         validation_data_check: validationDataCheck,
+        chemistry_check: chemistryCheck,
       };
       if (template) await tasksApi.updateTemplate(assistant.id, template.id, body);
       else await tasksApi.createTemplate(assistant.id, body);
@@ -1229,6 +1456,22 @@ function TemplateModal({
             />
           </Field>
         )}
+        <div className="rounded-lg border border-border bg-muted/15 p-3.5">
+          <p className="text-sm font-medium">Предметный контроль</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Платформа сама извлекает структуру расчёта и проверяет её формулами. Зафиксируйте тип только если
+            этот блюпринт всегда строится на одном методе.
+          </p>
+          <div className="mt-3">
+            <Field label="Тип расчёта">
+              <Select value={chemistryCheck} onChange={(event) => setChemistryCheck(event.target.value as ChemistryCheckId)}>
+                {chemistryChecksForDiscipline(assistant.discipline).map((checkId) => (
+                  <option key={checkId} value={checkId}>{CHEMISTRY_CHECK_LABELS[checkId]}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </div>
         <RubricEditor value={rubric} onChange={setRubric} disabled={loading} />
         <Field
           label="Инструкции генерации"
@@ -1253,7 +1496,7 @@ function TemplateModal({
           ) : (
             <div className="space-y-1.5 rounded-md border border-border p-3 max-h-48 overflow-y-auto">
               {sheets.map((sheet) => (
-                <label key={sheet.id} className="flex items-center gap-2 text-sm">
+                <label key={sheet.id} className="flex min-h-10 items-center gap-2 text-sm">
                   <input
                     type="checkbox"
                     checked={sheetIds.includes(sheet.id)}
@@ -1274,7 +1517,9 @@ function TemplateModal({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-muted-foreground">Пример {i + 1}</span>
                   <button
-                    className="p-1 text-muted-foreground hover:text-destructive"
+                    type="button"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`Удалить пример ${i + 1}`}
                     onClick={() => setExamples(examples.filter((_, idx) => idx !== i))}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -1304,7 +1549,7 @@ function TemplateModal({
           </div>
         </Field>
         <div className="space-y-1.5">
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex min-h-10 items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={validationSolver}
@@ -1313,7 +1558,7 @@ function TemplateModal({
             />
             Перепроверка независимым решателем
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex min-h-10 items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={validationDataCheck}
@@ -1355,13 +1600,18 @@ function BatchLaunchModal({
   onLaunched: (batch: GenerationBatch) => void;
 }) {
   const production = useMemo(() => modelOptions(providers, true), [providers]);
+  const controlModels = useMemo(() => production.filter((model) => !isKnownAdvisoryModel(model)), [production]);
+  const hiddenAdvisoryCount = production.length - controlModels.length;
   const generatorPrompts = useMemo(() => prompts.filter((p) => p.role === "generator"), [prompts]);
   const preferredGeneratorId = production.some((model) => model.id === assistant.default_generator_model_id)
     ? assistant.default_generator_model_id!
     : (production[0]?.id ?? "");
-  const preferredSolverId = production.some((model) => model.id === assistant.default_grader_model_id)
+  const preferredSolverId = controlModels.some((model) => model.id === assistant.default_grader_model_id)
     ? assistant.default_grader_model_id!
-    : (production.find((model) => model.id !== preferredGeneratorId)?.id ?? preferredGeneratorId);
+    : (controlModels.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro")?.id ??
+      controlModels.find((model) => model.id !== preferredGeneratorId)?.id ??
+      controlModels[0]?.id ??
+      "");
   const [templateId, setTemplateId] = useState(initialTemplateId);
   const [modelId, setModelId] = useState(preferredGeneratorId);
   const [solverId, setSolverId] = useState(preferredSolverId);
@@ -1374,6 +1624,10 @@ function BatchLaunchModal({
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
+    if (!solverId) {
+      setError("Нужна контрольная модель итогового класса — например DeepSeek V4 Pro. Flash не может допускать задачи в банк.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -1429,16 +1683,21 @@ function BatchLaunchModal({
         </Field>
         <Field
           label="Контрольная модель"
-          hint="DeepSeek Pro выполняет два слепых контрольных запуска. Flash может использоваться только для предварительного просмотра и не допускает задачу в банк."
+          hint="Из списка скрыты модели с явной маркировкой Flash/advisory. Перед запуском сервер дополнительно сверит выбранную модель с актуальной policy и заблокирует партию до генерации, если она не имеет права итогового допуска."
         >
           <Select value={solverId} onChange={(e) => setSolverId(e.target.value)}>
-            <option value="">— та же модель —</option>
-            {production.map((m) => (
+            {controlModels.length === 0 && <option value="">— подключите модель итогового класса —</option>}
+            {controlModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>
             ))}
           </Select>
+          {hiddenAdvisoryCount > 0 && (
+            <span className="block text-xs text-muted-foreground">
+              Не показано предварительных моделей: {hiddenAdvisoryCount}. Они доступны в Playground, но не в контуре допуска.
+            </span>
+          )}
         </Field>
         <Field label="Версия промпта-генератора">
           <Select value={promptVersionId} onChange={(e) => setPromptVersionId(e.target.value)}>
@@ -1481,16 +1740,17 @@ function BatchLaunchModal({
           <Textarea rows={2} value={instructions} onChange={(e) => setInstructions(e.target.value)} />
         </Field>
         <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          Платформа сама проверит каждый кандидат: решаемость без скрытых данных, полный ответ и единицы,
-          источники, рубрику и дубликаты. Готовые задачи попадут в банк без ручного подтверждения;
-          расхождения будут отделены от них.
+          Платформа сама проверит каждый кандидат: два независимых решения, предметную критику,
+          решаемость без скрытых данных, полный ответ и единицы, источники, рубрику и дубликаты.
+          Готовые задачи попадут в банк без ручного подтверждения.
+          Кандидаты с расхождениями будут отброшены и не попадут в очередь преподавателя.
         </p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Отмена
           </Button>
-          <Button onClick={submit} loading={loading} disabled={!modelId}>
+          <Button onClick={submit} loading={loading} disabled={!modelId || !solverId}>
             <Sparkles className="h-4 w-4" /> Запустить партию
           </Button>
         </div>
@@ -1554,7 +1814,7 @@ function ExportModal({
       <div className="space-y-4">
         <div className="space-y-1.5">
           <span className="text-sm font-medium">Формат</span>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex min-h-10 items-center gap-2 text-sm">
             <input
               type="radio"
               name="export-mode"
@@ -1564,7 +1824,7 @@ function ExportModal({
             />
             Банк задач (тренажёр)
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex min-h-10 items-center gap-2 text-sm">
             <input
               type="radio"
               name="export-mode"

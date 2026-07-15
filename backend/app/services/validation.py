@@ -1,3 +1,6 @@
+import hashlib
+import json
+import math
 import re
 from dataclasses import dataclass
 
@@ -5,7 +8,12 @@ import snowballstemmer
 
 from app.llm import client as llm
 from app.models import ModelEntry, Provider
+from app.services.chemistry_facts import chemistry_admission_evidence, normalize_chemistry_facts
+from app.services.chemistry_validation import CHEMISTRY_VALIDATION_VERSION
+from app.services.chemistry_units import known_unit_spellings, unit_definition
+from app.services.contracts import CHEMISTRY_FACTS_GUIDE
 from app.services.model_policy import current_model_use_policy
+from app.services.task_evidence import build_task_content_fingerprint, normalize_validation_config
 
 _ru_stemmer = snowballstemmer.stemmer("russian")
 
@@ -21,7 +29,44 @@ SOLVER_VERIFIER_SYSTEM_PROMPT = """Вы — второй независимый 
 запрошенные величины и выводы с единицами. Используйте только данные условия и приложенного контекста.
 Ответ — строго JSON: {"solution": "независимая проверка по шагам", "answer": "полный финальный ответ"}."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v4-blind-cross-check"
+SOLVER_CRITIC_SYSTEM_PROMPT = """Вы — строгий предметный редактор университетских задач по химии.
+Вы не решаете задачу в третий раз и не голосуете за большинство. Проверьте доказательства ниже на внутреннюю
+согласованность: самодостаточность условия, соответствие эталонного решения финальному ответу, независимость и
+полноту двух контрольных решений, размерности, знаки, атомный/зарядовый баланс и явно указанные ограничения модели.
+Отдельно установите семантическое следование: действительно ли полный вывод основного решателя следует из эталона
+и действительно ли полный вывод независимого аудитора следует из эталона. Совпадение терминов или общий сюжет не
+считаются доказательством. Для формул проверьте эквивалентность, область применимости, знаки и все множители.
+Отдельно проверьте, что structured chemistry_facts не содержат чисел, формул, коэффициентов или допущений,
+которых нет в условии, эталонном решении либо финальном ответе, и что выбранный блок относится к этой задаче.
+Не используйте внешние табличные значения. Любая конкретная необъяснённая проблема означает verdict="fail".
+Ответ — строго JSON:
+{"verdict":"pass|fail","checks":{"statement_self_contained":true,"reference_consistent":true,
+"solver_matches_reference":true,"verifier_matches_reference":true,"solver_agreement":true,
+"units_and_chemistry_consistent":true,"structured_facts_grounded":true},
+"issues":["конкретная проблема"]}.
+Никакого текста вне JSON."""
+
+CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный структурировщик доказательств химического расчёта.
+Вы не исправляете и не дополняете задачу, не решаете её заново и не используете внешние константы. Извлеките
+только явно записанные в условии, эталонном решении и финальном ответе величины, уравнения, коэффициенты и
+оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
+{"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
+
+VALIDATION_POLICY_VERSION = "evidence-gate-v9-semantic-entailment"
+
+CRITIC_REQUIRED_CHECKS = frozenset(
+    {
+        "statement_self_contained",
+        "reference_consistent",
+        "solver_matches_reference",
+        "verifier_matches_reference",
+        "solver_agreement",
+        "structured_facts_grounded",
+        "units_and_chemistry_consistent",
+    }
+)
+SEMANTIC_ENTAILMENT_ANSWER_FORMATS = frozenset({"formula", "text"})
+SEMANTIC_ENTAILMENT_BASIS = "subject_critic_semantic_entailment"
 
 ANSWER_FORMAT_HINTS = {
     "numeric": "число с единицами измерения",
@@ -46,7 +91,7 @@ _UNIT_ALIASES = {
     "моль/дм3": "моль/л",
     "моль/дм^3": "моль/л",
 }
-_KNOWN_UNITS = {
+_KNOWN_UNITS = set(known_unit_spellings()) | {
     "%",
     "°c",
     "атм",
@@ -98,14 +143,10 @@ _KNOWN_UNITS = {
     "ч",
     "эв",
 }
-_UNIT_SIGNATURES = {
-    "в": ("voltage", 1.0),
-    "мв": ("voltage", 1e-3),
-}
 _UNIT_RE = re.compile(
     r"(?<![a-zа-яё])("
     + "|".join(re.escape(unit) for unit in sorted(_KNOWN_UNITS, key=len, reverse=True))
-    + r")(?![a-zа-яё])",
+    + r")(?![a-zа-яё0-9])",
     re.IGNORECASE,
 )
 _ALTERNATIVE_CONNECTOR_RE = re.compile(r"(?<!\w)(?:или|либо|or)(?!\w)", re.IGNORECASE)
@@ -196,7 +237,12 @@ def _unit_after(normalized: str, number_end: int) -> tuple[str | None, int | Non
 def _explicit_label_before(normalized: str, number_start: int) -> str | None:
     segment = re.split(r"[;\n,.!?]", normalized[:number_start])[-1]
     match = _EXPLICIT_LABEL_RE.search(segment)
-    return match.group(1).casefold() if match else None
+    if match is None:
+        return None
+    candidate = match.group(1).casefold()
+    # In ``... / 100 mL = 0.010 mol/L`` the token before ``=`` is a
+    # denominator unit, not the label of the result.
+    return None if unit_definition(candidate) is not None else candidate
 
 
 def _number_occurrences(text: str) -> tuple[str, list[_NumberOccurrence]]:
@@ -236,11 +282,10 @@ def _is_direct_numeric_alternative(separator: str) -> bool:
 
 
 def _physical_value(occurrence: _NumberOccurrence) -> tuple[str, float] | None:
-    signature = _UNIT_SIGNATURES.get(occurrence.unit or "")
-    if signature is None:
+    definition = unit_definition(occurrence.unit or "")
+    if definition is None:
         return None
-    dimension, factor = signature
-    return dimension, occurrence.value * factor
+    return definition.dimension.value, occurrence.value * definition.factor_to_si + definition.offset_to_si
 
 
 def _same_physical_value(left: _NumberOccurrence, right: _NumberOccurrence, rel: float = 1e-9) -> bool:
@@ -322,7 +367,7 @@ def extract_units(text: str) -> set[str]:
 
 
 def _close(a: float, b: float, rel: float) -> bool:
-    return abs(a - b) <= max(rel * max(abs(a), abs(b)), 1e-9)
+    return math.isclose(a, b, rel_tol=rel, abs_tol=1e-15)
 
 
 def _drop_context_numbers(values: list[float], context_values: list[float]) -> list[float]:
@@ -389,7 +434,14 @@ def _unit_has_equivalent_value(
     )
 
 
-def compare_answers(reference: str, solver: str, tolerance_pct: float, context: str = "") -> dict:
+def compare_answers(
+    reference: str,
+    solver: str,
+    tolerance_pct: float,
+    context: str = "",
+    *,
+    allow_extra_numbers: bool = False,
+) -> dict:
     ref_text = (reference or "").strip()
     solver_text = (solver or "").strip()
     result: dict = {"verdict": "uncertain", "reference": ref_text, "solver": solver_text}
@@ -451,6 +503,7 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
             missing_reference_numbers=missing,
             missing_reference_groups=missing_groups,
             unexpected_solver_numbers=unexpected_solver_numbers,
+            extra_numbers_allowed=allow_extra_numbers,
         )
         reference_units = extract_units(ref_text)
         solver_units = extract_units(solver_text)
@@ -472,7 +525,7 @@ def compare_answers(reference: str, solver: str, tolerance_pct: float, context: 
             missing_reference_units=missing_units,
             missing_text_claims=missing_text_claims,
         )
-        if missing_units or missing_text_claims or unexpected_solver_numbers:
+        if missing_units or missing_text_claims or (unexpected_solver_numbers and not allow_extra_numbers):
             result["verdict"] = "incomplete" if matched else "mismatch"
         else:
             result["verdict"] = "match" if not missing else ("incomplete" if matched else "mismatch")
@@ -536,26 +589,44 @@ def data_check(statement: str, sheets_text: str, data_used: list | None = None) 
     ``None`` preserves the conservative legacy heuristic for older stored tasks.
     """
     if data_used is not None:
+        if not isinstance(data_used, list):
+            return {
+                "status": "invalid",
+                "unknown_numbers": [],
+                "unknown_sources": [],
+                "invalid_entries": ["data_used должен быть массивом"],
+            }
         if not data_used:
             return {"status": "ok", "unknown_numbers": [], "unknown_sources": []}
         sheet_tokens, sheet_values = _sheet_number_index(sheets_text)
         unknown_sources: list[str] = []
         claimed_values: list[str] = []
         sheets_casefold = (sheets_text or "").casefold()
-        for item in data_used:
+        invalid_entries: list[str] = []
+        for index, item in enumerate(data_used):
             if not isinstance(item, dict):
+                invalid_entries.append(f"data_used[{index}] должен быть объектом")
                 continue
             title = str(item.get("sheet_title") or "").strip()
-            if title and title.casefold() not in sheets_casefold and title not in unknown_sources:
+            values = item.get("values")
+            if not title:
+                invalid_entries.append(f"data_used[{index}].sheet_title не задан")
+            if not isinstance(values, list) or not values or any(not str(value).strip() for value in values):
+                invalid_entries.append(f"data_used[{index}].values должен быть непустым массивом")
+                values = []
+            title_heading = re.compile(
+                rf"(?m)^(?:##?\#?\s+)?{re.escape(title)}(?:\s|\(|\[|—|$)",
+                re.IGNORECASE,
+            )
+            if title and title_heading.search(sheets_casefold) is None and title not in unknown_sources:
                 unknown_sources.append(title)
-            values = item.get("values") or []
-            if isinstance(values, list):
-                claimed_values.extend(str(value) for value in values)
+            claimed_values.extend(str(value) for value in values)
         unknown = _unknown_number_tokens("\n".join(claimed_values), sheet_tokens, sheet_values)
         return {
-            "status": "warn" if unknown or unknown_sources else "ok",
+            "status": "invalid" if invalid_entries else ("warn" if unknown or unknown_sources else "ok"),
             "unknown_numbers": unknown[:20],
             "unknown_sources": unknown_sources[:20],
+            **({"invalid_entries": invalid_entries[:20]} if invalid_entries else {}),
         }
 
     if not (sheets_text or "").strip():
@@ -581,6 +652,56 @@ def data_check(statement: str, sheets_text: str, data_used: list | None = None) 
     return {"status": "warn" if unknown else "ok", "unknown_numbers": unknown[:20], "unknown_sources": []}
 
 
+def source_lineage_check(
+    data_used: list | None,
+    grounding_sheets: list | None,
+    provenance_text: str = "",
+) -> dict:
+    if data_used is None:
+        return {"status": "skipped", "unbound_sources": [], "kb_sources": [], "invalid_entries": []}
+    if not isinstance(data_used, list):
+        return {
+            "status": "invalid",
+            "unbound_sources": ["Некорректный data_used"],
+            "kb_sources": [],
+            "invalid_entries": ["data_used должен быть массивом"],
+        }
+    if not data_used:
+        return {"status": "ok", "unbound_sources": [], "kb_sources": [], "invalid_entries": []}
+    sheets = [sheet for sheet in (grounding_sheets or []) if isinstance(sheet, dict)]
+    by_title = {str(sheet.get("title") or "").strip().casefold(): sheet for sheet in sheets}
+    unbound: list[str] = []
+    kb_sources: list[str] = []
+    invalid_entries: list[str] = []
+    for index, item in enumerate(data_used):
+        if not isinstance(item, dict):
+            invalid_entries.append(f"data_used[{index}] должен быть объектом")
+            continue
+        title = str(item.get("sheet_title") or "").strip()
+        values = item.get("values")
+        if not title:
+            invalid_entries.append(f"data_used[{index}].sheet_title не задан")
+        if not isinstance(values, list) or not values or any(not str(value).strip() for value in values):
+            invalid_entries.append(f"data_used[{index}].values должен быть непустым массивом")
+        sheet = by_title.get(title.casefold())
+        source_ok = bool(
+            sheet is not None
+            and str(sheet.get("source_document_id") or "").strip()
+            and sheet.get("source_document_exists") is True
+            and str(sheet.get("source_authority") or "") in {"course_policy", "course_lecture", "reference"}
+        )
+        if not source_ok:
+            label = title or f"data_used[{index}]"
+            if label not in unbound:
+                unbound.append(label)
+    return {
+        "status": "invalid" if invalid_entries else ("warn" if unbound else "ok"),
+        "unbound_sources": unbound,
+        "kb_sources": kb_sources,
+        "invalid_entries": invalid_entries,
+    }
+
+
 def sanity_check(task: dict) -> dict:
     issues: list[str] = []
     statement = str(task.get("statement") or "").strip()
@@ -588,23 +709,42 @@ def sanity_check(task: dict) -> dict:
         issues.append("Условие подозрительно короткое (меньше 30 символов)")
     if len(str(task.get("reference_solution") or "").strip()) < 20:
         issues.append("Эталонное решение отсутствует или слишком короткое")
-    rubric = task.get("rubric") or []
+    rubric = task.get("rubric")
     try:
-        max_score = float(task.get("max_score") or 0)
+        max_score = float(task.get("max_score"))
     except (TypeError, ValueError):
-        max_score = 0.0
-    if not rubric:
+        max_score = math.nan
+    max_score_valid = math.isfinite(max_score) and max_score > 0
+    if not max_score_valid:
+        issues.append("Максимальный балл должен быть конечным положительным числом")
+    if not isinstance(rubric, list) or not rubric:
         issues.append("Рубрика оценивания пуста")
     else:
         total = 0.0
-        for criterion in rubric:
+        rubric_scores_valid = True
+        criterion_names: set[str] = set()
+        for index, criterion in enumerate(rubric):
             if not isinstance(criterion, dict):
+                issues.append(f"Критерий рубрики {index + 1} должен быть объектом")
+                rubric_scores_valid = False
                 continue
+            criterion_name = str(criterion.get("criterion_name") or "").strip()
+            if not criterion_name:
+                issues.append(f"У критерия рубрики {index + 1} не задано название")
+            elif criterion_name.casefold() in criterion_names:
+                issues.append(f"Название критерия рубрики повторяется: {criterion_name}")
+            else:
+                criterion_names.add(criterion_name.casefold())
             try:
-                total += float(criterion.get("max_score") or 0)
+                criterion_score = float(criterion.get("max_score"))
             except (TypeError, ValueError):
+                criterion_score = math.nan
+            if not math.isfinite(criterion_score) or criterion_score <= 0:
+                issues.append(f"Балл критерия рубрики {index + 1} должен быть конечным положительным числом")
+                rubric_scores_valid = False
                 continue
-        if abs(total - max_score) > 0.01:
+            total += criterion_score
+        if max_score_valid and rubric_scores_valid and abs(total - max_score) > 0.01:
             issues.append(f"Сумма баллов рубрики ({total:g}) не совпадает с max_score ({max_score:g})")
     if not str(task.get("answer") or "").strip():
         issues.append("Не указан финальный ответ")
@@ -642,11 +782,17 @@ async def solver_check(
     grounding: str,
     answer_format: str,
     system_prompt: str = SOLVER_SYSTEM_PROMPT,
+    discipline_context: str = "",
 ) -> dict:
     hint = ANSWER_FORMAT_HINTS.get(answer_format, ANSWER_FORMAT_HINTS["text"])
     parts = [f"Задача:\n{statement}"]
     if grounding:
         parts.append(grounding)
+    if discipline_context:
+        parts.append(
+            "Профиль дисциплины и требования преподавателя (это правила проверки, не источник численных данных):\n"
+            + discipline_context
+        )
     parts.append(f'Поле "answer" — {hint}. Ответ строго JSON {{"solution": "...", "answer": "..."}}.')
     try:
         result = await llm.chat(provider, model, system_prompt, "\n\n".join(parts), temperature=0.0, json_mode=True)
@@ -706,6 +852,172 @@ def _append_solver_reason(reasons: list[str], label: str, report: dict) -> None:
         )
 
 
+def _solver_outcome_complete(report: dict) -> bool:
+    return bool(
+        report.get("status") != "error"
+        and not str(report.get("error") or "").strip()
+        and str(report.get("answer") or "").strip()
+        and str(report.get("solution") or "").strip()
+    )
+
+
+def _semantic_entailment_candidate(
+    answer_format: str,
+    solver: dict,
+    verifier: dict,
+    cross_comparison: dict,
+) -> bool:
+    """Allow a critic to resolve only lexical uncertainty, never a detected contradiction."""
+
+    if answer_format not in SEMANTIC_ENTAILMENT_ANSWER_FORMATS:
+        return False
+    if not (_solver_outcome_complete(solver) and _solver_outcome_complete(verifier)):
+        return False
+    verdicts = {
+        str((solver.get("comparison") or {}).get("verdict") or solver.get("status") or ""),
+        str((verifier.get("comparison") or {}).get("verdict") or verifier.get("status") or ""),
+        str(cross_comparison.get("verdict") or ""),
+    }
+    # A critic may interpret paraphrases/equivalent symbolic forms. It must not
+    # erase a deterministic mismatch, incomplete answer, or solver error.
+    return verdicts.issubset({"match", "uncertain"}) and "uncertain" in verdicts
+
+
+def _critic_confirms_semantic_entailment(critic: dict) -> bool:
+    checks = critic.get("checks") if isinstance(critic.get("checks"), dict) else {}
+    return bool(
+        critic.get("status") == "pass"
+        and critic.get("issues") == []
+        and all(checks.get(key) is True for key in CRITIC_REQUIRED_CHECKS)
+    )
+
+
+def _promote_comparison(comparison: dict) -> dict:
+    return {
+        **comparison,
+        "previous_verdict": comparison.get("verdict"),
+        "verdict": "match",
+        "basis": SEMANTIC_ENTAILMENT_BASIS,
+    }
+
+
+def _promote_solver_report(report: dict) -> dict:
+    return {
+        **report,
+        "status": "match",
+        "comparison": _promote_comparison(report.get("comparison") or {}),
+    }
+
+
+async def critic_check(
+    provider: Provider,
+    model: ModelEntry,
+    *,
+    statement: str,
+    reference_solution: str,
+    reference_answer: str,
+    solver: dict,
+    verifier: dict,
+    discipline_context: str,
+    chemistry_facts: dict,
+) -> dict:
+    payload = {
+        "statement": statement,
+        "reference_solution": reference_solution,
+        "reference_answer": reference_answer,
+        "solver": {"solution": solver.get("solution", ""), "answer": solver.get("answer", "")},
+        "verifier": {"solution": verifier.get("solution", ""), "answer": verifier.get("answer", "")},
+        "chemistry_facts": chemistry_facts,
+        "discipline_context": discipline_context,
+    }
+    try:
+        result = await llm.chat(
+            provider,
+            model,
+            SOLVER_CRITIC_SYSTEM_PROMPT,
+            json.dumps(payload, ensure_ascii=False),
+            temperature=0.0,
+            json_mode=True,
+        )
+        parsed = llm.extract_json(result.text)
+    except llm.LlmError as err:
+        return {"status": "error", "issues": [str(err)], "checks": {}, "duration_ms": 0, "tokens_total": None}
+    checks = parsed.get("checks") if isinstance(parsed.get("checks"), dict) else {}
+    issues = parsed.get("issues") if isinstance(parsed.get("issues"), list) else []
+    issues = [str(issue).strip() for issue in issues if str(issue).strip()]
+    passed = (
+        parsed.get("verdict") == "pass"
+        and CRITIC_REQUIRED_CHECKS.issubset(checks)
+        and all(checks.get(key) is True for key in CRITIC_REQUIRED_CHECKS)
+        and not issues
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "checks": {key: checks.get(key) is True for key in sorted(CRITIC_REQUIRED_CHECKS)},
+        "issues": issues or ([] if passed else ["Критик не подтвердил все обязательные проверки"]),
+        "duration_ms": result.duration_ms,
+        "tokens_total": result.tokens_total,
+        "model": f"{provider.name}/{model.model_id}",
+    }
+
+
+async def extract_chemistry_facts(
+    provider: Provider,
+    model: ModelEntry,
+    *,
+    statement: str,
+    reference_solution: str,
+    reference_answer: str,
+    topic: str,
+    discipline_context: str,
+    chemistry_check: str,
+) -> dict:
+    payload = {
+        "discipline_context": discipline_context,
+        "topic": topic,
+        "required_check": chemistry_check,
+        "statement": statement,
+        "reference_solution": reference_solution,
+        "reference_answer": reference_answer,
+        "facts_schema": CHEMISTRY_FACTS_GUIDE,
+    }
+    try:
+        result = await llm.chat(
+            provider,
+            model,
+            CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT,
+            json.dumps(payload, ensure_ascii=False),
+            temperature=0.0,
+            json_mode=True,
+            max_tokens=3000,
+        )
+        parsed = llm.extract_json(result.text)
+    except llm.LlmError as err:
+        return {
+            "status": "error",
+            "facts": {},
+            "error": str(err),
+            "duration_ms": 0,
+            "tokens_total": None,
+        }
+    facts = normalize_chemistry_facts(parsed.get("facts"))
+    if facts is None:
+        return {
+            "status": "error",
+            "facts": {},
+            "error": "Модель вернула неподдерживаемую структуру chemistry_facts",
+            "duration_ms": result.duration_ms,
+            "tokens_total": result.tokens_total,
+        }
+    return {
+        "status": "ok",
+        "facts": facts,
+        "duration_ms": result.duration_ms,
+        "tokens_total": result.tokens_total,
+        "model": f"{provider.name}/{model.model_id}",
+    }
+
+
 async def run_validation(
     *,
     statement: str,
@@ -723,23 +1035,74 @@ async def run_validation(
     solver_model: ModelEntry | None = None,
     run_solver: bool = True,
     run_data: bool = True,
+    validation_config: dict | None = None,
+    discipline_context: str = "",
+    topic: str = "",
+    chemistry_facts: dict | None = None,
+    chemistry_facts_source: str = "",
+    extract_chemistry_facts_if_missing: bool = False,
+    grounding_sheets: list | None = None,
 ) -> dict:
     reasons: list[str] = []
 
+    config = normalize_validation_config(
+        {
+            **(validation_config or {}),
+            "answer_format": answer_format,
+            "tolerance_pct": tolerance_pct,
+            "validation_solver": run_solver,
+            "validation_data_check": run_data,
+            "source_digest": hashlib.sha256(
+                json.dumps(
+                    {
+                        "grounding": grounding,
+                        "sheets": sheets_text,
+                        "data_used": data_used,
+                        "grounding_sheets": grounding_sheets,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest(),
+            "profile_digest": hashlib.sha256(discipline_context.encode("utf-8")).hexdigest(),
+            "task_evidence_digest": hashlib.sha256(
+                json.dumps(
+                    {"data_used": data_used, "chemistry_facts": chemistry_facts},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+    )
+
     data: dict = {"status": "skipped", "unknown_numbers": [], "unknown_sources": []}
+    provenance_text = grounding if (grounding or "").strip() else sheets_text
     if run_data:
         # The generator can cite either a selected ReferenceSheet or a retrieved KB chunk.
         # Validate against the exact grounding it actually saw; ``sheets_text`` contains
         # only ReferenceSheets and would falsely reject a real KB heading. Falling back
         # preserves revalidation for older/manual calls that have no grounding block.
-        provenance_text = grounding if (grounding or "").strip() else sheets_text
         data = data_check(statement, provenance_text, data_used=data_used)
         if data["unknown_numbers"]:
             reasons.append("Числа не из справочника: " + ", ".join(data["unknown_numbers"][:10]))
         if data["unknown_sources"]:
             reasons.append("Неизвестные источники данных: " + ", ".join(data["unknown_sources"][:10]))
+        if data.get("invalid_entries"):
+            reasons.append("Некорректный provenance данных: " + "; ".join(data["invalid_entries"][:5]))
     else:
         reasons.append("Проверка происхождения данных отключена — автоматический допуск невозможен")
+    source_lineage = source_lineage_check(data_used, grounding_sheets, provenance_text)
+    if source_lineage["unbound_sources"]:
+        reasons.append(
+            "Справочные данные не связаны с исходным документом: "
+            + ", ".join(source_lineage["unbound_sources"][:10])
+        )
+    if source_lineage.get("invalid_entries"):
+        reasons.append(
+            "Некорректная привязка к источникам: " + "; ".join(source_lineage["invalid_entries"][:5])
+        )
 
     sanity = sanity_check(
         {
@@ -757,10 +1120,130 @@ async def run_validation(
     if dedup["duplicate"]:
         reasons.append(f"Похожа на уже существующую задачу (сходство {round(dedup['similarity'] * 100)}%)")
 
-    hard_fail = bool(data["unknown_numbers"] or data["unknown_sources"] or sanity["issues"] or dedup["duplicate"])
+    model_use = current_model_use_policy().classify(solver_model)
+    preliminary_hard_fail = bool(
+        data.get("status") != "ok"
+        or data["unknown_numbers"]
+        or data["unknown_sources"]
+        or source_lineage.get("status") != "ok"
+        or source_lineage["unbound_sources"]
+        or sanity["issues"]
+        or dedup["duplicate"]
+    )
+    chemistry_check = config.get("chemistry_check", "auto")
+    normalized_facts = normalize_chemistry_facts(chemistry_facts) if chemistry_facts is not None else None
+    facts_extraction: dict = {"status": "not_needed" if normalized_facts is not None else "skipped"}
+    facts_source = chemistry_facts_source or ("provided" if normalized_facts is not None else "not_available")
+
+    if chemistry_facts is not None and normalized_facts is None:
+        facts_extraction = {"status": "error", "error": "Некорректный формат сохранённых chemistry_facts"}
+        normalized_facts = {}
+        facts_source = "invalid"
+    elif (
+        normalized_facts is None
+        and extract_chemistry_facts_if_missing
+        and not preliminary_hard_fail
+        and solver_provider is not None
+        and solver_model is not None
+        and model_use.decision_capable
+    ):
+        facts_extraction = await extract_chemistry_facts(
+            solver_provider,
+            solver_model,
+            statement=statement,
+            reference_solution=reference_solution,
+            reference_answer=reference_answer,
+            topic=topic,
+            discipline_context=discipline_context,
+            chemistry_check=chemistry_check,
+        )
+        normalized_facts = facts_extraction.get("facts") if facts_extraction.get("status") == "ok" else {}
+        facts_source = "deepseek_extractor" if facts_extraction.get("status") == "ok" else "extraction_failed"
+
+    config = normalize_validation_config(
+        {
+            **config,
+            "chemistry_facts_digest": hashlib.sha256(
+                json.dumps(
+                    normalized_facts,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+    )
+    content_fingerprint = build_task_content_fingerprint(
+        statement=statement,
+        reference_solution=reference_solution,
+        answer=reference_answer,
+        rubric=rubric,
+        max_score=max_score,
+        validation_config=config,
+    )
+
+    chemistry_enabled = bool(discipline_context.strip() or normalized_facts is not None or chemistry_check != "auto")
+    if chemistry_enabled:
+        chemistry = chemistry_admission_evidence(
+            discipline=discipline_context,
+            statement=statement,
+            reference_solution=reference_solution,
+            answer=reference_answer,
+            topic=topic,
+            facts=normalized_facts or {},
+            facts_source=facts_source,
+            chemistry_check=chemistry_check,
+        )
+    else:
+        chemistry = {
+            "validation_version": CHEMISTRY_VALIDATION_VERSION,
+            "discipline": "unknown",
+            "deterministic_pass": False,
+            "applicable_count": 0,
+            "blocking_codes": [],
+            "indeterminate_codes": [],
+            "warning_codes": [],
+            "results": [],
+            "required_check_ids": [],
+            "required_not_passed": [],
+            "facts_source": facts_source,
+            "admission_effect": "limited",
+        }
+    chemistry["facts_extraction"] = facts_extraction
+    if chemistry_facts is not None and facts_source == "invalid":
+        chemistry["admission_effect"] = "block"
+        chemistry.setdefault("blocking_codes", []).append("chemistry.facts_schema")
+    requires_deterministic_core = config.get("task_kind") == "calculation" or answer_format == "numeric"
+    if requires_deterministic_core and chemistry.get("admission_effect") == "limited":
+        chemistry["coverage_before_admission"] = "limited"
+        chemistry["admission_effect"] = "block"
+        chemistry["admission_reason"] = "Для расчётной задачи не подтверждён основной предметный инвариант"
+        chemistry.setdefault("blocking_codes", []).append("chemistry.core_calculation_uncovered")
+    chemistry_blocked = chemistry.get("admission_effect") == "block"
+    if chemistry_blocked:
+        unsafe_results = [
+            result
+            for result in chemistry.get("results") or []
+            if result.get("state") in {"fail", "warning", "indeterminate", "error"}
+        ]
+        reasons.extend(
+            f"Предметный контроль ({result.get('check_id')}): {result.get('message')}"
+            for result in unsafe_results
+        )
+        reported = {result.get("check_id") for result in unsafe_results}
+        reasons.extend(
+            f"Предметный контроль не подтвердил обязательную проверку: {check_id}"
+            for check_id in chemistry.get("required_not_passed") or []
+            if check_id not in reported
+        )
+        if facts_extraction.get("status") == "error" and chemistry_check != "auto":
+            reasons.append("Не удалось подготовить данные для обязательной химической проверки")
+        if chemistry.get("admission_reason"):
+            reasons.append(str(chemistry["admission_reason"]))
+
+    hard_fail = preliminary_hard_fail or chemistry_blocked
     solver: dict = {"status": "skipped"}
     verifier: dict = {"status": "skipped"}
-    model_use = current_model_use_policy().classify(solver_model)
     advisory_only = not model_use.decision_capable
     if not run_solver:
         reasons.append("Семантическая проверка решателем отключена — требуется решение преподавателя")
@@ -772,14 +1255,20 @@ async def run_validation(
             model_name = f"{solver_provider.name}/{solver_model.model_id}"
             # Проверяем ровно то условие, которое увидит студент. Скрытый grounding
             # используется для аудита источников, но не должен делать неполную задачу решаемой.
-            solved = await solver_check(solver_provider, solver_model, statement, "", answer_format)
+            solved = await solver_check(
+                solver_provider,
+                solver_model,
+                statement,
+                "",
+                answer_format,
+                discipline_context=discipline_context,
+            )
             compared = (
                 compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
                 if solved["status"] != "error"
                 else None
             )
             solver = _solver_report(solved, reference_answer, model_name, compared)
-            _append_solver_reason(reasons, "Основной решатель", solver)
 
             if advisory_only:
                 reasons.append(f"{model_use.reason}: {solver_model.model_id}. Задача не подтверждена автоматически")
@@ -791,6 +1280,7 @@ async def run_validation(
                     "",
                     answer_format,
                     system_prompt=SOLVER_VERIFIER_SYSTEM_PROMPT,
+                    discipline_context=discipline_context,
                 )
                 verified_comparison = (
                     compare_answers(reference_answer, verified["answer"], tolerance_pct, context=statement)
@@ -798,22 +1288,71 @@ async def run_validation(
                     else None
                 )
                 verifier = _solver_report(verified, reference_answer, model_name, verified_comparison)
-                _append_solver_reason(reasons, "Независимый аудитор", verifier)
 
     cross_comparison = (
         compare_answers(solver.get("answer", ""), verifier.get("answer", ""), tolerance_pct, context=statement)
-        if solver.get("status") == "match" and verifier.get("status") == "match"
+        if _solver_outcome_complete(solver) and _solver_outcome_complete(verifier)
         else {"verdict": "skipped"}
     )
+    strict_comparison_candidate = bool(
+        solver.get("status") == "match"
+        and verifier.get("status") == "match"
+        and cross_comparison["verdict"] == "match"
+    )
+    semantic_entailment_candidate = _semantic_entailment_candidate(
+        answer_format,
+        solver,
+        verifier,
+        cross_comparison,
+    )
+
+    critic: dict = {"status": "skipped", "checks": {}, "issues": []}
+    if (
+        solver_provider is not None
+        and solver_model is not None
+        and model_use.decision_capable
+        and (strict_comparison_candidate or semantic_entailment_candidate)
+    ):
+        critic = await critic_check(
+            solver_provider,
+            solver_model,
+            statement=statement,
+            reference_solution=reference_solution,
+            reference_answer=reference_answer,
+            solver=solver,
+            verifier=verifier,
+            discipline_context=discipline_context,
+            chemistry_facts=normalized_facts or {},
+        )
+
+    semantic_entailment_applied = bool(
+        semantic_entailment_candidate and _critic_confirms_semantic_entailment(critic)
+    )
+    if semantic_entailment_applied:
+        solver = _promote_solver_report(solver)
+        verifier = _promote_solver_report(verifier)
+        cross_comparison = _promote_comparison(cross_comparison)
+
+    _append_solver_reason(reasons, "Основной решатель", solver)
+    _append_solver_reason(reasons, "Независимый аудитор", verifier)
     if cross_comparison["verdict"] != "match":
         reasons.append("Контрольные решения не совпали друг с другом полностью")
+
+    if critic["status"] != "pass":
+        if critic["status"] == "error":
+            reasons.append("Предметный критик не завершил проверку")
+        elif critic["status"] == "fail":
+            reasons.extend(f"Предметный критик: {issue}" for issue in critic.get("issues") or [])
 
     reference_solution_check = compare_answers(
         reference_answer,
         reference_solution,
         tolerance_pct,
         context=statement,
+        allow_extra_numbers=True,
     )
+    if semantic_entailment_applied and reference_solution_check["verdict"] == "uncertain":
+        reference_solution_check = _promote_comparison(reference_solution_check)
     if reference_solution_check["verdict"] != "match":
         reasons.append("Эталонное решение не содержит полный финальный ответ")
 
@@ -823,6 +1362,7 @@ async def run_validation(
         and solver["status"] == "match"
         and verifier["status"] == "match"
         and cross_comparison["verdict"] == "match"
+        and _critic_confirms_semantic_entailment(critic)
         and reference_solution_check["verdict"] == "match"
     )
     needs_review = (
@@ -833,17 +1373,25 @@ async def run_validation(
         or verifier["status"] in ("mismatch", "incomplete", "uncertain", "error")
         or bool(data["unknown_numbers"])
         or bool(data["unknown_sources"])
+        or source_lineage.get("status") != "ok"
+        or bool(source_lineage["unbound_sources"])
         or bool(sanity["issues"])
         or dedup["duplicate"]
+        or chemistry_blocked
     )
     return {
         "policy_version": VALIDATION_POLICY_VERSION,
+        "validation_config": config,
+        "content_fingerprint": content_fingerprint,
         "model_policy": model_use.as_dict(),
         "solver": solver,
         "verifier": verifier,
         "cross_comparison": cross_comparison,
+        "critic": critic,
+        "chemistry": chemistry,
         "reference_solution_check": reference_solution_check,
         "data": data,
+        "source_lineage": source_lineage,
         "sanity": sanity,
         "dedup": dedup,
         "answer_format": answer_format,

@@ -92,7 +92,13 @@ def test_generated_task_preserves_template_rubric_instead_of_model_output() -> N
     model_rubric = [{"criterion_name": "Общее впечатление", "max_score": 99, "description": ""}]
 
     task = task_from_item(
-        {"statement": "Условие", "rubric": model_rubric, "max_score": 99},
+        {
+            "statement": "Условие",
+            "rubric": model_rubric,
+            "max_score": 99,
+            "data_used": [],
+            "chemistry_facts": {},
+        },
         assistant_id="assistant-1",
         template_id="template-1",
         batch_id=None,
@@ -113,7 +119,13 @@ def test_generated_task_keeps_model_rubric_for_legacy_empty_template() -> None:
     model_rubric = [{"criterion_name": "Решение", "max_score": 7, "description": ""}]
 
     task = task_from_item(
-        {"statement": "Условие", "rubric": model_rubric, "max_score": 7},
+        {
+            "statement": "Условие",
+            "rubric": model_rubric,
+            "max_score": 7,
+            "data_used": [],
+            "chemistry_facts": {},
+        },
         assistant_id="assistant-1",
         template_id="template-1",
         batch_id=None,
@@ -127,6 +139,83 @@ def test_generated_task_keeps_model_rubric_for_legacy_empty_template() -> None:
     assert task is not None
     assert task.rubric == model_rubric
     assert task.max_score == 7
+
+
+def test_generated_task_without_explicit_data_provenance_is_rejected() -> None:
+    task = task_from_item(
+        {"statement": "Условие", "rubric": [], "max_score": 10},
+        assistant_id="assistant-1",
+        template_id=None,
+        batch_id=None,
+        topic="Растворы",
+        difficulty="medium",
+        model_used="DeepSeek/deepseek-v4-pro",
+        grounding_meta={},
+    )
+
+    assert task is None
+
+
+def test_generated_task_rejects_malformed_data_provenance() -> None:
+    task = task_from_item(
+        {
+            "statement": "Условие",
+            "rubric": [],
+            "max_score": 10,
+            "data_used": [{"sheet_title": "Карточка без перечисленных значений", "values": []}],
+        },
+        assistant_id="assistant-1",
+        template_id=None,
+        batch_id=None,
+        topic="Растворы",
+        difficulty="medium",
+        model_used="DeepSeek/deepseek-v4-pro",
+        grounding_meta={},
+    )
+
+    assert task is None
+
+
+def test_generated_task_requires_explicit_structured_chemistry_facts() -> None:
+    task = task_from_item(
+        {"statement": "Условие", "rubric": [], "max_score": 10, "data_used": []},
+        assistant_id="assistant-1",
+        template_id=None,
+        batch_id=None,
+        topic="Растворы",
+        difficulty="medium",
+        model_used="DeepSeek/deepseek-v4-pro",
+        grounding_meta={},
+    )
+
+    assert task is None
+
+
+def test_required_subject_check_requires_its_fact_block() -> None:
+    task = task_from_item(
+        {
+            "statement": "Рассчитайте концентрацию после разбавления",
+            "rubric": [],
+            "max_score": 10,
+            "data_used": [],
+            "chemistry_facts": {},
+        },
+        assistant_id="assistant-1",
+        template_id=None,
+        batch_id=None,
+        topic="Растворы",
+        difficulty="medium",
+        model_used="DeepSeek/deepseek-v4-pro",
+        grounding_meta={},
+        validation_contract={
+            "answer_format": "numeric",
+            "validation_solver": True,
+            "validation_data_check": True,
+            "chemistry_check": "chemistry.dilution",
+        },
+    )
+
+    assert task is None
 
 
 def test_sqlite_startup_backfills_rubric_for_existing_templates(monkeypatch) -> None:

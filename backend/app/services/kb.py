@@ -14,6 +14,7 @@ from app.db import SessionLocal
 from app.llm import client as llm
 from app.models import Assistant, KnowledgeChunk, KnowledgeDocument, ModelEntry, Provider
 from app.services import storage
+from app.services.evidence_invalidation import invalidate_task_evidence
 from app.services.ocr import run_datalab_ocr
 
 TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
@@ -372,8 +373,11 @@ async def search_chunks(
     query: str,
     limit: int = 8,
     allowed_visibilities: tuple[str, ...] | None = None,
+    allowed_authorities: tuple[str, ...] | None = None,
 ) -> list[KnowledgeChunk]:
     if allowed_visibilities is not None and not allowed_visibilities:
+        return []
+    if allowed_authorities is not None and not allowed_authorities:
         return []
     if _is_postgres(db):
         words = re.findall(r"\w+", query.lower().replace("ё", "е"))
@@ -388,6 +392,8 @@ async def search_chunks(
             )
             if allowed_visibilities is not None:
                 query_text += "AND d.visibility IN :visibilities "
+            if allowed_authorities is not None:
+                query_text += "AND d.authority IN :authorities "
             query_text += (
                 "ORDER BY ts_rank(c.search_vector, to_tsquery('russian', :q)) DESC LIMIT :n"
             )
@@ -396,6 +402,9 @@ async def search_chunks(
             if allowed_visibilities is not None:
                 statement = statement.bindparams(bindparam("visibilities", expanding=True))
                 params["visibilities"] = allowed_visibilities
+            if allowed_authorities is not None:
+                statement = statement.bindparams(bindparam("authorities", expanding=True))
+                params["authorities"] = allowed_authorities
             chunk_ids = (await db.execute(statement, params)).scalars().all()
         except Exception:
             return []
@@ -413,21 +422,35 @@ async def search_chunks(
             )
             if allowed_visibilities is not None:
                 query_text += "AND d.visibility IN :visibilities "
+            if allowed_authorities is not None:
+                query_text += "AND d.authority IN :authorities "
             query_text += "ORDER BY bm25(kb_fts) LIMIT :n"
             statement = sql_text(query_text)
             params = {"q": match_query, "aid": assistant_id, "n": limit}
             if allowed_visibilities is not None:
                 statement = statement.bindparams(bindparam("visibilities", expanding=True))
                 params["visibilities"] = allowed_visibilities
+            if allowed_authorities is not None:
+                statement = statement.bindparams(bindparam("authorities", expanding=True))
+                params["authorities"] = allowed_authorities
             chunk_ids = (await db.execute(statement, params)).scalars().all()
         except Exception:
             return []
     if not chunk_ids:
         return []
     stmt = select(KnowledgeChunk).where(KnowledgeChunk.id.in_(chunk_ids))
-    if allowed_visibilities is not None:
+    if allowed_visibilities is not None or allowed_authorities is not None:
         stmt = stmt.join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id).where(
-            KnowledgeDocument.visibility.in_(allowed_visibilities)
+            *(
+                [KnowledgeDocument.visibility.in_(allowed_visibilities)]
+                if allowed_visibilities is not None
+                else []
+            ),
+            *(
+                [KnowledgeDocument.authority.in_(allowed_authorities)]
+                if allowed_authorities is not None
+                else []
+            ),
         )
     chunks = (await db.execute(stmt)).scalars().all()
     by_id = {chunk.id: chunk for chunk in chunks}
@@ -600,6 +623,12 @@ async def ingest_document(document_id: str, analyze: bool = True) -> None:
             await db.flush()
             await index_chunks(db, chunks)
             document.status = "parsed"
+            if document.authority != "unverified" and document.visibility != "quarantine":
+                await invalidate_task_evidence(
+                    db,
+                    document.assistant_id,
+                    reason="Источник курса обновлён — автоматические доказательства нужно пересобрать",
+                )
             try:
                 await _offload_original(document)
             except Exception:

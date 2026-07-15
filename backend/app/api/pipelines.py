@@ -12,9 +12,9 @@ from app.services.pipeline import PipelineError, execute_pipeline, preflight_pip
 router = APIRouter(tags=["pipelines"])
 
 
-def _validate_steps(steps: list) -> None:
+def _validate_steps(steps: list) -> list[dict]:
     try:
-        validate_pipeline_steps(steps)
+        return validate_pipeline_steps(steps)
     except PipelineError as err:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
 
@@ -38,8 +38,8 @@ async def create_pipeline(
     assistant_id: str, body: PipelineCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
 ) -> Pipeline:
     await get_assistant_or_404(assistant_id, db)
-    _validate_steps(body.steps)
-    pipeline = Pipeline(assistant_id=assistant_id, name=body.name, description=body.description, steps=body.steps)
+    steps = _validate_steps(body.steps)
+    pipeline = Pipeline(assistant_id=assistant_id, name=body.name, description=body.description, steps=steps)
     db.add(pipeline)
     await db.commit()
     await db.refresh(pipeline)
@@ -66,7 +66,7 @@ async def update_pipeline(
     pipeline = await _get_pipeline(db, assistant_id, pipeline_id)
     payload = body.model_dump(exclude_unset=True)
     if "steps" in payload:
-        _validate_steps(payload["steps"])
+        payload["steps"] = _validate_steps(payload["steps"])
     for field, value in payload.items():
         setattr(pipeline, field, value)
     await db.commit()

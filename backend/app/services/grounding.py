@@ -28,6 +28,10 @@ AUTHORITY_LABELS = {
     "unverified": "непроверенный источник",
 }
 
+# Query-aware automatic grounding must stay focused even when a course has a
+# large canonical catalogue. Explicit teacher selections are never capped.
+AUTO_SHEET_TOP_K = 8
+
 _TOKEN_RE = re.compile(r"[0-9a-zа-яё]+", re.IGNORECASE)
 _QUERY_STOPWORDS = {
     "а",
@@ -114,11 +118,13 @@ def _field_score(text: str, terms: list[tuple[str, str]], weight: int) -> int:
     return matches * weight
 
 
-def _rank_sheets_for_query(sheets: list[ReferenceSheet], query: str) -> list[ReferenceSheet]:
+def _rank_sheets_for_query(
+    sheets: list[ReferenceSheet], query: str, *, limit: int = AUTO_SHEET_TOP_K
+) -> list[ReferenceSheet]:
     terms = _query_terms(query)
     if not terms:
         return []
-    ranked: list[tuple[int, int, int, ReferenceSheet]] = []
+    ranked: list[tuple[int, int, str, str, int, ReferenceSheet]] = []
     for position, sheet in enumerate(sheets):
         score = (
             _field_score(sheet.title or "", terms, 12)
@@ -126,9 +132,14 @@ def _rank_sheets_for_query(sheets: list[ReferenceSheet], query: str) -> list[Ref
             + _field_score(sheet.content_markdown or "", terms, 1)
         )
         if score > 0:
-            ranked.append((-score, int(sheet.ord or 0), position, sheet))
-    ranked.sort(key=lambda item: item[:3])
-    return [sheet for _, _, _, sheet in ranked]
+            # created_at/id make equal-score ranking deterministic across DB
+            # reads; position preserves stable input order for unsaved objects.
+            created_at = sheet.created_at.isoformat() if sheet.created_at else ""
+            ranked.append(
+                (-score, int(sheet.ord or 0), created_at, str(sheet.id or ""), position, sheet)
+            )
+    ranked.sort(key=lambda item: item[:5])
+    return [sheet for *_, sheet in ranked[: max(0, limit)]]
 
 
 def _select_sheets(
@@ -157,9 +168,11 @@ async def build_grounding_block(
     else:
         stmt = stmt.where(ReferenceSheet.id.in_(sheet_ids))
     sheets = (
-        await db.execute(stmt.order_by(ReferenceSheet.ord, ReferenceSheet.created_at))
+        await db.execute(
+            stmt.order_by(ReferenceSheet.ord, ReferenceSheet.created_at, ReferenceSheet.id)
+        )
     ).scalars().all()
-    sheets = _select_sheets(list(sheets), query=query, query_aware=sheet_ids is None)
+    sheets = list(sheets)
 
     source_meta: dict[str, tuple[str, str]] = {}
     source_ids = {sheet.source_document_id for sheet in sheets if sheet.source_document_id}
@@ -172,6 +185,18 @@ async def build_grounding_block(
             )
         ).all()
         source_meta = {document_id: (title, authority) for document_id, title, authority in rows}
+
+    if sheet_ids is None:
+        # Unverified source documents are useful while curating materials, but
+        # must not silently enter an automatic grounding context. A teacher can
+        # still opt into the corresponding sheet by selecting it explicitly.
+        sheets = [
+            sheet
+            for sheet in sheets
+            if sheet.source_document_id in source_meta
+            and source_meta[sheet.source_document_id][1] != "unverified"
+        ]
+    sheets = _select_sheets(sheets, query=query, query_aware=sheet_ids is None)
 
     used = 0
     sheet_parts: list[str] = []
@@ -213,6 +238,7 @@ async def build_grounding_block(
             query,
             limit=kb_limit,
             allowed_visibilities=allowed_visibilities,
+            allowed_authorities=("course_policy", "course_lecture", "reference"),
         )
         doc_titles: dict[str, str] = {}
         doc_ids = {chunk.document_id for chunk in chunks}

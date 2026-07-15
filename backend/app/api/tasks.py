@@ -20,14 +20,22 @@ from app.schemas import (
     TaskTemplateUpdate,
 )
 from app.security import get_current_user
+from app.services.assistant_profile import build_assistant_profile
 from app.services.export import build_bank_export, build_variants_export
+from app.services.evidence_invalidation import invalidate_task_evidence
 from app.services.model_policy import ModelUsePolicyError, require_decision_model
 from app.services.task_approval import task_is_export_ready
+from app.services.task_evidence import (
+    APPROVAL_SCHEMA_VERSION,
+    evidence_matches_task,
+    task_content_fingerprint,
+)
 from app.services.task_revalidation import run_revalidation_batch
 from app.services.taskgen import (
     GenerationError,
     build_generation_grounding,
     build_grounding_meta,
+    build_validation_contract,
     generate_tasks,
     load_reference_sheets,
     merge_template_params,
@@ -36,6 +44,7 @@ from app.services.taskgen import (
     run_batch,
     sheets_to_text,
     task_from_item,
+    validation_contract_for_task,
 )
 from app.services.validation import VALIDATION_POLICY_VERSION, run_validation
 
@@ -96,6 +105,12 @@ async def update_template(
     for field, value in body.model_dump(exclude_unset=True).items():
         if value is not None:
             setattr(template, field, value)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        template_id=template_id,
+        reason="Изменился шаблон задачи — автоматические доказательства нужно пересобрать",
+    )
     await db.commit()
     await db.refresh(template)
     return template
@@ -104,6 +119,12 @@ async def update_template(
 @router.delete("/assistants/{assistant_id}/templates/{template_id}")
 async def delete_template(assistant_id: str, template_id: str, db: AsyncSession = Depends(get_db)) -> dict:
     template = await _get_template_or_404(db, assistant_id, template_id)
+    await invalidate_task_evidence(
+        db,
+        assistant_id,
+        template_id=template_id,
+        reason="Шаблон задачи удалён — автоматические доказательства нужно пересобрать",
+    )
     await db.delete(template)
     await db.commit()
     return {"ok": True}
@@ -177,11 +198,13 @@ async def generate(
             example_tasks=merged["example_tasks"],
             existing_statements=list(existing),
             temperature=body.temperature,
+            chemistry_check=merged["chemistry_check"],
         )
     except llm.LlmError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
 
-    grounding_meta = build_grounding_meta(sheets, grounding_text, grounding_query)
+    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
+    validation_contract = build_validation_contract(merged, grounding_meta)
     created: list[GeneratedTask] = []
     for item in items:
         task = task_from_item(
@@ -193,6 +216,7 @@ async def generate(
             difficulty=merged["difficulty"],
             model_used=f"{provider.name}/{model.model_id}",
             grounding_meta=grounding_meta,
+            validation_contract=validation_contract,
             template_rubric=merged["rubric"],
         )
         if task is not None:
@@ -391,25 +415,32 @@ async def revalidate_task(
             )
         ).scalar_one_or_none()
     merged = merge_template_params(template, topic=task.topic, difficulty=task.difficulty, instructions="")
+    contract = validation_contract_for_task(task, merged)
 
     solver_entry_id = (
         body.solver_model_entry_id or assistant.default_grader_model_id or assistant.default_generator_model_id
     )
 
     solver_provider = solver_model = None
-    if merged["validation_solver"]:
+    if contract["validation_solver"]:
         if not solver_entry_id:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Не удалось определить модель-решатель — передайте solver_model_entry_id",
             )
         solver_provider, solver_model = await resolve_model(db, solver_entry_id)
+        try:
+            require_decision_model(solver_model)
+        except ModelUsePolicyError as err:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err))
 
-    grounding_query = merged["kb_query"] or task.topic
-    sheets = await load_reference_sheets(db, assistant_id, merged["sheet_ids"])
+    grounding_query = contract["kb_query"] or task.topic
+    sheet_ids = contract["sheet_ids"] or None
+    sheets = await load_reference_sheets(db, assistant_id, sheet_ids)
     grounding_text = await build_generation_grounding(
-        db, assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query
+        db, assistant_id, sheet_ids=sheet_ids, query=grounding_query
     )
+    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
     existing = (
         (
             await db.execute(
@@ -429,19 +460,32 @@ async def revalidate_task(
         reference_answer=task.answer,
         rubric=task.rubric,
         max_score=task.max_score,
-        answer_format=merged["answer_format"],
-        tolerance_pct=merged["tolerance_pct"],
+        answer_format=contract["answer_format"],
+        tolerance_pct=contract["tolerance_pct"],
         grounding=grounding_text,
         sheets_text=sheets_to_text(sheets),
         existing_statements=list(existing),
-        data_used=(task.grounding or {}).get("data_used", []),
+        data_used=(task.grounding or {}).get("data_used"),
         solver_provider=solver_provider,
         solver_model=solver_model,
-        run_solver=merged["validation_solver"],
-        run_data=merged["validation_data_check"],
+        run_solver=contract["validation_solver"],
+        run_data=contract["validation_data_check"],
+        validation_config=contract,
+        discipline_context=build_assistant_profile(assistant),
+        topic=task.topic,
+        chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
+        chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
+        extract_chemistry_facts_if_missing=True,
+        grounding_sheets=grounding_meta["sheets"],
     )
     validation = dict(validation)
     validation.pop("approval", None)
+    await db.refresh(task)
+    if not evidence_matches_task(validation, task):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Задача изменилась во время проверки. Изменения сохранены; запустите проверку ещё раз",
+        )
     task.validation = validation
     task.status = validation["verdict"]
     task.approved = False
@@ -519,17 +563,30 @@ async def update_task(
         data["approved"] = False
     elif requested_status == "approved":
         validation = dict(task.validation) if isinstance(task.validation, dict) else {}
+        if (
+            task.status != "needs_review"
+            or validation.get("verdict") != "needs_review"
+            or validation.get("policy_version") != VALIDATION_POLICY_VERSION
+            or not evidence_matches_task(validation, task)
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Ручное исключение доступно только после актуальной автоматической проверки этой версии задачи",
+            )
         if len(approval_reason) < 10:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Ручное принятие — исключение из автоматической политики: укажите причину (не менее 10 символов)",
             )
+        approval_config = validation.get("validation_config")
         validation["approval"] = {
             "basis": "teacher_override",
+            "schema_version": APPROVAL_SCHEMA_VERSION,
             "reviewed_by": user.id,
             "reviewed_at": utcnow().isoformat(),
             "reason": approval_reason,
-            "policy_version": VALIDATION_POLICY_VERSION,
+            "validation_config": approval_config,
+            "content_fingerprint": task_content_fingerprint(task, approval_config),
         }
         data["validation"] = validation
         data["status"] = "approved"

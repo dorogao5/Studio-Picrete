@@ -1,0 +1,168 @@
+{
+  "schema_version": "picrete-chemistry-gold-cases-v1",
+  "content_version": "LAB-CURATED-2026-07-R3",
+  "validator_version": "chemistry-evidence-v2",
+  "cases": [
+    {
+      "id": "inorg-units-pass",
+      "kind": "gold",
+      "template_slug": "lab-dilution-material-balance",
+      "selected_check": "auto",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Переведите объём и сохраните размерность.",
+        "reference_solution": "V = 25 mL = 0.025 L.",
+        "answer": "V = 25 mL = 0.025 L",
+        "facts": {}
+      },
+      "expected": {"check_id": "chemistry.units", "state": "pass", "automatic_admission_effect": "limited_or_pass_with_other_evidence"}
+    },
+    {
+      "id": "inorg-units-conversion-mutation",
+      "kind": "mutation",
+      "mutates": "inorg-units-pass",
+      "mutation": "Change 0.025 L to 0.25 L.",
+      "selected_check": "auto",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Переведите объём и сохраните размерность.",
+        "reference_solution": "V = 25 mL = 0.25 L.",
+        "answer": "V = 25 mL = 0.25 L",
+        "facts": {}
+      },
+      "expected": {"check_id": "chemistry.units", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "inorg-reaction-balance-pass",
+      "kind": "gold",
+      "template_slug": "lab-observation-equation-conclusion",
+      "selected_check": "auto",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Уравняйте ионную ОВР в кислой среде.",
+        "reference_solution": "MnO4^- + 8H+ + 5Fe^2+ -> Mn^2+ + 5Fe^3+ + 4H2O",
+        "answer": "MnO4^- + 8H+ + 5Fe^2+ -> Mn^2+ + 5Fe^3+ + 4H2O",
+        "facts": {}
+      },
+      "expected": {"check_id": "chemistry.reaction_balance", "state": "pass", "automatic_admission_effect": "limited_or_pass_with_other_evidence"}
+    },
+    {
+      "id": "inorg-reaction-balance-mutation",
+      "kind": "mutation",
+      "mutates": "inorg-reaction-balance-pass",
+      "mutation": "Remove one water molecule from the product side.",
+      "selected_check": "auto",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Уравняйте ионную ОВР в кислой среде.",
+        "reference_solution": "MnO4^- + 8H+ + 5Fe^2+ -> Mn^2+ + 5Fe^3+ + 3H2O",
+        "answer": "MnO4^- + 8H+ + 5Fe^2+ -> Mn^2+ + 5Fe^3+ + 3H2O",
+        "facts": {}
+      },
+      "expected": {"check_id": "chemistry.reaction_balance", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "inorg-stoich-pass",
+      "kind": "gold",
+      "template_slug": "inorg-redox-stoichiometry",
+      "selected_check": "chemistry.stoichiometry",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Для Fe^3+ + e- -> Fe^2+ даны 1.00 mol Fe^3+ и 2.00 mol e-. Найдите количество Fe^2+.",
+        "reference_solution": "Fe^3+ + e- -> Fe^2+; лимитирует Fe^3+, n(Fe^2+)=1.00 mol.",
+        "answer": "n(Fe^2+) = 1.00 mol",
+        "facts": {
+          "stoichiometry": {
+            "reaction": "Fe^3+ + e- -> Fe^2+",
+            "reactant_amounts": {"Fe^3+": "1.00 mol", "e-": "2.00 mol"},
+            "target_species": "Fe^2+",
+            "target_amount": "1.00 mol",
+            "limiting_reagent": "Fe^3+"
+          }
+        }
+      },
+      "expected": {"check_id": "chemistry.stoichiometry", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "inorg-stoich-target-mutation",
+      "kind": "mutation",
+      "mutates": "inorg-stoich-pass",
+      "mutation": "Double target_amount without changing reactants.",
+      "selected_check": "chemistry.stoichiometry",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Для Fe^3+ + e- -> Fe^2+ даны 1.00 mol Fe^3+ и 2.00 mol e-. Найдите количество Fe^2+.",
+        "reference_solution": "Ошибочно заявлено n(Fe^2+)=2.00 mol.",
+        "answer": "n(Fe^2+) = 2.00 mol",
+        "facts": {
+          "stoichiometry": {
+            "reaction": "Fe^3+ + e- -> Fe^2+",
+            "reactant_amounts": {"Fe^3+": "1.00 mol", "e-": "2.00 mol"},
+            "target_species": "Fe^2+",
+            "target_amount": "2.00 mol",
+            "limiting_reagent": "Fe^3+"
+          }
+        }
+      },
+      "expected": {"check_id": "chemistry.stoichiometry", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "inorg-dilution-pass",
+      "kind": "gold",
+      "template_slug": "lab-dilution-material-balance",
+      "selected_check": "chemistry.dilution",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "c1=0.100 mol/L; V1=25.0 mL; раствор разбавлен до V2=250 mL. Найдите c2.",
+        "reference_solution": "c2=c1V1/V2=0.0100 mol/L.",
+        "answer": "c2 = 0.0100 mol/L",
+        "facts": {"dilution": {"c1": "0.100 mol/L", "v1": "25.0 mL", "c2": "0.0100 mol/L", "v2": "250 mL"}}
+      },
+      "expected": {"check_id": "chemistry.dilution", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "inorg-dilution-volume-mutation",
+      "kind": "mutation",
+      "mutates": "inorg-dilution-pass",
+      "mutation": "Change final volume in facts from 250 mL to 125 mL while retaining c2.",
+      "selected_check": "chemistry.dilution",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "c1=0.100 mol/L; V1=25.0 mL; раствор разбавлен до V2=125 mL. Найдите c2.",
+        "reference_solution": "Ошибочно заявлено c2=0.0100 mol/L.",
+        "answer": "c2 = 0.0100 mol/L",
+        "facts": {"dilution": {"c1": "0.100 mol/L", "v1": "25.0 mL", "c2": "0.0100 mol/L", "v2": "125 mL"}}
+      },
+      "expected": {"check_id": "chemistry.dilution", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "inorg-scale-comparison-pass",
+      "kind": "gold",
+      "template_slug": "inorg-electronegativity-scale-audit",
+      "selected_check": "auto",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Сравните определения электроотрицательности по Полингу и Малликену.",
+        "reference_solution": "Шкалы Полинга и Малликена построены по разным исходным величинам и напрямую не смешиваются.",
+        "answer": "Прямая численная подстановка между шкалами без заданной калибровки недопустима.",
+        "facts": {}
+      },
+      "expected": {"check_id": "chemistry.scale_compatibility", "state": "pass", "automatic_admission_effect": "limited_or_pass_with_other_evidence"}
+    },
+    {
+      "id": "inorg-scale-substitution-mutation",
+      "kind": "mutation",
+      "mutates": "inorg-scale-comparison-pass",
+      "mutation": "Substitute a Pauling value directly into a Mulliken energy formula.",
+      "selected_check": "auto",
+      "task": {
+        "discipline": "general_inorganic",
+        "statement": "Вычислите сродство по формуле Малликена E = 2χ - I.",
+        "reference_solution": "Берём χ(C)=2,5 по шкале Полинга. Применяем формулу Малликена: E = 2·2,5 - 11,26 эВ.",
+        "answer": "E = -6,26 эВ",
+        "facts": {}
+      },
+      "expected": {"check_id": "chemistry.scale_compatibility", "state": "fail", "automatic_admission_effect": "block"}
+    }
+  ]
+}

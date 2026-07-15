@@ -1,8 +1,13 @@
 {
   "schema_version": "picrete-content-manifest-v1",
-  "content_version": "LAB-CURATED-2026-07",
+  "content_version": "LAB-CURATED-2026-07-R3",
   "assistant_scope": "general-inorganic-chemistry-first-year",
   "course_scope": "infochem-29",
+  "release_artifacts": {
+    "typed_blueprints": "blueprints-r2.json",
+    "gold_and_mutation_cases": "gold-cases-r2.json",
+    "release_readme": "README.md"
+  },
   "source": {
     "title": "Введение в лабораторный практикум по неорганической химии",
     "authors": [
@@ -16,49 +21,173 @@
     "effective_version": "BGU-2000-ocr-2025-12",
     "ocr_index": "/Users/doroga/Downloads/ChemRAG/data/Lab_practice.index.enriched.json",
     "page_images": "/Users/doroga/Downloads/ChemRAG/ocr_output/Lab_practice",
-    "authority": "unverified",
+    "authority": "historical_blueprint_corpus_unverified",
     "visibility": "quarantine",
+    "usage_mode": "blueprint_and_topic_corpus_only",
+    "truth_eligibility": false,
     "quality_notes": [
-      "OCR scan 3 / printed pages 4–5 is mojibake and must not be used.",
+      "OCR page 3 is recoverable only by a reversible latin1→cp1251 transform followed by conservative dehyphenation and a visual diff; raw and repaired forms remain quarantined until certification.",
       "OCR scan 42 omits safety-test questions 1–6 on printed page 83.",
       "OCR scan 47 / printed page 93 contains recognition garbage.",
-      "Formulas, indices, units, tables and AI figure descriptions require visual verification."
+      "OCR page 9 contains corrupted formulas and unit glyphs; none may be used without fresh transcription from the page image.",
+      "Every figure_metadata.ai_description and model caption is non-authoritative; page 34 contains a concrete Gemini/caption label contradiction."
     ]
+  },
+  "ocr_repair_policy": {
+    "pipeline_version": "lab-ocr-repair-v1",
+    "immutable_inputs": [
+      "raw markdown from Lab_practice.index.enriched.json",
+      "original page image",
+      "source page number and content hash"
+    ],
+    "page_3_mojibake": {
+      "allowed_transform": "raw_text.encode('latin1').decode('cp1251')",
+      "precondition": "transform is byte-reversible and improves Cyrillic without replacement characters",
+      "postprocess": "conservative line-wrap dehyphenation only when both fragments are alphabetic; preserve chemical minus signs, reaction arrows, numeric ranges and source offsets",
+      "required_evidence": [
+        "raw/repaired diff",
+        "re-encoding round trip",
+        "visual comparison with the page image"
+      ],
+      "default_disposition": "quarantine"
+    },
+    "chemical_token_fail_patterns": [
+      "H3SO4",
+      "HBf",
+      "state labels (r) or (p) where the scan does not support them",
+      "damaged subscripts, superscripts, charges, coefficients or percent units"
+    ],
+    "failure_action": "quarantine_fragment_and_regenerate_transcription_from_image",
+    "automatic_substitution_forbidden": true,
+    "figure_truth_policy": {
+      "excluded_fields": [
+        "figure_metadata.ai_description",
+        "figure_metadata.raw_response",
+        "figure_metadata.model",
+        "prompt_excerpt"
+      ],
+      "allowed_truth_sources": [
+        "original page image",
+        "printed caption after visual transcription",
+        "current approved protocol when operational meaning is required"
+      ],
+      "known_conflict": "On OCR page 34, Gemini describes element 1 as a condenser while the printed caption assigns 1 to support clamps; the whole ai_description is excluded, not selectively repaired."
+    }
   },
   "exclusions": [
     {
       "printed_pages": "front matter and 93",
-      "scans": [1, 47],
+      "scans": [
+        1,
+        47
+      ],
       "disposition": "exclude",
       "reason": "Library metadata, inventory marks and unusable OCR are not course content."
     },
     {
       "printed_pages": "4–5",
-      "scans": [3],
+      "scans": [
+        3
+      ],
       "disposition": "quarantine",
-      "reason": "Mojibake; recover only by a new visual transcription."
+      "reason": "Raw text is mojibake. A reversible latin1→cp1251 candidate may be generated, but it remains quarantined until dehyphenation audit and visual diff; procedural content remains excluded regardless of encoding quality."
+    },
+    {
+      "source_page": 9,
+      "disposition": "formula_quarantine",
+      "reason": "Extracted mass-fraction equations and percent/unit glyphs are internally corrupted. Do not repair algebraically from context; transcribe from the page image and validate dimensions before certification."
+    },
+    {
+      "source_page": 34,
+      "figure_ids": [
+        "Lab_practice_p0034_img0",
+        "Lab_practice_p0034_img1"
+      ],
+      "disposition": "exclude_all_ai_descriptions_from_truth",
+      "reason": "Gemini metadata contradicts the printed caption (including the label 1 mapping) and can inject operational details. Only the page image and visually transcribed caption may be curated."
     },
     {
       "printed_pages": "83–92",
-      "scans": [42, 43, 44, 45, 46],
+      "scans": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
       "disposition": "quarantine",
       "reason": "Safety test is incomplete, has no verified key and contains historical rules that must not be treated as current policy."
     },
     {
       "printed_pages": "11–14, 52–54, 64–80 and other procedural fragments",
-      "scans": [6, 7, 23, 24, 25, 26, 32, 33, 34, 37, 38, 39, 40, 41],
+      "scans": [
+        6,
+        7,
+        23,
+        24,
+        25,
+        26,
+        32,
+        33,
+        34,
+        37,
+        38,
+        39,
+        40,
+        41
+      ],
       "disposition": "retain_only_inside_quarantined_raw_source",
       "reason": "Selected fragments contain concrete cleaning, heating, vacuum, gas, toxic-reagent or other procedures that require a current approved SOP. They must not enter generation grounding. The report form on printed page 81 is extracted separately into LAB-01."
     }
   ],
+  "source_and_blueprint_certification": {
+    "certification_status": "certified_theory_and_preflight_calculation_only",
+    "operational_procedure_status": "blocked_until_approved_protocol_binding",
+    "one_time_gates": [
+      "Raw OCR digest and page image set are frozen.",
+      "Every imported formula, charge, coefficient, state label and unit is visually transcribed and passes parser/dimension checks.",
+      "Known corrupt tokens H3SO4, HBf, unsupported (r)/(p) labels and page 9 equations are absent from certified truth.",
+      "All ai_description/model-generated figure fields are excluded from retrieval and truth.",
+      "Typed blueprint schema and every referenced gold/mutation case pass for this exact content version.",
+      "Operational laboratory content remains bound to a current approved_protocol_id/version, never to the historical handbook alone."
+    ],
+    "certification_scope": "raw_source_digest + curated_content_version + blueprint_contract_digest + protocol_binding",
+    "recertify_on": [
+      "OCR/page image digest change",
+      "formula, equation, unit or state-label edit",
+      "blueprint contract or rubric edit",
+      "approved protocol binding change"
+    ],
+    "per_task_teacher_approval": false,
+    "task_admission": {
+      "mode": "automatic_evidence_gate",
+      "required": [
+        "immutable content fingerprint and frozen validation contract",
+        "source/profile digests match the certified release",
+        "required deterministic invariant PASS for typed calculation blueprints",
+        "reaction parser confirms atom and charge balance when an equation is present",
+        "two independent decision-grade DeepSeek solutions agree",
+        "subject critic passes self-containment, reference consistency, chemistry, units and laboratory boundary"
+      ],
+      "exception_states": [
+        "fail",
+        "warning",
+        "indeterminate",
+        "stale evidence",
+        "OCR uncertainty",
+        "agent disagreement"
+      ]
+    }
+  },
   "document_upload": {
     "file": "grounding.md",
-    "title": "Лабораторный модуль: общая и неорганическая химия, первый курс",
+    "title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
     "doc_type": "methodical",
-    "authority": "course_lecture",
+    "authority": "reference",
     "visibility": "student",
     "course_scope": "infochem-29",
-    "effective_version": "LAB-CURATED-2026-07",
+    "effective_version": "LAB-CURATED-2026-07-R3",
+    "content_sha256": "ce6d5b569d84e3290ed93d3f46e12a447827db74c25c936f5ee12f8b6a425e8e",
     "analyze": false
   },
   "reference_sheet_proposals": [
@@ -70,7 +199,15 @@
       "content_anchor": "LAB-00",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 100
+      "ord": 100,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-00-boundaries.md",
+        "content_sha256": "43638a34263f8703f3462cc50521055542a24c87d373b242396c41c2629792eb",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-01-report",
@@ -80,7 +217,15 @@
       "content_anchor": "LAB-01",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 101
+      "ord": 101,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-01-report.md",
+        "content_sha256": "56f43aeb628a0fc75de324a6dac68930e5ba45df8b25e8ac1a3447e79bf09714",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-02-measurements",
@@ -90,7 +235,15 @@
       "content_anchor": "LAB-02",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 102
+      "ord": 102,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-02-measurements.md",
+        "content_sha256": "d2d35c9e210d980927ddd362b350dda7786d89effa5bfc9bc8f682f4d45dc3ca",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-03-equipment",
@@ -100,7 +253,15 @@
       "content_anchor": "LAB-03",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 103
+      "ord": 103,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-03-equipment.md",
+        "content_sha256": "e345b5a2852d8d781afb93e818cc057377e8e5975872b09a4b1b7290f9e61722",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-04-solutions",
@@ -110,7 +271,15 @@
       "content_anchor": "LAB-04",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 104
+      "ord": 104,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-04-solutions.md",
+        "content_sha256": "6eb83cf111c0d5fd565ac0a59e725ad19854a12ba91dce2fcb907fa380ba3fa6",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-05-recrystallization",
@@ -120,7 +289,15 @@
       "content_anchor": "LAB-05",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 105
+      "ord": 105,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-05-recrystallization.md",
+        "content_sha256": "a46a968c8febdf6e0512bfa3098b2264cbe5b782e1c2f23d3ddf286d01cd8bb7",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-06-sublimation",
@@ -130,7 +307,15 @@
       "content_anchor": "LAB-06",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 106
+      "ord": 106,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-06-sublimation.md",
+        "content_sha256": "c23994c2a69ff869f3d73034327125dd287ff9ad72dfa7f96728914c09f85f21",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-07-separation",
@@ -140,7 +325,15 @@
       "content_anchor": "LAB-07",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 107
+      "ord": 107,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-07-separation.md",
+        "content_sha256": "4e88154d1458343e41ce81c49b3f2fa80c1005a9290abd99d77aee4f63915515",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     },
     {
       "slug": "lab-08-water",
@@ -150,7 +343,15 @@
       "content_anchor": "LAB-08",
       "visibility": "student",
       "is_canonical": true,
-      "ord": 108
+      "ord": 108,
+      "release_binding": {
+        "normalization": "picrete-markdown-nfc-lf-v1",
+        "content_file": "sheets/lab-08-water.md",
+        "content_sha256": "6e81991645376a019de4014d71f3dd9de30ec60b70f9a3c12a9a9ae7f2b89a3f",
+        "source_document_title": "Лабораторный модуль: общая и неорганическая химия, первый курс · R3",
+        "source_effective_version": "LAB-CURATED-2026-07-R3",
+        "source_course_scope": "infochem-29"
+      }
     }
   ],
   "assistant_profile_patch": {
@@ -167,13 +368,16 @@
       "Ассистент не разрешает работу и не создаёт или изменяет лабораторную процедуру без действующего СОП и допуска преподавателя.",
       "Наблюдения, показания и подпись преподавателя никогда не генерируются; ожидаемый эффект явно отделяется от фактического.",
       "Пособие 2000 года используется как исторический учебный источник, но не как действующая норма безопасности, первая помощь или утилизация.",
-      "Формулы из OCR и автоматические описания рисунков требуют сверки с оригинальным сканом."
+      "Повреждённые химические токены H3SO4, HBf, неподтверждённые (r)/(p), формулы страницы 9 и другие OCR-догадки не исправляются по смыслу: фрагмент уходит в карантин до визуальной транскрипции.",
+      "Все ai_description/Gemini/vision-описания рисунков исключены из truth и retrieval; подписи извлекаются только из оригинального изображения после сверки."
     ]
   },
   "task_templates": [
     {
       "slug": "lab-preflight-gap-check",
-      "reference_sheet_slugs": ["lab-00-boundaries"],
+      "reference_sheet_slugs": [
+        "lab-00-boundaries"
+      ],
       "payload": {
         "name": "Лабораторный допуск · поиск недостающих данных",
         "topic": "Допуск к лабораторной работе",
@@ -187,18 +391,37 @@
         "example_tasks": [],
         "kb_query": "LAB-00 карточка допуска утверждённый протокол границы помощи",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Найдены все пробелы", "max_score": 4, "description": "Перечислены отсутствующие обязательные поля без домыслов."},
-        {"criterion_name": "Обоснована остановка", "max_score": 2, "description": "Показано, почему данных недостаточно для допуска."},
-        {"criterion_name": "Вопросы преподавателю", "max_score": 2, "description": "Сформулированы конкретные вопросы по каждому пробелу."},
-        {"criterion_name": "Нет импровизации", "max_score": 2, "description": "Ответ не предлагает процедуру, замену или неподтверждённые меры."}
+        {
+          "criterion_name": "Найдены все пробелы",
+          "max_score": 4,
+          "description": "Перечислены отсутствующие обязательные поля без домыслов."
+        },
+        {
+          "criterion_name": "Обоснована остановка",
+          "max_score": 2,
+          "description": "Показано, почему данных недостаточно для допуска."
+        },
+        {
+          "criterion_name": "Вопросы преподавателю",
+          "max_score": 2,
+          "description": "Сформулированы конкретные вопросы по каждому пробелу."
+        },
+        {
+          "criterion_name": "Нет импровизации",
+          "max_score": 2,
+          "description": "Ответ не предлагает процедуру, замену или неподтверждённые меры."
+        }
       ]
     },
     {
       "slug": "lab-observation-equation-conclusion",
-      "reference_sheet_slugs": ["lab-01-report"],
+      "reference_sheet_slugs": [
+        "lab-01-report"
+      ],
       "payload": {
         "name": "Наблюдение → уравнение → вывод",
         "topic": "Лабораторный журнал и доказательный вывод",
@@ -212,18 +435,37 @@
         "example_tasks": [],
         "kb_query": "LAB-01 наблюдение интерпретация уравнение вывод отчёт",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Факты отделены от интерпретации", "max_score": 3, "description": "Не добавлены вымышленные наблюдения."},
-        {"criterion_name": "Уравнение", "max_score": 3, "description": "Формулы, коэффициенты, заряды и состояния согласованы с условием."},
-        {"criterion_name": "Логика вывода", "max_score": 3, "description": "Вывод следует из данных и не шире доказательства."},
-        {"criterion_name": "Ясность записи", "max_score": 1, "description": "Использованы понятные статусы утверждений."}
+        {
+          "criterion_name": "Факты отделены от интерпретации",
+          "max_score": 3,
+          "description": "Не добавлены вымышленные наблюдения."
+        },
+        {
+          "criterion_name": "Уравнение",
+          "max_score": 3,
+          "description": "Формулы, коэффициенты, заряды и состояния согласованы с условием."
+        },
+        {
+          "criterion_name": "Логика вывода",
+          "max_score": 3,
+          "description": "Вывод следует из данных и не шире доказательства."
+        },
+        {
+          "criterion_name": "Ясность записи",
+          "max_score": 1,
+          "description": "Использованы понятные статусы утверждений."
+        }
       ]
     },
     {
       "slug": "lab-measurement-quality",
-      "reference_sheet_slugs": ["lab-02-measurements"],
+      "reference_sheet_slugs": [
+        "lab-02-measurements"
+      ],
       "payload": {
         "name": "Серия измерений · качество результата",
         "topic": "Измерения, погрешности и значащие цифры",
@@ -237,18 +479,37 @@
         "example_tasks": [],
         "kb_query": "LAB-02 погрешность среднее значащие цифры",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Работа с исходными данными", "max_score": 2, "description": "Единицы согласованы; исключение опирается на документированную ошибку или заданный критерий, а не только на удалённость точки."},
-        {"criterion_name": "Среднее значение", "max_score": 2, "description": "Формула, подстановка и округление согласованы с заданной точностью измерения."},
-        {"criterion_name": "Отклонения", "max_score": 4, "description": "Верно рассчитаны абсолютное и относительное отклонения."},
-        {"criterion_name": "Единицы и значащие цифры", "max_score": 2, "description": "Все ответы подписаны и не содержат ложной точности."}
+        {
+          "criterion_name": "Работа с исходными данными",
+          "max_score": 2,
+          "description": "Единицы согласованы; исключение опирается на документированную ошибку или заданный критерий, а не только на удалённость точки."
+        },
+        {
+          "criterion_name": "Среднее значение",
+          "max_score": 2,
+          "description": "Формула, подстановка и округление согласованы с заданной точностью измерения."
+        },
+        {
+          "criterion_name": "Отклонения",
+          "max_score": 4,
+          "description": "Верно рассчитаны абсолютное и относительное отклонения."
+        },
+        {
+          "criterion_name": "Единицы и значащие цифры",
+          "max_score": 2,
+          "description": "Все ответы подписаны и не содержат ложной точности."
+        }
       ]
     },
     {
       "slug": "lab-solution-calculation",
-      "reference_sheet_slugs": ["lab-04-solutions"],
+      "reference_sheet_slugs": [
+        "lab-04-solutions"
+      ],
       "payload": {
         "name": "Растворы · расчёт без процедурных указаний",
         "topic": "Расчёты для растворов",
@@ -262,18 +523,38 @@
         "example_tasks": [],
         "kb_query": "LAB-04 массовая доля молярная концентрация разбавление размерность",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Физическая модель", "max_score": 2, "description": "Выбрано подходящее определение концентрации и выписаны допущения."},
-        {"criterion_name": "Формула и единицы", "max_score": 3, "description": "Формула приведена до подстановки, единицы согласованы."},
-        {"criterion_name": "Числовой результат", "max_score": 3, "description": "Все запрошенные величины вычислены корректно."},
-        {"criterion_name": "Проверка", "max_score": 2, "description": "Есть размерностная и обратная или порядковая проверка."}
+        {
+          "criterion_name": "Физическая модель",
+          "max_score": 2,
+          "description": "Выбрано подходящее определение концентрации и выписаны допущения."
+        },
+        {
+          "criterion_name": "Формула и единицы",
+          "max_score": 3,
+          "description": "Формула приведена до подстановки, единицы согласованы."
+        },
+        {
+          "criterion_name": "Числовой результат",
+          "max_score": 3,
+          "description": "Все запрошенные величины вычислены корректно."
+        },
+        {
+          "criterion_name": "Проверка",
+          "max_score": 2,
+          "description": "Есть размерностная и обратная или порядковая проверка."
+        }
       ]
     },
     {
       "slug": "lab-read-approved-scheme",
-      "reference_sheet_slugs": ["lab-03-equipment", "lab-00-boundaries"],
+      "reference_sheet_slugs": [
+        "lab-03-equipment",
+        "lab-00-boundaries"
+      ],
       "payload": {
         "name": "Чтение утверждённой схемы установки",
         "topic": "Посуда, оборудование и схема установки",
@@ -287,18 +568,38 @@
         "example_tasks": [],
         "kb_query": "LAB-03 функция элемента направление потока утверждённая схема",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Функции элементов", "max_score": 4, "description": "Все метки сопоставлены только по данным условия."},
-        {"criterion_name": "Потоки и измерение", "max_score": 2, "description": "Направление и контролируемая величина определены верно."},
-        {"criterion_name": "Противоречие", "max_score": 2, "description": "Найдена и объяснена заданная несогласованность."},
-        {"criterion_name": "Границы ответа", "max_score": 2, "description": "Нет новых инструкций по сборке, режимам или замене."}
+        {
+          "criterion_name": "Функции элементов",
+          "max_score": 4,
+          "description": "Все метки сопоставлены только по данным условия."
+        },
+        {
+          "criterion_name": "Потоки и измерение",
+          "max_score": 2,
+          "description": "Направление и контролируемая величина определены верно."
+        },
+        {
+          "criterion_name": "Противоречие",
+          "max_score": 2,
+          "description": "Найдена и объяснена заданная несогласованность."
+        },
+        {
+          "criterion_name": "Границы ответа",
+          "max_score": 2,
+          "description": "Нет новых инструкций по сборке, режимам или замене."
+        }
       ]
     },
     {
       "slug": "lab-crystallization-balance",
-      "reference_sheet_slugs": ["lab-05-recrystallization", "lab-02-measurements"],
+      "reference_sheet_slugs": [
+        "lab-05-recrystallization",
+        "lab-02-measurements"
+      ],
       "payload": {
         "name": "Перекристаллизация · материальный баланс",
         "topic": "Перекристаллизация и материальный баланс",
@@ -312,18 +613,37 @@
         "example_tasks": [],
         "kb_query": "LAB-05 перекристаллизация извлечение материальный баланс чистота",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Исходный баланс", "max_score": 2, "description": "Масса целевого компонента отделена от массы смеси."},
-        {"criterion_name": "Все числовые ответы", "max_score": 4, "description": "Теоретическая масса, извлечение и недостающий поток рассчитаны."},
-        {"criterion_name": "Проверка баланса", "max_score": 2, "description": "Сумма потоков сопоставлена с подачей."},
-        {"criterion_name": "Вывод о чистоте", "max_score": 2, "description": "Не сделан неподтверждённый вывод о чистоте по одному выходу."}
+        {
+          "criterion_name": "Исходный баланс",
+          "max_score": 2,
+          "description": "Масса целевого компонента отделена от массы смеси."
+        },
+        {
+          "criterion_name": "Все числовые ответы",
+          "max_score": 4,
+          "description": "Теоретическая масса, извлечение и недостающий поток рассчитаны."
+        },
+        {
+          "criterion_name": "Проверка баланса",
+          "max_score": 2,
+          "description": "Сумма потоков сопоставлена с подачей."
+        },
+        {
+          "criterion_name": "Вывод о чистоте",
+          "max_score": 2,
+          "description": "Не сделан неподтверждённый вывод о чистоте по одному выходу."
+        }
       ]
     },
     {
       "slug": "lab-separation-principle",
-      "reference_sheet_slugs": ["lab-07-separation"],
+      "reference_sheet_slugs": [
+        "lab-07-separation"
+      ],
       "payload": {
         "name": "Разделение смеси · выбор принципа",
         "topic": "Принципы разделения смесей",
@@ -337,19 +657,44 @@
         "example_tasks": [],
         "kb_query": "LAB-07 разделение смесей различие свойств потоки материальный баланс",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Различающее свойство", "max_score": 2, "description": "Названо свойство, данное в условии."},
-        {"criterion_name": "Принцип разделения", "max_score": 3, "description": "Принцип логически следует из различия свойств."},
-        {"criterion_name": "Маршрут компонента", "max_score": 2, "description": "Целевой компонент прослежен по всем потокам."},
-        {"criterion_name": "Материальный баланс", "max_score": 2, "description": "Все заданные потоки учтены."},
-        {"criterion_name": "Нет процедурной импровизации", "max_score": 1, "description": "Ответ не вводит условия и операции сверх задачи."}
+        {
+          "criterion_name": "Различающее свойство",
+          "max_score": 2,
+          "description": "Названо свойство, данное в условии."
+        },
+        {
+          "criterion_name": "Принцип разделения",
+          "max_score": 3,
+          "description": "Принцип логически следует из различия свойств."
+        },
+        {
+          "criterion_name": "Маршрут компонента",
+          "max_score": 2,
+          "description": "Целевой компонент прослежен по всем потокам."
+        },
+        {
+          "criterion_name": "Материальный баланс",
+          "max_score": 2,
+          "description": "Все заданные потоки учтены."
+        },
+        {
+          "criterion_name": "Нет процедурной импровизации",
+          "max_score": 1,
+          "description": "Ответ не вводит условия и операции сверх задачи."
+        }
       ]
     },
     {
       "slug": "lab-report-evidence-audit",
-      "reference_sheet_slugs": ["lab-01-report", "lab-06-sublimation", "lab-08-water"],
+      "reference_sheet_slugs": [
+        "lab-01-report",
+        "lab-06-sublimation",
+        "lab-08-water"
+      ],
       "payload": {
         "name": "Аудит лабораторного отчёта",
         "topic": "Лабораторный журнал и доказательный вывод",
@@ -363,13 +708,161 @@
         "example_tasks": [],
         "kb_query": "LAB-01 статусы утверждений наблюдение расчёт ожидается вывод неизвестно",
         "validation_solver": true,
-        "validation_data_check": true
+        "validation_data_check": true,
+        "chemistry_check": "auto"
       },
       "recommended_rubric": [
-        {"criterion_name": "Классификация утверждений", "max_score": 3, "description": "Статусы назначены по происхождению данных."},
-        {"criterion_name": "Логические разрывы", "max_score": 3, "description": "Найдены широкий вывод и недостающие данные."},
-        {"criterion_name": "Исправленный вывод", "max_score": 3, "description": "Новый вывод не шире имеющегося доказательства."},
-        {"criterion_name": "Нет вымышленных данных", "max_score": 1, "description": "Пропуски сохранены как неизвестные."}
+        {
+          "criterion_name": "Классификация утверждений",
+          "max_score": 3,
+          "description": "Статусы назначены по происхождению данных."
+        },
+        {
+          "criterion_name": "Логические разрывы",
+          "max_score": 3,
+          "description": "Найдены широкий вывод и недостающие данные."
+        },
+        {
+          "criterion_name": "Исправленный вывод",
+          "max_score": 3,
+          "description": "Новый вывод не шире имеющегося доказательства."
+        },
+        {
+          "criterion_name": "Нет вымышленных данных",
+          "max_score": 1,
+          "description": "Пропуски сохранены как неизвестные."
+        }
+      ]
+    },
+    {
+      "slug": "inorg-redox-stoichiometry",
+      "reference_sheet_slugs": [
+        "lab-04-solutions",
+        "lab-01-report"
+      ],
+      "payload": {
+        "name": "Неорганика · ОВР, заряд и лимитирующий реагент",
+        "topic": "Окислительно-восстановительные реакции и стехиометрия",
+        "difficulty": "hard",
+        "instructions": "Сгенерируй университетскую расчётную задачу на уже заданную ионную ОВР в явно указанной среде. В условии дай уравниваемую схему, количества всех реагентов и потребуй: электронный баланс, уравненное ионное уравнение, лимитирующий реагент и теоретическое количество целевого продукта. Не подставляй окислительно-восстановительные потенциалы и свойства из памяти. chemistry_facts.stoichiometry содержит уравненную reaction, reactant_amounts для каждого реагента, target_species, target_amount в mol и limiting_reagent; эталонное уравнение также обязано пройти атомный и зарядовый баланс.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "ОВР ионное уравнение среда электронный баланс заряд лимитирующий реагент",
+        "validation_solver": true,
+        "validation_data_check": true,
+        "chemistry_check": "chemistry.stoichiometry"
+      },
+      "recommended_rubric": [
+        {
+          "criterion_name": "Полуреакции и среда",
+          "max_score": 3,
+          "description": "Электронный баланс и частицы среды согласованы с условием."
+        },
+        {
+          "criterion_name": "Атомный и зарядовый баланс",
+          "max_score": 2,
+          "description": "Итоговое уравнение сохраняет каждый элемент и суммарный заряд."
+        },
+        {
+          "criterion_name": "Лимитирующий реагент",
+          "max_score": 2,
+          "description": "Сопоставлены количества вещества на единицу стехиометрического превращения."
+        },
+        {
+          "criterion_name": "Количество продукта и проверка",
+          "max_score": 3,
+          "description": "Теоретическое количество продукта, единицы и обратная проверка корректны."
+        }
+      ]
+    },
+    {
+      "slug": "lab-dilution-material-balance",
+      "reference_sheet_slugs": [
+        "lab-04-solutions"
+      ],
+      "payload": {
+        "name": "Растворы · одношаговое разбавление с проверкой баланса",
+        "topic": "Расчёты для растворов",
+        "difficulty": "medium",
+        "instructions": "Дай только бумажную задачу на одно разбавление одного компонента без реакции. Явно задай c1, V1, V2, единицы и допущение о сохранении количества вещества; попроси c2, обе стороны баланса и обратную проверку. Не описывай приготовление раствора. chemistry_facts.dilution обязан содержать c1, v1, c2, v2 ровно с теми значениями и единицами, которые видит студент и использует эталон.",
+        "example": "",
+        "task_kind": "calculation",
+        "answer_format": "numeric",
+        "numeric_tolerance_pct": 0.5,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "LAB-04 разбавление c1 V1 c2 V2 материальный баланс единицы",
+        "validation_solver": true,
+        "validation_data_check": true,
+        "chemistry_check": "chemistry.dilution"
+      },
+      "recommended_rubric": [
+        {
+          "criterion_name": "Допущения модели",
+          "max_score": 2,
+          "description": "Показано, почему количество компонента сохраняется."
+        },
+        {
+          "criterion_name": "Материальный баланс",
+          "max_score": 3,
+          "description": "c1V1=c2V2 записано и преобразовано корректно."
+        },
+        {
+          "criterion_name": "Единицы и результат",
+          "max_score": 3,
+          "description": "Масштабы объёма согласованы, c2 вычислена с единицей."
+        },
+        {
+          "criterion_name": "Обратная проверка",
+          "max_score": 2,
+          "description": "Обе стороны баланса совпадают в пределах допуска."
+        }
+      ]
+    },
+    {
+      "slug": "inorg-electronegativity-scale-audit",
+      "reference_sheet_slugs": [],
+      "payload": {
+        "name": "Неорганика · совместимость шкал электроотрицательности",
+        "topic": "Периодические свойства и химическая связь",
+        "difficulty": "hard",
+        "instructions": "Сгенерируй аудит двух решений, где одновременно упоминаются шкалы Полинга и Малликена. Одно решение должно корректно сравнивать определения без численной конверсии, другое — пытаться подставить безразмерное значение Полинга в энергетическую формулу Малликена. Студент должен локализовать категориальную ошибку, назвать размерности исходных величин и сформулировать допустимый вывод. Не предлагай эмпирическую конверсию без заданного и сертифицированного источника. Для этого conceptual-блюпринта chemistry_facts должен быть пустым; generic scale compatibility check работает по тексту, а полный смысл подтверждают независимые агенты.",
+        "example": "",
+        "task_kind": "conceptual",
+        "answer_format": "text",
+        "numeric_tolerance_pct": 0,
+        "reference_sheet_ids": [],
+        "example_tasks": [],
+        "kb_query": "электроотрицательность Полинг Малликен шкала размерность энергия совместимость",
+        "validation_solver": true,
+        "validation_data_check": true,
+        "chemistry_check": "auto"
+      },
+      "recommended_rubric": [
+        {
+          "criterion_name": "Определения шкал",
+          "max_score": 3,
+          "description": "Различены эмпирическая шкала Полинга и энергетическое определение Малликена."
+        },
+        {
+          "criterion_name": "Локализация ошибки",
+          "max_score": 3,
+          "description": "Прямая подстановка несовместимых величин обнаружена и объяснена."
+        },
+        {
+          "criterion_name": "Размерности",
+          "max_score": 2,
+          "description": "Указано, какие исходные величины имеют энергетическую размерность."
+        },
+        {
+          "criterion_name": "Допустимый вывод",
+          "max_score": 2,
+          "description": "Нет выдуманной конверсии или ложного численного результата."
+        }
       ]
     }
   ]

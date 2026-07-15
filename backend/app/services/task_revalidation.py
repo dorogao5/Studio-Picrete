@@ -2,14 +2,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
-from app.models import GeneratedTask, GenerationBatch, TaskTemplate, utcnow
+from app.models import Assistant, GeneratedTask, GenerationBatch, TaskTemplate, utcnow
+from app.services.assistant_profile import build_assistant_profile
 from app.services.task_approval import task_is_export_ready
+from app.services.task_evidence import evidence_matches_task
 from app.services.taskgen import (
     _resolve_batch_model,
     build_generation_grounding,
+    build_grounding_meta,
     load_reference_sheets,
     merge_template_params,
     sheets_to_text,
+    validation_contract_for_task,
 )
 from app.services.validation import run_validation
 
@@ -26,13 +30,22 @@ async def _set_progress(
     await db.commit()
 
 
+def _generated_candidate_should_be_discarded(task: GeneratedTask, validation: dict) -> bool:
+    """Keep failed model candidates out of the teacher's exception queue."""
+
+    return validation.get("verdict") != "validated" and bool(
+        str(task.model_used or "").strip() or task.batch_id
+    )
+
+
 async def _revalidate_task(
     db: AsyncSession,
     *,
     batch: GenerationBatch,
     task: GeneratedTask,
     solver_model_entry_id: str,
-) -> bool:
+    discipline_context: str,
+) -> str:
     template = None
     if task.template_id:
         template = (
@@ -44,15 +57,18 @@ async def _revalidate_task(
             )
         ).scalar_one_or_none()
     merged = merge_template_params(template, topic=task.topic, difficulty=task.difficulty, instructions="")
+    contract = validation_contract_for_task(task, merged)
     solver_provider, solver_model = await _resolve_batch_model(db, solver_model_entry_id)
-    grounding_query = merged["kb_query"] or task.topic
-    sheets = await load_reference_sheets(db, batch.assistant_id, merged["sheet_ids"])
+    grounding_query = contract["kb_query"] or task.topic
+    sheet_ids = contract["sheet_ids"] or None
+    sheets = await load_reference_sheets(db, batch.assistant_id, sheet_ids)
     grounding_text = await build_generation_grounding(
         db,
         batch.assistant_id,
-        sheet_ids=merged["sheet_ids"],
+        sheet_ids=sheet_ids,
         query=grounding_query,
     )
+    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
     existing = (
         (
             await db.execute(
@@ -75,24 +91,48 @@ async def _revalidate_task(
         reference_answer=task.answer,
         rubric=task.rubric,
         max_score=task.max_score,
-        answer_format=merged["answer_format"],
-        tolerance_pct=merged["tolerance_pct"],
+        answer_format=contract["answer_format"],
+        tolerance_pct=contract["tolerance_pct"],
         grounding=grounding_text,
         sheets_text=sheets_to_text(sheets),
         existing_statements=list(existing),
-        data_used=(task.grounding or {}).get("data_used", []),
+        data_used=(task.grounding or {}).get("data_used"),
         solver_provider=solver_provider,
         solver_model=solver_model,
-        run_solver=merged["validation_solver"],
-        run_data=merged["validation_data_check"],
+        run_solver=contract["validation_solver"],
+        run_data=contract["validation_data_check"],
+        validation_config=contract,
+        discipline_context=discipline_context,
+        topic=task.topic,
+        chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
+        chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
+        extract_chemistry_facts_if_missing=True,
+        grounding_sheets=grounding_meta["sheets"],
     )
     validation = dict(validation)
     validation.pop("approval", None)
+    await db.refresh(task)
+    if not evidence_matches_task(validation, task):
+        return "attention"
+    if _generated_candidate_should_be_discarded(task, validation):
+        validation["candidate_disposition"] = "discarded_on_revalidation"
+        task.status = "rejected"
+        disposition = "discarded"
+    else:
+        task.status = validation["verdict"]
+        disposition = "ready" if task.status == "validated" else "attention"
     task.validation = validation
-    task.status = validation["verdict"]
     task.approved = False
+    if disposition == "ready" and not task_is_export_ready(task):
+        validation["reasons"] = [
+            *(validation.get("reasons") or []),
+            "Перепроверка не сформировала полный экспортный evidence-контракт",
+        ]
+        task.validation = validation
+        task.status = "needs_review"
+        disposition = "attention"
     await db.commit()
-    return task_is_export_ready(task)
+    return disposition
 
 
 async def _execute_revalidation_batch(db: AsyncSession, batch: GenerationBatch) -> None:
@@ -102,24 +142,18 @@ async def _execute_revalidation_batch(db: AsyncSession, batch: GenerationBatch) 
     if not task_ids or not solver_model_entry_id:
         raise ValueError("Партия перепроверки не содержит задач или контрольной модели")
 
-    tasks = list(
-        (
-            await db.execute(
-                select(GeneratedTask).where(
-                    GeneratedTask.assistant_id == batch.assistant_id,
-                    GeneratedTask.id.in_(task_ids),
-                )
-            )
-        ).scalars()
-    )
-    by_id = {task.id: task for task in tasks}
-    ordered = [by_id[task_id] for task_id in task_ids if task_id in by_id]
-    if len(ordered) != len(task_ids):
-        raise ValueError("Часть задач партии перепроверки больше не существует")
+    assistant = (
+        await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))
+    ).scalar_one_or_none()
+    if assistant is None:
+        raise ValueError("Дисциплина партии перепроверки больше не существует")
+    discipline_context = build_assistant_profile(assistant)
 
     ready = 0
-    total = len(ordered)
-    for index, task in enumerate(ordered, start=1):
+    discarded = 0
+    attention = 0
+    total = len(task_ids)
+    for index, task_id in enumerate(task_ids, start=1):
         await _set_progress(
             db,
             batch,
@@ -127,21 +161,51 @@ async def _execute_revalidation_batch(db: AsyncSession, batch: GenerationBatch) 
             done=index - 1,
             total=total,
         )
-        if await _revalidate_task(
-            db,
-            batch=batch,
-            task=task,
-            solver_model_entry_id=solver_model_entry_id,
-        ):
+        task = (
+            await db.execute(
+                select(GeneratedTask).where(
+                    GeneratedTask.assistant_id == batch.assistant_id,
+                    GeneratedTask.id == task_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if task is None:
+            discarded += 1
+            batch.generated_count = index
+            await db.commit()
+            continue
+        if task_is_export_ready(task):
+            disposition = "ready"
+        else:
+            disposition = await _revalidate_task(
+                db,
+                batch=batch,
+                task=task,
+                solver_model_entry_id=solver_model_entry_id,
+                discipline_context=discipline_context,
+            )
+        if disposition == "ready":
             ready += 1
+        elif disposition == "discarded":
+            discarded += 1
+        else:
+            attention += 1
         batch.validated_count = ready
         batch.generated_count = index
         await db.commit()
 
     batch.status = "completed"
     batch.finished_at = utcnow()
+    batch.params = {
+        **(batch.params or {}),
+        "quality_summary": {
+            "ready_count": ready,
+            "discarded_count": discarded,
+            "attention_count": attention,
+        },
+    }
     batch.progress = {
-        "stage": f"Готово: {ready}; требуют внимания: {total - ready}",
+        "stage": f"Готовы: {ready}; исключены: {discarded}; требуют внимания: {attention}",
         "done": total,
         "total": total,
     }

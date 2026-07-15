@@ -84,12 +84,12 @@ def test_rejects_missing_review_contract_fields(field: str) -> None:
         validate_grading_output(output, RUBRIC, 5)
 
 
-def test_low_confidence_is_deterministically_routed_to_teacher_review() -> None:
+def test_low_self_reported_confidence_is_diagnostic_not_a_review_signal() -> None:
     output = grade_output()
     output["confidence"] = 0.55
     validated = validate_grading_output(output, RUBRIC, 5)
-    assert validated["needs_teacher_review"] is True
-    assert "уверенность модели" in validated["contract_review_reasons"][0]
+    assert validated["needs_teacher_review"] is False
+    assert "contract_review_reasons" not in validated
 
 
 def test_unreadable_work_requires_reason_and_teacher_review() -> None:

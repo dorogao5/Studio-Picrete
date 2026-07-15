@@ -5,7 +5,6 @@ from typing import Any
 
 
 SCORE_TOLERANCE = 1e-6
-LOW_CONFIDENCE_THRESHOLD = 0.8
 
 
 class GradingContractError(ValueError):
@@ -150,8 +149,6 @@ def validate_grading_output(output: Any, rubric: list, max_score: float) -> dict
     forced_review_reasons: list[str] = []
     if unreadable and not needs_teacher_review:
         forced_review_reasons.append("работа отмечена как нечитаемая")
-    if confidence < LOW_CONFIDENCE_THRESHOLD and not needs_teacher_review:
-        forced_review_reasons.append(f"уверенность модели {confidence:.2f} ниже порога {LOW_CONFIDENCE_THRESHOLD:.2f}")
     if forced_review_reasons:
         safe_output["needs_teacher_review"] = True
         safe_output["contract_review_reasons"] = forced_review_reasons

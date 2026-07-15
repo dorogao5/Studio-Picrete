@@ -26,7 +26,7 @@ const STEPS = [
   {
     key: "tasks",
     label: "Задания",
-    hint: "Сгенерируйте задачи в нотации курса, проверьте их автопроверкой (независимый решатель, сверка данных) и одобрите лучшие.",
+    hint: "Задайте уровень и нотацию курса. Система сгенерирует партию, независимо решит задачи и автоматически допустит согласованные; преподавателю останутся только исключения.",
   },
   {
     key: "review",
@@ -102,7 +102,7 @@ export default function AssistantDetail() {
           </Button>
           <Link
             to="/playground"
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground transition-colors hover:opacity-90"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground transition-colors hover:opacity-90"
           >
             <FlaskConical className="h-4 w-4" /> Playground
           </Link>

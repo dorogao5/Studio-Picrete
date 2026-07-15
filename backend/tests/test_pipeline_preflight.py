@@ -172,6 +172,56 @@ def test_unexpected_exception_is_persisted_as_failed(monkeypatch) -> None:
     assert db.commits == 1
 
 
+def test_grade_role_changes_instruction_and_is_preserved_in_output(monkeypatch) -> None:
+    captured_prompts: list[str] = []
+
+    async def fake_grounding(*_args, **_kwargs):
+        return ""
+
+    async def successful_grade(_provider, _model, system_prompt, *_args, **_kwargs):
+        captured_prompts.append(system_prompt)
+        return grading.GradeOutcome(
+            output={
+                "total_score": 5,
+                "max_score": 5,
+                "criteria_scores": [{"criterion_name": "Решение", "score": 5, "max_score": 5}],
+            },
+            raw_text="",
+            duration_ms=1,
+            tokens_total=100,
+        )
+
+    monkeypatch.setattr(pipeline, "build_grounding_block", fake_grounding)
+    monkeypatch.setattr(pipeline.grading, "run_grading", successful_grade)
+    base_plan = grade_plan()
+    auditor_plan = pipeline.PipelinePlan(
+        assistant=base_plan.assistant,
+        grades={
+            0: pipeline.GradeStepPlan(
+                provider=base_plan.grades[0].provider,
+                model=base_plan.grades[0].model,
+                prompt=base_plan.grades[0].prompt,
+                model_use=base_plan.grades[0].model_use,
+                role="auditor",
+                role_label="Независимый аудит",
+            )
+        },
+    )
+    configured = SimpleNamespace(
+        assistant_id="assistant",
+        steps=[{"type": "grade", "config": {"model_entry_id": "model", "role": "auditor"}}],
+    )
+    db = AssistantDb(None)
+    run = configured_run()
+
+    asyncio.run(pipeline.execute_pipeline(db, configured, run, auditor_plan))
+
+    assert run.status == "completed"
+    assert "Проведите независимый аудит с нуля" in captured_prompts[0]
+    assert run.steps_log[0]["role"] == "auditor"
+    assert run.steps_log[0]["output"]["role_label"] == "Независимый аудит"
+
+
 class SequenceDb:
     def __init__(self, *values):
         self.values = iter(values)

@@ -1,0 +1,249 @@
+{
+  "schema_version": "picrete-chemistry-gold-cases-v1",
+  "content_version": "ANALYTICAL-CURATED-2026-07-R3",
+  "validator_version": "chemistry-evidence-v2",
+  "cases": [
+    {
+      "id": "ana-dilution-pass",
+      "kind": "gold",
+      "template_slug": "ana-dilution-single-stage",
+      "selected_check": "chemistry.dilution",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Аликвота V1=10.0 mL с c1=0.100 mol/L разбавлена до V2=100 mL. Найдите c2.",
+        "reference_solution": "c2=c1V1/V2=0.0100 mol/L.",
+        "answer": "c2 = 0.0100 mol/L",
+        "facts": {"dilution": {"c1": "0.100 mol/L", "v1": "10.0 mL", "c2": "0.0100 mol/L", "v2": "100 mL"}}
+      },
+      "expected": {"check_id": "chemistry.dilution", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "ana-dilution-mutation",
+      "kind": "mutation",
+      "mutates": "ana-dilution-pass",
+      "mutation": "Halve V2 without changing the claimed c2.",
+      "selected_check": "chemistry.dilution",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Аликвота V1=10.0 mL с c1=0.100 mol/L разбавлена до V2=50 mL. Найдите c2.",
+        "reference_solution": "Ошибочно заявлено c2=0.0100 mol/L.",
+        "answer": "c2 = 0.0100 mol/L",
+        "facts": {"dilution": {"c1": "0.100 mol/L", "v1": "10.0 mL", "c2": "0.0100 mol/L", "v2": "50 mL"}}
+      },
+      "expected": {"check_id": "chemistry.dilution", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "ana-titration-pass",
+      "kind": "gold",
+      "template_slug": "ana-titration-equivalence-stoichiometry",
+      "selected_check": "analytical.titration",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Для реакции с коэффициентами analyte:titrant=1:2 даны cA=0.0100 mol/L, VA=25.00 mL, cT=0.0200 mol/L. Найдите VT в точке эквивалентности.",
+        "reference_solution": "cA*VA/1=cT*VT/2, поэтому VT=25.00 mL.",
+        "answer": "VT = 25.00 mL",
+        "facts": {
+          "titration": {
+            "analyte": {"concentration": "0.0100 mol/L", "volume": "25.00 mL", "stoichiometric_coefficient": 1},
+            "titrant": {"concentration": "0.0200 mol/L", "volume": "25.00 mL", "stoichiometric_coefficient": 2}
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.titration", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "ana-titration-coefficient-mutation",
+      "kind": "mutation",
+      "mutates": "ana-titration-pass",
+      "mutation": "Replace the titrant coefficient 2 with 1 while retaining its volume.",
+      "selected_check": "analytical.titration",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Проверьте ошибочный расчёт точки эквивалентности.",
+        "reference_solution": "Ошибочно приравнены количества без коэффициента титранта.",
+        "answer": "VT = 25.00 mL",
+        "facts": {
+          "titration": {
+            "analyte": {"concentration": "0.0100 mol/L", "volume": "25.00 mL", "stoichiometric_coefficient": 1},
+            "titrant": {"concentration": "0.0200 mol/L", "volume": "25.00 mL", "stoichiometric_coefficient": 1}
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.titration", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "ana-gravimetry-pass",
+      "kind": "gold",
+      "template_slug": "ana-gravimetric-factor",
+      "selected_check": "analytical.gravimetry",
+      "task": {
+        "discipline": "analytical",
+        "statement": "После прокаливания получено m(Fe2O3)=0.5000 g. Один mol Fe2O3 соответствует двум mol Fe. Используйте M(Fe)=55.845 g/mol и M(Fe2O3)=159.687 g/mol. Найдите гравиметрический фактор и массу Fe.",
+        "reference_solution": "Fg=(2*55.845)/(1*159.687)=0.69943; m(Fe)=Fg*m(Fe2O3)=0.34972 g.",
+        "answer": "Fg=0.69943; m(Fe)=0.34972 g",
+        "facts": {
+          "gravimetry": {
+            "analyte_stoichiometric_coefficient": 2,
+            "weighing_form_stoichiometric_coefficient": 1,
+            "analyte_molar_mass": "55.845 g/mol",
+            "weighing_form_molar_mass": "159.687 g/mol",
+            "gravimetric_factor": 0.69943,
+            "weighing_form_mass": "0.5000 g",
+            "analyte_mass": "0.34972 g"
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.gravimetry", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "ana-gravimetry-stoichiometry-mutation",
+      "kind": "mutation",
+      "mutates": "ana-gravimetry-pass",
+      "mutation": "Replace the analyte stoichiometric coefficient 2 with 1 while retaining the certified factor and mass.",
+      "selected_check": "analytical.gravimetry",
+      "task": {
+        "discipline": "analytical",
+        "statement": "После прокаливания получено m(Fe2O3)=0.5000 g. Ошибочно заявлено, что один mol Fe2O3 соответствует одному mol Fe. Используйте M(Fe)=55.845 g/mol и M(Fe2O3)=159.687 g/mol.",
+        "reference_solution": "Ошибочно сохранены Fg=0.69943 и m(Fe)=0.34972 g при коэффициенте Fe, равном 1.",
+        "answer": "Fg=0.69943; m(Fe)=0.34972 g",
+        "facts": {
+          "gravimetry": {
+            "analyte_stoichiometric_coefficient": 1,
+            "weighing_form_stoichiometric_coefficient": 1,
+            "analyte_molar_mass": "55.845 g/mol",
+            "weighing_form_molar_mass": "159.687 g/mol",
+            "gravimetric_factor": 0.69943,
+            "weighing_form_mass": "0.5000 g",
+            "analyte_mass": "0.34972 g"
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.gravimetry", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "ana-conductometry-pass",
+      "kind": "gold",
+      "template_slug": "ana-conductometry-cell-constant",
+      "selected_check": "analytical.conductometry",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Для ячейки с K_cell=1.000 cm^-1 измерено сопротивление R=1.000 kOhm. Найдите G и удельную проводимость kappa.",
+        "reference_solution": "G=1/R=1.000 mS; kappa=K_cell*G=1.000 mS/cm=0.1000 S/m.",
+        "answer": "G=1.000 mS; kappa=1.000 mS/cm=0.1000 S/m",
+        "facts": {
+          "conductometry": {
+            "resistance": "1.000 kOhm",
+            "conductance": "1.000 mS",
+            "cell_constant": "1.000 cm^-1",
+            "conductivity": "1.000 mS/cm"
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.conductometry", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "ana-conductometry-unit-scale-mutation",
+      "kind": "mutation",
+      "mutates": "ana-conductometry-pass",
+      "mutation": "Report 1.000 mS/m instead of 1.000 mS/cm while retaining R, G and K_cell.",
+      "selected_check": "analytical.conductometry",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Для ячейки с K_cell=1.000 cm^-1 измерено сопротивление R=1.000 kOhm. Проверьте заявленный результат.",
+        "reference_solution": "Ошибочно заявлено kappa=1.000 mS/m; потерян множитель 100 при переходе от cm^-1 к m^-1.",
+        "answer": "G=1.000 mS; kappa=1.000 mS/m",
+        "facts": {
+          "conductometry": {
+            "resistance": "1.000 kOhm",
+            "conductance": "1.000 mS",
+            "cell_constant": "1.000 cm^-1",
+            "conductivity": "1.000 mS/m"
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.conductometry", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "ana-faraday-pass",
+      "kind": "gold",
+      "template_slug": "ana-coulometry-constant-current",
+      "selected_check": "analytical.faraday",
+      "task": {
+        "discipline": "analytical",
+        "statement": "При I=1.000 A и t=96485.33212 s прошёл Q=96485.33212 C. Используйте F=96485.33212 C/mol. Для Ag: z=1, M=107.8682 g/mol, eta=1.000.",
+        "reference_solution": "n_e=Q/F=1.000 mol; m=M*Q*eta/(zF)=107.8682 g.",
+        "answer": "Q=96485.33212 C; n_e=1.000 mol; m=107.8682 g",
+        "facts": {
+          "faraday": {
+            "current": "1.000 A",
+            "time": "96485.33212 s",
+            "charge": "96485.33212 C",
+            "faraday_constant": "96485.33212 C/mol",
+            "electron_amount": "1.000 mol",
+            "mass": "107.8682 g",
+            "molar_mass": "107.8682 g/mol",
+            "electrons": 1,
+            "current_efficiency": 1.0
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.faraday", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "ana-faraday-efficiency-mutation",
+      "kind": "mutation",
+      "mutates": "ana-faraday-pass",
+      "mutation": "Set current efficiency to 0.5 but retain the mass for eta=1.",
+      "selected_check": "analytical.faraday",
+      "task": {
+        "discipline": "analytical",
+        "statement": "При I=1.000 A и t=96485.33212 s прошёл Q=96485.33212 C. Используйте F=96485.33212 C/mol. Для Ag: z=1, M=107.8682 g/mol, eta=0.500.",
+        "reference_solution": "Ошибочно оставлена масса 107.8682 g.",
+        "answer": "m=107.8682 g",
+        "facts": {
+          "faraday": {
+            "current": "1.000 A",
+            "time": "96485.33212 s",
+            "charge": "96485.33212 C",
+            "faraday_constant": "96485.33212 C/mol",
+            "electron_amount": "1.000 mol",
+            "mass": "107.8682 g",
+            "molar_mass": "107.8682 g/mol",
+            "electrons": 1,
+            "current_efficiency": 0.5
+          }
+        }
+      },
+      "expected": {"check_id": "analytical.faraday", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "ana-calibration-pass",
+      "kind": "gold",
+      "template_slug": "ana-calibration-inverse-range",
+      "selected_check": "analytical.calibration",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Модель y=2.0c+0.5 сертифицирована на c=0.0…3.0. Для y=4.5 найдите c.",
+        "reference_solution": "c=(4.5-0.5)/2.0=2.0, значение внутри диапазона.",
+        "answer": "c = 2.0",
+        "facts": {"calibration": {"slope": 2.0, "intercept": 0.5, "signal": 4.5, "concentration": 2.0, "calibration_range": [0.0, 3.0]}}
+      },
+      "expected": {"check_id": "analytical.calibration", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "ana-calibration-extrapolation-mutation",
+      "kind": "mutation",
+      "mutates": "ana-calibration-pass",
+      "mutation": "Use a mathematically consistent concentration outside the certified range.",
+      "selected_check": "analytical.calibration",
+      "task": {
+        "discipline": "analytical",
+        "statement": "Модель y=2.0c+0.5 сертифицирована на c=0.0…2.0. Для y=5.5 найдите c.",
+        "reference_solution": "c=(5.5-0.5)/2.0=2.5, но это экстраполяция.",
+        "answer": "c = 2.5; количественный вывод вне диапазона не допускается",
+        "facts": {"calibration": {"slope": 2.0, "intercept": 0.5, "signal": 5.5, "concentration": 2.5, "calibration_range": [0.0, 2.0]}}
+      },
+      "expected": {"check_id": "analytical.calibration", "state": "warning", "automatic_admission_effect": "block"}
+    }
+  ]
+}

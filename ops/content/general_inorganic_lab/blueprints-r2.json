@@ -1,0 +1,100 @@
+{
+  "schema_version": "picrete-typed-blueprints-v1",
+  "content_version": "LAB-CURATED-2026-07-R3",
+  "validator_version": "chemistry-evidence-v2",
+  "admission_contract": {
+    "certification": "one_time_per_source_and_blueprint_version",
+    "per_task_teacher_approval": false,
+    "automatic_gate_requires": [
+      "immutable content fingerprint and frozen validation contract",
+      "certified source/profile digests",
+      "every required deterministic check returns pass",
+      "no deterministic fail, warning, indeterminate or error",
+      "two independent decision-grade DeepSeek solutions agree",
+      "subject critic passes self-containment, reference consistency, chemistry and units",
+      "rubric and final answer are structurally consistent"
+    ],
+    "on_exception": "needs_review_with_machine_readable_reason"
+  },
+  "contracts": [
+    {
+      "template_slug": "inorg-redox-stoichiometry",
+      "chemistry_check": "chemistry.stoichiometry",
+      "task_kind": "calculation",
+      "answer_format": "numeric",
+      "core_invariant": "A balanced ionic reaction, limiting extent and target amount must agree, including charge.",
+      "chemistry_facts_schema": {
+        "block": "stoichiometry",
+        "required": ["reaction", "reactant_amounts", "target_species", "target_amount"],
+        "optional": ["limiting_reagent"],
+        "types": {
+          "reaction": "string parseable as one equation with one arrow",
+          "reactant_amounts": "object: species formula -> amount with explicit mol unit",
+          "target_species": "string species formula including ionic charge where applicable",
+          "target_amount": "measurement with amount dimension",
+          "limiting_reagent": "string species formula"
+        }
+      },
+      "also_expected_generic_checks": ["chemistry.reaction_balance", "chemistry.units"],
+      "coverage_boundary": "The deterministic check verifies balance, limiting extent and target amount. Choice of redox model, medium, pedagogical level and completeness of the electron-balance explanation remain multi-agent checks.",
+      "gold_case_ids": ["inorg-stoich-pass", "inorg-stoich-target-mutation"]
+    },
+    {
+      "template_slug": "lab-dilution-material-balance",
+      "chemistry_check": "chemistry.dilution",
+      "task_kind": "calculation",
+      "answer_format": "numeric",
+      "core_invariant": "For one component without reaction, c1*V1 must equal c2*V2 with compatible concentration types.",
+      "chemistry_facts_schema": {
+        "block": "dilution",
+        "required": ["c1", "v1", "c2", "v2"],
+        "types": {
+          "c1": "amount or mass concentration measurement with unit",
+          "v1": "volume measurement with unit",
+          "c2": "same concentration dimension as c1",
+          "v2": "volume measurement with unit"
+        }
+      },
+      "also_expected_generic_checks": ["chemistry.units"],
+      "coverage_boundary": "The check does not prove that dilution is the chemically appropriate model; the statement and critic must establish one conserved component and absence of reaction.",
+      "gold_case_ids": ["inorg-dilution-pass", "inorg-dilution-volume-mutation"]
+    },
+    {
+      "template_slug": "lab-observation-equation-conclusion",
+      "chemistry_check": "auto",
+      "task_kind": "conceptual",
+      "answer_format": "text",
+      "core_invariant": "Every equation present in the reference solution must conserve atoms and total charge.",
+      "chemistry_facts_schema": {
+        "block": null,
+        "required": [],
+        "types": {}
+      },
+      "also_expected_generic_checks": ["chemistry.reaction_balance"],
+      "coverage_boundary": "A balanced equation is necessary, not sufficient evidence that the stated observation identifies a species. Observation-to-conclusion logic remains a critic/solver obligation.",
+      "gold_case_ids": ["inorg-reaction-balance-pass", "inorg-reaction-balance-mutation"]
+    },
+    {
+      "template_slug": "inorg-electronegativity-scale-audit",
+      "chemistry_check": "auto",
+      "task_kind": "conceptual",
+      "answer_format": "text",
+      "core_invariant": "A dimensionless Pauling value must not be substituted into an energy-based Mulliken formula.",
+      "chemistry_facts_schema": {
+        "block": null,
+        "required": [],
+        "types": {}
+      },
+      "also_expected_generic_checks": ["chemistry.scale_compatibility"],
+      "coverage_boundary": "The text check detects the explicit Pauling-to-Mulliken category error. It does not certify arbitrary empirical scale conversions or all bonding arguments.",
+      "gold_case_ids": ["inorg-scale-comparison-pass", "inorg-scale-substitution-mutation"]
+    }
+  ],
+  "unsupported_green_claims": [
+    "recrystallization recovery or purity",
+    "instrument/scheme correctness",
+    "water quality or safety",
+    "statistical outlier exclusion",
+    "laboratory procedure compliance without a current versioned protocol"
+  ]
+}

@@ -79,6 +79,19 @@ def test_unexpected_final_quantity_prevents_automatic_match() -> None:
     assert result["unexpected_solver_numbers"] == [3.0]
 
 
+def test_intermediate_numbers_are_allowed_inside_reference_solution() -> None:
+    result = compare_answers(
+        "m = 5 г",
+        "Сначала находим n = 0.1 моль. Затем получаем m = 5 г.",
+        tolerance_pct=2,
+        allow_extra_numbers=True,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["unexpected_solver_numbers"] == [0.1]
+    assert result["extra_numbers_allowed"] is True
+
+
 def test_explicit_quantity_labels_prevent_same_unit_value_swaps() -> None:
     result = compare_answers(
         "m_start = 5 г; m_end = 3 г",
@@ -231,3 +244,56 @@ def test_voltage_is_not_equated_to_unknown_compound_unit() -> None:
 
     assert result["verdict"] != "match"
     assert result["missing_reference_units"] == ["в"]
+
+
+def test_trace_values_do_not_match_through_a_large_absolute_floor() -> None:
+    result = compare_answers("c = 1e-12 mol/L", "c = 9e-10 mol/L", tolerance_pct=2)
+
+    assert result["verdict"] != "match"
+
+
+def test_same_number_with_different_mobility_scale_does_not_match() -> None:
+    result = compare_answers(
+        "μ = 1e-8 m²/(V·s)",
+        "μ = 1e-8 cm²/(V·s)",
+        tolerance_pct=2,
+    )
+
+    assert result["verdict"] != "match"
+
+
+def test_same_number_with_current_instead_of_charge_does_not_match() -> None:
+    result = compare_answers("Q = 5 C", "I = 5 A", tolerance_pct=2)
+
+    assert result["verdict"] != "match"
+
+
+def test_equivalent_launch_units_are_converted_before_comparison() -> None:
+    result = compare_answers("μ = 1e-8 m²/(V·s)", "μ = 1e-4 cm²/(V·s)", tolerance_pct=2)
+
+    assert result["verdict"] == "match"
+
+
+@pytest.mark.parametrize(
+    ("reference", "solver"),
+    [
+        ("η = 2 Pa·s", "η = 2 mPa·s"),
+        ("S = 10 m²/g", "S = 10 m²/kg"),
+        ("n = 1 mol", "n = 1 mmol"),
+    ],
+)
+def test_same_numeral_with_different_si_scale_is_not_equal(reference: str, solver: str) -> None:
+    assert compare_answers(reference, solver, tolerance_pct=2)["verdict"] != "match"
+
+
+@pytest.mark.parametrize(
+    ("reference", "solver"),
+    [
+        ("η = 2 Pa·s", "η = 2000 mPa·s"),
+        ("S = 10 m²/g", "S = 10000 m²/kg"),
+        ("n = 1 mol", "n = 1000 mmol"),
+        ("m = 1 g", "m = 0.001 kg"),
+    ],
+)
+def test_equivalent_si_scaled_values_match(reference: str, solver: str) -> None:
+    assert compare_answers(reference, solver, tolerance_pct=2)["verdict"] == "match"

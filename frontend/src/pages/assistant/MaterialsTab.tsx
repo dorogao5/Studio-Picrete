@@ -129,6 +129,7 @@ function DocumentsSection({
   const [dragOver, setDragOver] = useState(false);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [viewDocId, setViewDocId] = useState<string | null>(null);
+  const [editDoc, setEditDoc] = useState<KnowledgeDocument | null>(null);
   const [analyzeDoc, setAnalyzeDoc] = useState<KnowledgeDocument | null>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
 
@@ -394,6 +395,11 @@ function DocumentsSection({
                     {doc.page_count > 0 && ` · ${doc.page_count} стр.`}
                     {doc.status === "parsed" && ` · ${doc.chunk_count} фрагментов`}
                   </p>
+                  <p className={`mt-1 text-xs ${doc.course_scope && doc.effective_version ? "text-muted-foreground" : "text-warning"}`}>
+                    {doc.course_scope && doc.effective_version
+                      ? `Область: ${doc.course_scope} · версия: ${doc.effective_version}`
+                      : "Не заданы область действия и версия источника"}
+                  </p>
                   {doc.status === "failed" && doc.error && (
                     <p className="text-xs text-destructive mt-1 whitespace-pre-wrap">{doc.error}</p>
                   )}
@@ -435,15 +441,28 @@ function DocumentsSection({
                       </span>
                     )}
                   <button
+                    type="button"
+                    className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-auto sm:w-auto sm:p-1.5"
+                    title="Версия и доступ"
+                    aria-label={`Изменить версию и доступ документа «${doc.title}»`}
+                    onClick={() => setEditDoc(doc)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
                     className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground sm:h-auto sm:w-auto sm:p-1.5"
                     title="Открыть текст"
+                    aria-label={`Открыть текст документа «${doc.title}»`}
                     onClick={() => setViewDocId(doc.id)}
                   >
                     <Eye className="h-4 w-4" />
                   </button>
                   <button
+                    type="button"
                     className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 sm:h-auto sm:w-auto sm:p-1.5"
                     title="Переразобрать файл"
+                    aria-label={`Переразобрать документ «${doc.title}»`}
                     disabled={doc.status === "parsing" || doc.status === "uploaded" || busyDocId === doc.id}
                     onClick={() => reparse(doc)}
                   >
@@ -454,8 +473,10 @@ function DocumentsSection({
                     )}
                   </button>
                   <button
+                    type="button"
                     className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive sm:h-auto sm:w-auto sm:p-1.5"
                     title="Удалить"
+                    aria-label={`Удалить документ «${doc.title}»`}
                     onClick={() => removeDoc(doc)}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -468,6 +489,17 @@ function DocumentsSection({
       )}
 
       {viewDocId && <DocViewModal assistantId={assistant.id} documentId={viewDocId} onClose={() => setViewDocId(null)} />}
+      {editDoc && (
+        <DocumentMetadataModal
+          assistantId={assistant.id}
+          document={editDoc}
+          onClose={() => setEditDoc(null)}
+          onSaved={async () => {
+            setEditDoc(null);
+            await reload();
+          }}
+        />
+      )}
       {analyzeDoc && (
         <AnalyzeModal
           assistant={assistant}
@@ -479,6 +511,112 @@ function DocumentsSection({
         />
       )}
     </section>
+  );
+}
+
+function DocumentMetadataModal({
+  assistantId,
+  document,
+  onClose,
+  onSaved,
+}: {
+  assistantId: string;
+  document: KnowledgeDocument;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [title, setTitle] = useState(document.title);
+  const [authority, setAuthority] = useState<MaterialAuthority>(document.authority);
+  const [visibility, setVisibility] = useState<MaterialVisibility>(document.visibility);
+  const [courseScope, setCourseScope] = useState(document.course_scope);
+  const [effectiveVersion, setEffectiveVersion] = useState(document.effective_version);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await kbApi.updateDocument(assistantId, document.id, {
+        title: title.trim(),
+        authority,
+        visibility,
+        course_scope: courseScope.trim(),
+        effective_version: effectiveVersion.trim(),
+      });
+      await onSaved();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Версия и доступ материала" open onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="Название документа">
+          <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Статус источника">
+            <Select
+              value={authority}
+              onChange={(event) => {
+                const next = event.target.value as MaterialAuthority;
+                setAuthority(next);
+                if (next === "unverified") setVisibility("quarantine");
+              }}
+            >
+              {Object.entries(AUTHORITY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Кому доступен">
+            <Select
+              value={visibility}
+              onChange={(event) => setVisibility(event.target.value as MaterialVisibility)}
+              disabled={authority === "unverified"}
+            >
+              {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Курс / область действия" hint="Стабильный ID курса или однозначное название программы">
+            <Input
+              value={courseScope}
+              onChange={(event) => setCourseScope(event.target.value)}
+              placeholder="Например, infochem-29"
+            />
+          </Field>
+          <Field label="Действующая версия" hint="Изменение версии отзывает старые автоматические допуски">
+            <Input
+              value={effectiveVersion}
+              onChange={(event) => setEffectiveVersion(event.target.value)}
+              placeholder="Например, осень 2026 · редакция 3"
+            />
+          </Field>
+        </div>
+        {visibility === "student" && (!courseScope.trim() || !effectiveVersion.trim()) && (
+          <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            Для публикации студентам задайте область действия и версию: без них источник нельзя однозначно привязать к релизу.
+          </p>
+        )}
+        <ErrorNote message={error} />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Отмена</Button>
+          <Button
+            onClick={save}
+            loading={saving}
+            disabled={!title.trim() || (visibility === "student" && (!courseScope.trim() || !effectiveVersion.trim()))}
+          >
+            Сохранить
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

@@ -25,6 +25,7 @@ from app.schemas import (
 )
 from app.security import get_current_user
 from app.services.meta_prompt import generate_system_prompt
+from app.services.evidence_invalidation import invalidate_task_evidence
 
 router = APIRouter(prefix="/assistants", tags=["assistants"])
 
@@ -131,8 +132,16 @@ async def update_assistant(
 ) -> Assistant:
     assistant = await get_assistant_or_404(assistant_id, db)
     payload = body.model_dump(exclude_unset=True)
+    profile_fields = {"discipline", "description", "audience", "language", "topics", "criteria", "nuances"}
+    profile_changed = any(field in payload and getattr(assistant, field) != payload[field] for field in profile_fields)
     for field, value in payload.items():
         setattr(assistant, field, value)
+    if profile_changed:
+        await invalidate_task_evidence(
+            db,
+            assistant_id,
+            reason="Изменился профиль дисциплины — автоматические доказательства нужно пересобрать",
+        )
     assistant.updated_by = user.id
     await db.commit()
     await db.refresh(assistant)
@@ -146,9 +155,16 @@ async def add_nuance(
     assistant = await get_assistant_or_404(assistant_id, db)
     text = body.text.strip()
     nuances = list(assistant.nuances or [])
-    if text and text not in nuances:
+    added = bool(text and text not in nuances)
+    if added:
         nuances.append(text)
     assistant.nuances = nuances
+    if added:
+        await invalidate_task_evidence(
+            db,
+            assistant_id,
+            reason="Изменились требования преподавателя — автоматические доказательства нужно пересобрать",
+        )
     assistant.updated_by = user.id
     await db.commit()
     await db.refresh(assistant)

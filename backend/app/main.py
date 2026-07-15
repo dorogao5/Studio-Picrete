@@ -92,6 +92,7 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
         "kb_query": "VARCHAR(512) DEFAULT ''",
         "validation_solver": "BOOLEAN DEFAULT 1",
         "validation_data_check": "BOOLEAN DEFAULT 1",
+        "chemistry_check": "VARCHAR(64) DEFAULT 'auto'",
     },
     "generated_tasks": {
         "batch_id": "VARCHAR(32)",
@@ -124,11 +125,66 @@ async def ensure_sqlite_columns(conn) -> None:
         for column, ddl in wanted.items():
             if column not in columns:
                 await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                columns.add(column)
+        if table == "task_templates" and "chemistry_check" in columns:
+            await conn.exec_driver_sql(
+                """UPDATE task_templates SET chemistry_check = 'auto'
+                WHERE chemistry_check IS NULL OR chemistry_check NOT IN (
+                    'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
+                    'analytical.titration', 'analytical.faraday', 'analytical.calibration',
+                    'analytical.gravimetry', 'analytical.conductometry',
+                    'colloid.bet', 'colloid.smoluchowski', 'colloid.dlvo'
+                )"""
+            )
 
 
 async def ensure_postgres_columns(conn) -> None:
     await conn.exec_driver_sql(
         "ALTER TABLE task_templates ADD COLUMN IF NOT EXISTS rubric JSONB NOT NULL DEFAULT '[]'::jsonb"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE task_templates ADD COLUMN IF NOT EXISTS chemistry_check VARCHAR(64) DEFAULT 'auto'"
+    )
+    await conn.exec_driver_sql(
+        """UPDATE task_templates SET chemistry_check = 'auto'
+        WHERE chemistry_check IS NULL OR chemistry_check NOT IN (
+            'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
+            'analytical.titration', 'analytical.faraday', 'analytical.calibration',
+            'analytical.gravimetry', 'analytical.conductometry',
+            'colloid.bet', 'colloid.smoluchowski', 'colloid.dlvo'
+        )"""
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE task_templates ALTER COLUMN chemistry_check SET DEFAULT 'auto'"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE task_templates ALTER COLUMN chemistry_check SET NOT NULL"
+    )
+    await conn.exec_driver_sql(
+        """DO $$ BEGIN
+        IF EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'ck_task_templates_chemistry_check'
+              AND conrelid = 'task_templates'::regclass
+              AND pg_get_constraintdef(oid) NOT LIKE '%analytical.gravimetry%'
+        ) THEN
+            ALTER TABLE task_templates DROP CONSTRAINT ck_task_templates_chemistry_check;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'ck_task_templates_chemistry_check'
+              AND conrelid = 'task_templates'::regclass
+        ) THEN
+            ALTER TABLE task_templates ADD CONSTRAINT ck_task_templates_chemistry_check CHECK (
+                chemistry_check IN (
+                    'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
+                    'analytical.titration', 'analytical.faraday', 'analytical.calibration',
+                    'analytical.gravimetry', 'analytical.conductometry',
+                    'colloid.bet', 'colloid.smoluchowski', 'colloid.dlvo'
+                )
+            );
+        END IF;
+        END $$"""
     )
     await conn.exec_driver_sql(
         "ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_version VARCHAR(64) DEFAULT ''"

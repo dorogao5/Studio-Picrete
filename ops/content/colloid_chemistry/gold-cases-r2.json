@@ -1,0 +1,192 @@
+{
+  "schema_version": "picrete-chemistry-gold-cases-v1",
+  "content_version": "COLLOID-CURATED-2026-07-R3",
+  "validator_version": "chemistry-evidence-v2",
+  "cases": [
+    {
+      "id": "col-bet-pass",
+      "kind": "gold",
+      "template_slug": "col-bet-linear-parameters",
+      "selected_check": "colloid.bet",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для линейной формы БЭТ получены s=0.4, i=0.1 на p/p0=0.05, 0.15, 0.30.",
+        "reference_solution": "am=1/(s+i)=2.0; C=1+s/i=5.0.",
+        "answer": "am=2.0; C=5.0",
+        "facts": {"bet": {"slope": 0.4, "intercept": 0.1, "monolayer_capacity": 2.0, "bet_constant": 5.0, "relative_pressures": [0.05, 0.15, 0.30]}}
+      },
+      "expected": {"check_id": "colloid.bet", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "col-bet-capacity-mutation",
+      "kind": "mutation",
+      "mutates": "col-bet-pass",
+      "mutation": "Replace am=2.0 with 2.5 while preserving s and i.",
+      "selected_check": "colloid.bet",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для линейной формы БЭТ получены s=0.4, i=0.1.",
+        "reference_solution": "Ошибочно заявлено am=2.5; C=5.0.",
+        "answer": "am=2.5; C=5.0",
+        "facts": {"bet": {"slope": 0.4, "intercept": 0.1, "monolayer_capacity": 2.5, "bet_constant": 5.0, "relative_pressures": [0.05, 0.15, 0.30]}}
+      },
+      "expected": {"check_id": "colloid.bet", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "col-bet-pressure-mutation",
+      "kind": "mutation",
+      "mutates": "col-bet-pass",
+      "mutation": "Add p/p0=0.40 outside the configured conventional linear window.",
+      "selected_check": "colloid.bet",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для линейной формы БЭТ использованы p/p0=0.05, 0.15, 0.40; s=0.4, i=0.1.",
+        "reference_solution": "am=2.0; C=5.0; последняя точка требует исключения из автоматического допуска.",
+        "answer": "am=2.0; C=5.0",
+        "facts": {"bet": {"slope": 0.4, "intercept": 0.1, "monolayer_capacity": 2.0, "bet_constant": 5.0, "relative_pressures": [0.05, 0.15, 0.40]}}
+      },
+      "expected": {"check_id": "colloid.bet", "state": "warning", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "col-bet-surface-pass",
+      "kind": "gold",
+      "template_slug": "col-bet-surface-area",
+      "selected_check": "colloid.bet",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для монослоя БЭТ a_m=1.000 mmol/g; площадь молекулы s0=0.162 nm2. Используйте постоянную Авогадро N_A=6.02214076e23 1/mol. Найдите удельную поверхность Ssp.",
+        "reference_solution": "Ssp=a_m*N_A*s0=1.000 mmol/g * 6.02214076e23 1/mol * 0.162 nm2=97.5587 m2/g.",
+        "answer": "Ssp=97.5587 m2/g",
+        "facts": {
+          "bet": {
+            "variant": "surface_area",
+            "monolayer_amount_per_mass": "1.000 mmol/g",
+            "molecular_cross_section": "0.162 nm2",
+            "avogadro_constant": "6.02214076e23 1/mol",
+            "specific_surface": "97.5587 m2/g"
+          }
+        }
+      },
+      "expected": {"check_id": "colloid.bet", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "col-bet-surface-unit-scale-mutation",
+      "kind": "mutation",
+      "mutates": "col-bet-surface-pass",
+      "mutation": "Replace the result unit m2/g with m2/kg while retaining the same numeric value.",
+      "selected_check": "colloid.bet",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для монослоя БЭТ a_m=1.000 mmol/g; площадь молекулы s0=0.162 nm2. Используйте постоянную Авогадро N_A=6.02214076e23 1/mol. Проверьте заявленную Ssp.",
+        "reference_solution": "Ошибочно заявлено Ssp=97.5587 m2/kg: потерян множитель 1000 при нормировании на массу.",
+        "answer": "Ssp=97.5587 m2/kg",
+        "facts": {
+          "bet": {
+            "variant": "surface_area",
+            "monolayer_amount_per_mass": "1.000 mmol/g",
+            "molecular_cross_section": "0.162 nm2",
+            "avogadro_constant": "6.02214076e23 1/mol",
+            "specific_surface": "97.5587 m2/kg"
+          }
+        }
+      },
+      "expected": {"check_id": "colloid.bet", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "col-bet-surface-hidden-constant-mutation",
+      "kind": "mutation",
+      "mutates": "col-bet-surface-pass",
+      "mutation": "Remove the numerical Avogadro constant from the student statement while retaining it in structured facts and the solution.",
+      "selected_check": "colloid.bet",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для монослоя БЭТ a_m=1.000 mmol/g; площадь молекулы s0=0.162 nm2. Найдите удельную поверхность Ssp.",
+        "reference_solution": "Для расчёта скрыто использовано N_A=6.02214076e23 1/mol; такой эталон не самодостаточен.",
+        "answer": "Ssp=97.5587 m2/g",
+        "facts": {
+          "bet": {
+            "variant": "surface_area",
+            "monolayer_amount_per_mass": "1.000 mmol/g",
+            "molecular_cross_section": "0.162 nm2",
+            "avogadro_constant": "6.02214076e23 1/mol",
+            "specific_surface": "97.5587 m2/g"
+          }
+        }
+      },
+      "expected": {"check_id": "colloid.bet", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "col-smoluchowski-pass",
+      "kind": "gold",
+      "template_slug": "col-zeta-smoluchowski",
+      "selected_check": "colloid.smoluchowski",
+      "task": {
+        "discipline": "colloid",
+        "statement": "mu=3.475e-8 m2/(V*s), eta=1.000 mPa*s, epsilon_r=78.5, epsilon_0=8.8541878128e-12 F/m; kappa*a=100. Рассчитайте zeta в приближении Смолуховского.",
+        "reference_solution": "zeta=eta*mu/(epsilon_r*epsilon_0)=0.0500 V; kappa*a=100 согласуется с тонким слоем.",
+        "answer": "zeta = 0.0500 V",
+        "facts": {"smoluchowski": {"mobility": "3.475e-8 m2/(V*s)", "viscosity": "1.000 mPa*s", "relative_permittivity": 78.5, "vacuum_permittivity": "8.8541878128e-12 F/m", "zeta": "0.0500 V", "kappa_a": 100, "claims_applicable": true}}
+      },
+      "expected": {"check_id": "colloid.smoluchowski", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "col-smoluchowski-regime-mutation",
+      "kind": "mutation",
+      "mutates": "col-smoluchowski-pass",
+      "mutation": "Set kappa*a=5 while retaining claims_applicable=true.",
+      "selected_check": "colloid.smoluchowski",
+      "task": {
+        "discipline": "colloid",
+        "statement": "mu=3.475e-8 m2/(V*s), eta=1.000 mPa*s, epsilon_r=78.5, epsilon_0=8.8541878128e-12 F/m; kappa*a=5.",
+        "reference_solution": "Ошибочно заявлено, что формула Смолуховского заведомо применима при kappa*a=5.",
+        "answer": "zeta = 0.0500 V; приближение применимо",
+        "facts": {"smoluchowski": {"mobility": "3.475e-8 m2/(V*s)", "viscosity": "1.000 mPa*s", "relative_permittivity": 78.5, "vacuum_permittivity": "8.8541878128e-12 F/m", "zeta": "0.0500 V", "kappa_a": 5, "claims_applicable": true}}
+      },
+      "expected": {"check_id": "colloid.smoluchowski", "state": "fail", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "col-dlvo-pass",
+      "kind": "gold",
+      "template_slug": "col-dlvo-debye-geometry",
+      "selected_check": "colloid.dlvo",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Вода, 1:1 электролит, 25 °C: I=0.0100 mol/L; a=100 nm; h=2 nm. Проверьте lambda_D и приближение Дерягина.",
+        "reference_solution": "lambda_D=0.304/sqrt(0.0100)=3.04 nm; h/a=0.02, геометрическое приближение согласовано.",
+        "answer": "lambda_D=3.04 nm; h/a=0.02",
+        "facts": {"dlvo": {"debye_model": "water_1_1_25c", "ionic_strength": "0.0100 mol/L", "debye_length": "3.04 nm", "particle_radius": "100 nm", "separation": "2 nm", "claims_derjaguin": true}}
+      },
+      "expected": {"check_id": "colloid.dlvo", "state": "pass", "automatic_admission_effect": "pass"}
+    },
+    {
+      "id": "col-dlvo-medium-mutation",
+      "kind": "mutation",
+      "mutates": "col-dlvo-pass",
+      "mutation": "Remove the explicit water/1:1/25 °C model while retaining the shortcut result.",
+      "selected_check": "colloid.dlvo",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Для неизвестной среды при I=0.0100 mol/L заявлена lambda_D=3.04 nm.",
+        "reference_solution": "Формула 0.304/sqrt(I) применена без модели среды.",
+        "answer": "lambda_D=3.04 nm",
+        "facts": {"dlvo": {"ionic_strength": "0.0100 mol/L", "debye_length": "3.04 nm"}}
+      },
+      "expected": {"check_id": "colloid.dlvo", "state": "indeterminate", "automatic_admission_effect": "block"}
+    },
+    {
+      "id": "col-dlvo-geometry-mutation",
+      "kind": "mutation",
+      "mutates": "col-dlvo-pass",
+      "mutation": "Increase h/a to 0.20 while retaining claims_derjaguin=true.",
+      "selected_check": "colloid.dlvo",
+      "task": {
+        "discipline": "colloid",
+        "statement": "Вода, 1:1 электролит, 25 °C: I=0.0100 mol/L; a=100 nm; h=20 nm.",
+        "reference_solution": "Ошибочно заявлено приближение Дерягина при h/a=0.20.",
+        "answer": "lambda_D=3.04 nm; приближение Дерягина применимо",
+        "facts": {"dlvo": {"debye_model": "water_1_1_25c", "ionic_strength": "0.0100 mol/L", "debye_length": "3.04 nm", "particle_radius": "100 nm", "separation": "20 nm", "claims_derjaguin": true}}
+      },
+      "expected": {"check_id": "colloid.dlvo", "state": "fail", "automatic_admission_effect": "block"}
+    }
+  ]
+}

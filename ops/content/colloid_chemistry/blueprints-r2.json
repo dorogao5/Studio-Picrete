@@ -1,0 +1,105 @@
+{
+  "schema_version": "picrete-typed-blueprints-v1",
+  "content_version": "COLLOID-CURATED-2026-07-R3",
+  "validator_version": "chemistry-evidence-v2",
+  "admission_contract": {
+    "certification": "one_time_per_source_course_binding_and_blueprint_version",
+    "per_task_teacher_approval": false,
+    "automatic_gate_requires": [
+      "immutable content fingerprint and frozen validation contract",
+      "certified source/profile digests and current course binding",
+      "required deterministic check returns pass",
+      "no deterministic fail, warning, indeterminate or error",
+      "two independent decision-grade DeepSeek solutions agree",
+      "subject critic passes model applicability, units, self-containment and reference consistency"
+    ],
+    "on_exception": "needs_review_with_machine_readable_reason"
+  },
+  "contracts": [
+    {
+      "template_slug": "col-bet-linear-parameters",
+      "chemistry_check": "colloid.bet",
+      "core_invariant": "am=1/(s+i), C=1+s/i, both parameters are positive and p/p0 values are physically admissible.",
+      "chemistry_facts_schema": {
+        "block": "bet",
+        "required": ["slope", "intercept", "monolayer_capacity", "bet_constant", "relative_pressures"],
+        "types": {
+          "slope": "finite number",
+          "intercept": "finite non-zero number",
+          "monolayer_capacity": "finite positive number in the stated adsorption unit",
+          "bet_constant": "finite positive dimensionless number",
+          "relative_pressures": "array of finite values strictly between 0 and 1"
+        }
+      },
+      "coverage_boundary": "The check validates transformed-line algebra and a conventional 0.05–0.35 warning window. It does not prove that a real isotherm is BET-linear, that regression weighting is valid or that the adsorbate cross-section is correct.",
+      "gold_case_ids": ["col-bet-pass", "col-bet-pressure-mutation"]
+    },
+    {
+      "template_slug": "col-bet-surface-area",
+      "chemistry_check": "colloid.bet",
+      "core_invariant": "For variant=surface_area, Ssp=am*NA*s0 agrees after converting amount-per-mass, molecular area and specific-surface units, and the numeric NA is explicit in the task.",
+      "chemistry_facts_schema": {
+        "block": "bet",
+        "required": ["variant", "monolayer_amount_per_mass", "molecular_cross_section", "avogadro_constant", "specific_surface"],
+        "literals": {"variant": "surface_area"},
+        "types": {
+          "monolayer_amount_per_mass": "positive amount-per-mass measurement with mol/g or mmol/g unit",
+          "molecular_cross_section": "positive area measurement with nm2 unit",
+          "avogadro_constant": "positive reciprocal-amount measurement with 1/mol unit, numerically stated and named in the task",
+          "specific_surface": "positive specific-surface measurement with m2/g or m2/kg unit"
+        }
+      },
+      "coverage_boundary": "The check validates unit conversion, the stated cross-section and Ssp algebra, and requires NA within the physical-constant tolerance. It does not establish adsorbate identity, monolayer-model applicability, regression quality, pore accessibility or the correctness of an externally sourced molecular cross-section.",
+      "gold_case_ids": ["col-bet-surface-pass", "col-bet-surface-unit-scale-mutation", "col-bet-surface-hidden-constant-mutation"]
+    },
+    {
+      "template_slug": "col-zeta-smoluchowski",
+      "chemistry_check": "colloid.smoluchowski",
+      "core_invariant": "zeta=eta*mobility/(epsilon_r*epsilon_0), epsilon_0 is visible to the student and any applicability claim agrees with kappa*a.",
+      "chemistry_facts_schema": {
+        "block": "smoluchowski",
+        "required": ["mobility", "viscosity", "relative_permittivity", "vacuum_permittivity", "zeta", "kappa_a", "claims_applicable"],
+        "types": {
+          "mobility": "electrophoretic-mobility measurement with unit",
+          "viscosity": "dynamic-viscosity measurement with unit",
+          "relative_permittivity": "positive finite dimensionless number",
+          "vacuum_permittivity": "permittivity measurement with unit, also stated numerically in the task",
+          "zeta": "voltage measurement with unit",
+          "kappa_a": "positive finite dimensionless number",
+          "claims_applicable": "boolean"
+        }
+      },
+      "coverage_boundary": "PASS verifies the stated Smoluchowski relation and encoded asymptotic claim. It does not establish surface potential, dispersion stability, non-Newtonian corrections or validity for an unencoded particle shape.",
+      "gold_case_ids": ["col-smoluchowski-pass", "col-smoluchowski-regime-mutation"]
+    },
+    {
+      "template_slug": "col-dlvo-debye-geometry",
+      "chemistry_check": "colloid.dlvo",
+      "core_invariant": "For water, a 1:1 electrolyte and 25 °C, lambda_D[nm]=0.304/sqrt(I[mol/L]); a claimed Derjaguin approximation must agree with h/a.",
+      "chemistry_facts_schema": {
+        "block": "dlvo",
+        "required": ["debye_model", "ionic_strength", "debye_length", "particle_radius", "separation", "claims_derjaguin"],
+        "types": {
+          "debye_model": "literal water_1_1_25c",
+          "ionic_strength": "amount-concentration measurement with unit",
+          "debye_length": "length measurement with unit",
+          "particle_radius": "positive length measurement with unit",
+          "separation": "positive length measurement with unit",
+          "claims_derjaguin": "boolean"
+        }
+      },
+      "coverage_boundary": "The shortcut is not valid for other media, valences or temperatures. The check does not compute a full interaction-energy curve or certify dispersion stability; non-DLVO forces require separate evidence.",
+      "gold_case_ids": ["col-dlvo-pass", "col-dlvo-medium-mutation"]
+    }
+  ],
+  "semantic_only_blueprints": [
+    {
+      "template_slug": "col-electrokinetic-model-audit",
+      "reason": "The text-only comparison spans regimes beyond the implemented Smoluchowski relation."
+    },
+    {
+      "template_slug": "col-dlvo-profile-interpretation",
+      "reason": "The current DLVO check does not identify extrema in an arbitrary U/kBT table."
+    }
+  ]
+}

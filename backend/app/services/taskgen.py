@@ -10,6 +10,7 @@ from app.models import (
     Assistant,
     GeneratedTask,
     GenerationBatch,
+    KnowledgeDocument,
     ModelEntry,
     PromptVersion,
     Provider,
@@ -17,9 +18,12 @@ from app.models import (
     TaskTemplate,
     utcnow,
 )
-from app.services.assistant_profile import with_assistant_profile
-from app.services.contracts import GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE
+from app.services.assistant_profile import build_assistant_profile, with_assistant_profile
+from app.services.chemistry_facts import FACT_BLOCK_BY_CHECK, normalize_chemistry_facts
+from app.services.contracts import CHEMISTRY_FACTS_GUIDE, GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE
 from app.services.grounding import KB_HEADER, build_grounding_block
+from app.services.task_approval import task_is_export_ready
+from app.services.task_evidence import evidence_matches_task, normalize_validation_config
 from app.services.validation import run_validation
 
 FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподаватель и методист высшей школы по дисциплине «{discipline}».
@@ -90,6 +94,7 @@ def build_generation_user_message(
     rubric: list[dict] | None = None,
     example_tasks: list[dict] | None = None,
     existing_statements: list[str] | None = None,
+    chemistry_check: str = "auto",
 ) -> str:
     examples = _render_example_tasks(list(example_tasks or []))
     existing = "\n---\n".join((existing_statements or [])[:8])
@@ -115,10 +120,14 @@ def build_generation_user_message(
     sections.append(f"Уже существующие задачи (НЕ повторяйте их сюжеты и числа):\n{existing or '(нет)'}")
     sections.append(
         "Каждая задача: условие + подробное эталонное решение + краткий финальный ответ (answer) "
-        "+ рубрика с баллами + список использованных справочных значений (data_used).\n"
+        "+ рубрика с баллами + список использованных справочных значений (data_used) "
+        "+ chemistry_facts для детерминированной перепроверки.\n"
         "В data_used перечисляйте только значения, действительно скопированные из приложенного справочного листа, "
         "с его точным заголовком. Самостоятельно заданные числа условия туда не входят; если справочник не "
         "использован, верните data_used: [].\n"
+        f"Предметная проверка: {chemistry_check}. Если указан конкретный тип вместо auto, "
+        "соответствующий блок chemistry_facts обязателен и должен содержать полный набор величин.\n"
+        f"{CHEMISTRY_FACTS_GUIDE}\n\n"
         "Ответ — строго JSON по схеме (эта схема главнее любых других форматов):\n"
         f"{GENERATION_JSON_CONTRACT}\n{JSON_LATEX_ESCAPING_NOTE}"
     )
@@ -142,6 +151,7 @@ async def generate_tasks(
     example_tasks: list[dict] | None = None,
     existing_statements: list[str] | None = None,
     temperature: float = 0.7,
+    chemistry_check: str = "auto",
 ) -> list[dict]:
     prompt = system_prompt or FALLBACK_GENERATOR_PROMPT.format(
         discipline=assistant.discipline, contract=GENERATION_JSON_CONTRACT
@@ -158,6 +168,7 @@ async def generate_tasks(
         rubric=rubric,
         example_tasks=example_tasks,
         existing_statements=existing_statements,
+        chemistry_check=chemistry_check,
     )
     result = await llm.chat(
         provider, model, prompt, user_message, temperature=temperature, json_mode=True, max_tokens=8000
@@ -196,6 +207,7 @@ def merge_template_params(template: TaskTemplate | None, *, topic: str, difficul
             "example_tasks": [],
             "validation_solver": True,
             "validation_data_check": True,
+            "chemistry_check": "auto",
             "rubric": [],
         }
     example_tasks = list(template.example_tasks or [])
@@ -213,6 +225,7 @@ def merge_template_params(template: TaskTemplate | None, *, topic: str, difficul
         "example_tasks": example_tasks,
         "validation_solver": template.validation_solver,
         "validation_data_check": template.validation_data_check,
+        "chemistry_check": getattr(template, "chemistry_check", "auto") or "auto",
         "rubric": list(getattr(template, "rubric", None) or []),
     }
 
@@ -274,15 +287,101 @@ async def build_generation_grounding(
     return await build_grounding_block(db, assistant_id, sheet_ids=sheet_ids, query=query)
 
 
-def build_grounding_meta(sheets: list[ReferenceSheet], grounding_text: str, query: str) -> dict:
+async def build_grounding_meta(
+    db: AsyncSession,
+    sheets: list[ReferenceSheet],
+    grounding_text: str,
+    query: str,
+) -> dict:
+    # Automatic grounding is query-aware and capped. Freeze only the sheets
+    # actually rendered into the model context; otherwise provenance could
+    # claim evidence that the generator never saw.
+    rendered_sheets = [sheet for sheet in sheets if f"### {sheet.title} (" in grounding_text]
+    document_ids = {sheet.source_document_id for sheet in rendered_sheets if sheet.source_document_id}
+    documents: dict[str, tuple[str, str]] = {}
+    if document_ids:
+        rows = (
+            await db.execute(
+                select(KnowledgeDocument.id, KnowledgeDocument.authority, KnowledgeDocument.effective_version).where(
+                    KnowledgeDocument.id.in_(document_ids)
+                )
+            )
+        ).all()
+        documents = {
+            document_id: (authority, effective_version)
+            for document_id, authority, effective_version in rows
+        }
     kb_chunks = 0
     if KB_HEADER in grounding_text:
         kb_chunks = grounding_text.split(KB_HEADER, 1)[1].count("\n### ")
     return {
-        "sheets": [{"id": sheet.id, "title": sheet.title} for sheet in sheets],
+        "sheets": [
+            {
+                "id": sheet.id,
+                "title": sheet.title,
+                "source_document_id": sheet.source_document_id or "",
+                "source_document_exists": bool(sheet.source_document_id and sheet.source_document_id in documents),
+                "source_authority": documents.get(sheet.source_document_id or "", ("", ""))[0],
+                "source_version": documents.get(sheet.source_document_id or "", ("", ""))[1],
+            }
+            for sheet in rendered_sheets
+        ],
         "kb_chunks": kb_chunks,
         "query": query,
     }
+
+
+def build_validation_contract(merged: dict, grounding_meta: dict | None = None) -> dict:
+    has_rendered_snapshot = grounding_meta is not None
+    grounding_meta = grounding_meta or {}
+    sheet_ids = (
+        [
+            str(sheet.get("id") or "")
+            for sheet in grounding_meta.get("sheets") or []
+            if isinstance(sheet, dict) and sheet.get("id")
+        ]
+        if has_rendered_snapshot
+        else list(merged.get("sheet_ids") or [])
+    )
+    return normalize_validation_config(
+        {
+            "answer_format": merged.get("answer_format"),
+            "tolerance_pct": merged.get("tolerance_pct"),
+            "validation_solver": merged.get("validation_solver") is True,
+            "validation_data_check": merged.get("validation_data_check") is True,
+            # Once grounding has been rendered, freeze exactly what the model
+            # saw — including an intentionally empty set. Never resurrect a
+            # selected sheet that was omitted by limits or source policy.
+            "sheet_ids": sheet_ids,
+            "kb_query": grounding_meta.get("query") or merged.get("kb_query") or merged.get("topic") or "",
+            "task_kind": merged.get("task_kind") or "",
+            "chemistry_check": merged.get("chemistry_check") or "auto",
+        }
+    )
+
+
+def validation_contract_for_task(task: GeneratedTask, merged: dict) -> dict:
+    validation = task.validation if isinstance(task.validation, dict) else {}
+    grounding = task.grounding if isinstance(task.grounding, dict) else {}
+    for candidate in (validation.get("validation_config"), grounding.get("validation_contract")):
+        if isinstance(candidate, dict) and candidate.get("answer_format"):
+            return normalize_validation_config(candidate)
+    return build_validation_contract(merged, grounding)
+
+
+def _normalize_data_used(value: object) -> list[dict] | None:
+    if not isinstance(value, list):
+        return None
+    normalized: list[dict] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        title = str(item.get("sheet_title") or "").strip()
+        values = item.get("values")
+        if not title or not isinstance(values, list) or not values:
+            return None
+        normalized.append({"sheet_title": title, "values": [str(entry) for entry in values]})
+    return normalized
 
 
 def task_from_item(
@@ -295,6 +394,7 @@ def task_from_item(
     difficulty: str,
     model_used: str,
     grounding_meta: dict,
+    validation_contract: dict | None = None,
     template_rubric: list[dict] | None = None,
 ) -> GeneratedTask | None:
     if not isinstance(item, dict) or not item.get("statement"):
@@ -314,7 +414,16 @@ def task_from_item(
             for criterion in template_rubric
         ]
         max_score = 10.0
-    data_used = item.get("data_used")
+    data_used = _normalize_data_used(item.get("data_used"))
+    if data_used is None:
+        return None
+    chemistry_facts = normalize_chemistry_facts(item.get("chemistry_facts"))
+    if chemistry_facts is None:
+        return None
+    contract = normalize_validation_config(validation_contract or {})
+    required_block = FACT_BLOCK_BY_CHECK.get(contract.get("chemistry_check", "auto"))
+    if required_block and required_block not in chemistry_facts:
+        return None
     return GeneratedTask(
         assistant_id=assistant_id,
         template_id=template_id,
@@ -328,8 +437,28 @@ def task_from_item(
         topic=str(item.get("topic") or topic),
         model_used=model_used,
         status="draft",
-        grounding={**grounding_meta, "data_used": data_used if isinstance(data_used, list) else []},
+        grounding={
+            **grounding_meta,
+            "data_used": data_used,
+            "chemistry_facts": chemistry_facts,
+            "chemistry_facts_source": "generator",
+            "validation_contract": contract,
+        },
     )
+
+
+def generation_item_contract_error(item: object, chemistry_check: str) -> str | None:
+    if not isinstance(item, dict) or not str(item.get("statement") or "").strip():
+        return "нет условия"
+    if _normalize_data_used(item.get("data_used")) is None:
+        return "нет явного data_used"
+    chemistry_facts = normalize_chemistry_facts(item.get("chemistry_facts"))
+    if chemistry_facts is None:
+        return "нет корректного chemistry_facts"
+    required_block = FACT_BLOCK_BY_CHECK.get(chemistry_check)
+    if required_block and required_block not in chemistry_facts:
+        return f"нет обязательного блока chemistry_facts.{required_block}"
+    return None
 
 
 async def _resolve_batch_model(db: AsyncSession, model_entry_id: str) -> tuple[Provider, ModelEntry]:
@@ -388,15 +517,26 @@ async def _generate_batch_items(
                 example_tasks=merged["example_tasks"],
                 existing_statements=seen_statements,
                 temperature=float(params.get("temperature") or 0.7),
+                chemistry_check=merged.get("chemistry_check", "auto"),
             )
         except llm.LlmError as err:
             errors.append(str(err))
             continue
 
-        usable = [item for item in chunk if isinstance(item, dict) and str(item.get("statement") or "").strip()]
+        rejected_contracts = [
+            error
+            for item in chunk
+            if (error := generation_item_contract_error(item, merged.get("chemistry_check", "auto")))
+        ]
+        usable = [
+            item
+            for item in chunk
+            if generation_item_contract_error(item, merged.get("chemistry_check", "auto")) is None
+        ]
         usable = usable[:missing]
         if not usable:
-            errors.append("Модель вернула порцию без валидных условий задач")
+            detail = ", ".join(sorted(set(rejected_contracts)))
+            errors.append(f"Модель вернула порцию без полного evidence-контракта: {detail or 'нет задач'}")
             continue
         items.extend(usable)
         seen_statements.extend(str(item["statement"]) for item in usable)
@@ -439,6 +579,7 @@ async def _validate_batch(
     solver_model: ModelEntry,
     grounding_text: str,
     sheets_text: str,
+    discipline_context: str = "",
 ) -> None:
     prior = (
         (
@@ -460,27 +601,49 @@ async def _validate_batch(
     for index, task in enumerate(created, start=1):
         await _set_progress(db, batch, f"{stage_name} {index}/{total}", index - 1, total)
         neighbours = [other.statement for other in created if other is not task]
+        contract = validation_contract_for_task(task, merged)
         validation = await run_validation(
             statement=task.statement,
             reference_solution=task.reference_solution,
             reference_answer=task.answer,
             rubric=task.rubric,
             max_score=task.max_score,
-            answer_format=merged["answer_format"],
-            tolerance_pct=merged["tolerance_pct"],
+            answer_format=contract["answer_format"],
+            tolerance_pct=contract["tolerance_pct"],
             grounding=grounding_text,
             sheets_text=sheets_text,
             existing_statements=list(prior) + neighbours,
-            data_used=(task.grounding or {}).get("data_used", []),
+            data_used=(task.grounding or {}).get("data_used"),
             solver_provider=solver_provider,
             solver_model=solver_model,
-            run_solver=merged["validation_solver"],
-            run_data=merged["validation_data_check"],
+            run_solver=contract["validation_solver"],
+            run_data=contract["validation_data_check"],
+            validation_config=contract,
+            discipline_context=discipline_context,
+            topic=getattr(task, "topic", ""),
+            chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
+            chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
+            grounding_sheets=(task.grounding or {}).get("sheets"),
         )
+        await db.refresh(task)
+        if not evidence_matches_task(validation, task):
+            # Преподаватель успел изменить содержимое во время LLM-проверки.
+            # Старое evidence не записываем и пользовательские изменения не затираем.
+            continue
         task.validation = validation
         if validation["verdict"] == "validated":
             task.status = "validated"
-            batch.validated_count += 1
+            if task_is_export_ready(task):
+                batch.validated_count += 1
+            else:
+                validation = dict(validation)
+                validation["candidate_disposition"] = "discarded"
+                validation["reasons"] = [
+                    *(validation.get("reasons") or []),
+                    "Проверка не сформировала полный экспортный evidence-контракт",
+                ]
+                task.validation = validation
+                task.status = "rejected"
         else:
             validation = dict(validation)
             validation["candidate_disposition"] = "discarded"
@@ -561,7 +724,8 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     if not items and gen_errors:
         raise llm.LlmError(" || ".join(gen_errors[:3]))
 
-    grounding_meta = build_grounding_meta(sheets, grounding_text, grounding_query)
+    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
+    validation_contract = build_validation_contract(merged, grounding_meta)
 
     async def persist_candidates(candidate_items: list[dict]) -> list[GeneratedTask]:
         persisted: list[GeneratedTask] = []
@@ -575,6 +739,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
                 difficulty=merged["difficulty"],
                 model_used=f"{provider.name}/{model.model_id}",
                 grounding_meta=grounding_meta,
+                validation_contract=validation_contract,
                 template_rubric=merged.get("rubric", []),
             )
             if task is not None:
@@ -594,7 +759,15 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         solver_provider, solver_model = await _resolve_batch_model(db, str(params["solver_model_entry_id"]))
     if validation_enabled:
         await _validate_batch(
-            db, batch, created, merged, solver_provider, solver_model, grounding_text, sheets_to_text(sheets)
+            db,
+            batch,
+            created,
+            merged,
+            solver_provider,
+            solver_model,
+            grounding_text,
+            sheets_to_text(sheets),
+            build_assistant_profile(assistant),
         )
 
     # Пользователь заказывает готовые задачи, а не число сырых ответов модели.
@@ -631,7 +804,15 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             break
         created.extend(refill)
         await _validate_batch(
-            db, batch, refill, merged, solver_provider, solver_model, grounding_text, sheets_to_text(sheets)
+            db,
+            batch,
+            refill,
+            merged,
+            solver_provider,
+            solver_model,
+            grounding_text,
+            sheets_to_text(sheets),
+            build_assistant_profile(assistant),
         )
 
     rejected = [task for task in created if task.status == "rejected"]

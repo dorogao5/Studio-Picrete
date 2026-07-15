@@ -29,15 +29,16 @@ export function Button({
   };
   return (
     <button
+      aria-busy={loading || undefined}
       className={clsx(
-        "inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none",
+        "inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none",
         styles[variant],
         className,
       )}
       disabled={disabled || loading}
       {...props}
     >
-      {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+      {loading && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}
       {children}
     </button>
   );
@@ -47,7 +48,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={clsx(
-        "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring",
+        "min-h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring",
         className,
       )}
       {...props}
@@ -71,7 +72,7 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
   return (
     <select
       className={clsx(
-        "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/40",
+        "min-h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/40",
         className,
       )}
       {...props}
@@ -272,7 +273,7 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Закрыть окно"
-            className="rounded p-1 text-muted-foreground hover:bg-muted"
+            className="inline-flex h-10 w-10 items-center justify-center rounded text-muted-foreground hover:bg-muted"
           >
             <X className="h-4 w-4" />
           </button>
@@ -285,8 +286,8 @@ export function Modal({
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
-      <Loader2 className="h-5 w-5 animate-spin" />
+    <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center" role="status" aria-live="polite">
+      <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
       {label ?? "Загрузка..."}
     </div>
   );
@@ -303,5 +304,5 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
 
 export function ErrorNote({ message }: { message: string }) {
   if (!message) return null;
-  return <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{message}</div>;
+  return <div role="alert" aria-live="polite" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{message}</div>;
 }

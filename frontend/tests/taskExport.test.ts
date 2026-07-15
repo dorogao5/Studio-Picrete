@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { exportReadyTaskIds } from "../src/lib/taskExport.ts";
+import {
+  exportReadyTaskIds,
+  nextRevalidationTaskIds,
+  REVALIDATION_TASK_LIMIT,
+  taskIsAutoReady,
+  taskIsManualReady,
+  taskNeedsAttention,
+} from "../src/lib/taskExport.ts";
 
 test("exports only tasks admitted by the current automatic or manual policy", () => {
   const taskIds = exportReadyTaskIds([
@@ -22,4 +29,37 @@ test("keeps an empty export blocked when no task is ready", () => {
     ]),
     [],
   );
+});
+
+test("uses one admission predicate for stale, draft and review tasks", () => {
+  assert.equal(taskNeedsAttention({ status: "validated", export_ready: false }), true);
+  assert.equal(taskNeedsAttention({ status: "approved", export_ready: false }), true);
+  assert.equal(taskNeedsAttention({ status: "needs_review", export_ready: false }), true);
+  assert.equal(taskNeedsAttention({ status: "draft", export_ready: false }), true);
+  assert.equal(taskNeedsAttention({ status: "rejected", export_ready: false }), false);
+  assert.equal(taskNeedsAttention({ status: "validated", export_ready: true }), false);
+});
+
+test("distinguishes automatic admission from a documented manual exception", () => {
+  assert.equal(taskIsAutoReady({ status: "validated", export_ready: true }), true);
+  assert.equal(taskIsAutoReady({ status: "validated", export_ready: false }), false);
+  assert.equal(taskIsManualReady({ status: "approved", export_ready: true }), true);
+  assert.equal(taskIsManualReady({ status: "approved", export_ready: false }), false);
+});
+
+test("limits one background revalidation request to the next 100 attention tasks", () => {
+  const queue = Array.from({ length: REVALIDATION_TASK_LIMIT + 7 }, (_, index) => ({
+    id: `attention-${index}`,
+    status: "draft" as const,
+    export_ready: false,
+  }));
+  const ids = nextRevalidationTaskIds([
+    { id: "ready", status: "validated", export_ready: true },
+    { id: "discarded", status: "rejected", export_ready: false },
+    ...queue,
+  ]);
+
+  assert.equal(ids.length, REVALIDATION_TASK_LIMIT);
+  assert.equal(ids[0], "attention-0");
+  assert.equal(ids.at(-1), "attention-99");
 });

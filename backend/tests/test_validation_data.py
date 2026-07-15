@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.validation import data_check, run_validation
+from app.services.validation import data_check, run_validation, source_lineage_check
 
 
 def test_self_contained_task_numbers_are_not_reference_claims() -> None:
@@ -94,3 +94,81 @@ F = 96485 Кл·моль⁻¹
         "unknown_numbers": ["12345"],
         "unknown_sources": ["Выдуманный источник"],
     }
+
+
+def test_source_lineage_rejects_reference_sheet_without_source_document() -> None:
+    result = source_lineage_check(
+        [{"sheet_title": "Сиротская карточка", "values": ["K = 1"]}],
+        [{"id": "sheet-1", "title": "Сиротская карточка", "source_document_id": ""}],
+        "### Сиротская карточка\nK = 1",
+    )
+
+    assert result["status"] == "warn"
+    assert result["unbound_sources"] == ["Сиротская карточка"]
+
+
+def test_source_lineage_does_not_accept_title_substring_as_document_lineage() -> None:
+    result = source_lineage_check(
+        [{"sheet_title": "Учебник [материал курса] — раздел", "values": ["F = 96485"]}],
+        [],
+        "### Учебник [материал курса] — раздел\nF = 96485",
+    )
+
+    assert result["status"] == "warn"
+    assert result["unbound_sources"] == ["Учебник [материал курса] — раздел"]
+    assert result["kb_sources"] == []
+
+
+def test_source_lineage_accepts_only_existing_verified_document_metadata() -> None:
+    result = source_lineage_check(
+        [{"sheet_title": "ANA-03", "values": ["F = 96485"]}],
+        [
+            {
+                "title": "ANA-03",
+                "source_document_id": "doc-1",
+                "source_document_exists": True,
+                "source_authority": "reference",
+            }
+        ],
+    )
+
+    assert result["status"] == "ok"
+    assert result["unbound_sources"] == []
+
+
+def test_source_lineage_rejects_dangling_or_unverified_document() -> None:
+    data_used = [{"sheet_title": "Источник", "values": ["K = 1"]}]
+    dangling = source_lineage_check(
+        data_used,
+        [
+            {
+                "title": "Источник",
+                "source_document_id": "missing",
+                "source_document_exists": False,
+                "source_authority": "reference",
+            }
+        ],
+    )
+    unverified = source_lineage_check(
+        data_used,
+        [
+            {
+                "title": "Источник",
+                "source_document_id": "doc-1",
+                "source_document_exists": True,
+                "source_authority": "unverified",
+            }
+        ],
+    )
+
+    assert dangling["status"] == "warn"
+    assert unverified["status"] == "warn"
+
+
+def test_malformed_provenance_is_never_treated_as_empty_and_valid() -> None:
+    for malformed in ("garbage", {}, [7], [{"values": ["1.0"]}]):
+        data = data_check("Полное условие задачи с исходными данными.", "", data_used=malformed)
+        lineage = source_lineage_check(malformed, [])
+
+        assert data["status"] == "invalid"
+        assert lineage["status"] == "invalid"

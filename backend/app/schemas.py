@@ -258,6 +258,7 @@ class TaskTemplateOut(ORMModel):
     kb_query: str
     validation_solver: bool
     validation_data_check: bool
+    chemistry_check: str
 
 
 class TaskTemplateCreate(BaseModel):
@@ -275,6 +276,10 @@ class TaskTemplateCreate(BaseModel):
     kb_query: str = ""
     validation_solver: bool = True
     validation_data_check: bool = True
+    chemistry_check: str = Field(
+        default="auto",
+        pattern="^(auto|chemistry\\.stoichiometry|chemistry\\.dilution|analytical\\.titration|analytical\\.gravimetry|analytical\\.conductometry|analytical\\.faraday|analytical\\.calibration|colloid\\.bet|colloid\\.smoluchowski|colloid\\.dlvo)$",
+    )
 
     @field_validator("rubric")
     @classmethod
@@ -297,6 +302,10 @@ class TaskTemplateUpdate(BaseModel):
     kb_query: str | None = None
     validation_solver: bool | None = None
     validation_data_check: bool | None = None
+    chemistry_check: str | None = Field(
+        default=None,
+        pattern="^(auto|chemistry\\.stoichiometry|chemistry\\.dilution|analytical\\.titration|analytical\\.gravimetry|analytical\\.conductometry|analytical\\.faraday|analytical\\.calibration|colloid\\.bet|colloid\\.smoluchowski|colloid\\.dlvo)$",
+    )
 
     @field_validator("rubric")
     @classmethod
@@ -326,12 +335,12 @@ class GeneratedTaskOut(ORMModel):
     @computed_field
     @property
     def approval_ready(self) -> bool:
-        return has_complete_approval(self.validation)
+        return has_complete_approval(self.validation, self)
 
     @computed_field
     @property
     def validation_ready(self) -> bool:
-        return validation_is_current_decision(self.validation)
+        return validation_is_current_decision(self.validation, self)
 
     @computed_field
     @property
@@ -433,6 +442,20 @@ class KnowledgeDocumentDetailOut(KnowledgeDocumentOut):
     markdown: str = ""
 
 
+class KnowledgeDocumentUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=512)
+    authority: str | None = Field(
+        default=None,
+        pattern="^(course_policy|course_lecture|reference|unverified)$",
+    )
+    visibility: str | None = Field(
+        default=None,
+        pattern="^(student|teacher_only|assessment_private|quarantine)$",
+    )
+    course_scope: str | None = Field(default=None, max_length=128)
+    effective_version: str | None = Field(default=None, max_length=128)
+
+
 class KnowledgeChunkOut(ORMModel):
     id: str
     document_id: str
@@ -497,6 +520,7 @@ class ReferenceSheetUpdate(BaseModel):
     kind: str | None = Field(default=None, pattern="^(data_table|glossary|conventions|formulas|other)$")
     description: str | None = None
     content_markdown: str | None = None
+    source_document_id: str | None = None
     visibility: str | None = Field(default=None, pattern="^(student|teacher_only|assessment_private|quarantine)$")
     is_canonical: bool | None = None
     ord: int | None = None
