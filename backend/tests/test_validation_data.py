@@ -1,5 +1,7 @@
 import asyncio
+from types import SimpleNamespace
 
+from app.services.task_evidence import evidence_matches_task
 from app.services.validation import data_check, run_validation, source_lineage_check
 
 
@@ -72,6 +74,36 @@ Q=It
     )
 
     assert validation["data"] == {"status": "ok", "unknown_numbers": [], "unknown_sources": []}
+
+
+def test_validation_fingerprint_uses_the_task_evidence_canonical_form() -> None:
+    task = SimpleNamespace(
+        statement="Объясните выбор индикатора.",
+        reference_solution="Интервал перехода должен попадать в скачок титрования.",
+        answer="Индикатор выбирают по положению интервала перехода.",
+        rubric=[{"criterion_name": "Обоснование", "max_score": 1}],
+        max_score=1,
+        grounding={"data_used": [], "chemistry_facts": None},
+    )
+    validation = asyncio.run(
+        run_validation(
+            statement=task.statement,
+            reference_solution=task.reference_solution,
+            reference_answer=task.answer,
+            rubric=task.rubric,
+            max_score=task.max_score,
+            answer_format="text",
+            tolerance_pct=0,
+            grounding="",
+            sheets_text="",
+            existing_statements=[],
+            data_used=[],
+            run_solver=False,
+            run_data=True,
+        )
+    )
+
+    assert evidence_matches_task(validation, task)
 
 
 def test_grounding_provenance_still_rejects_fabricated_value_and_source() -> None:

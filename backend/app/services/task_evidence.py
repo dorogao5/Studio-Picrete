@@ -12,6 +12,12 @@ def _json_digest(value: object) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def task_evidence_digest(*, data_used: object, chemistry_facts: object) -> str:
+    """Hash task-owned evidence with the same canonical form everywhere."""
+
+    return _json_digest({"data_used": data_used, "chemistry_facts": chemistry_facts})
+
+
 def normalize_validation_config(value: object) -> dict[str, Any]:
     config = value if isinstance(value, dict) else {}
     try:
@@ -71,11 +77,9 @@ def task_content_fingerprint(task: object, validation_config: object) -> str:
     if config.get("task_evidence_digest"):
         grounding = getattr(task, "grounding", None)
         grounding = grounding if isinstance(grounding, dict) else {}
-        config["task_evidence_digest"] = _json_digest(
-            {
-                "data_used": grounding.get("data_used"),
-                "chemistry_facts": grounding.get("chemistry_facts"),
-            }
+        config["task_evidence_digest"] = task_evidence_digest(
+            data_used=grounding.get("data_used"),
+            chemistry_facts=grounding.get("chemistry_facts"),
         )
     return build_task_content_fingerprint(
         statement=getattr(task, "statement", ""),

@@ -13,7 +13,11 @@ from app.services.chemistry_validation import CHEMISTRY_VALIDATION_VERSION
 from app.services.chemistry_units import known_unit_spellings, unit_definition
 from app.services.contracts import CHEMISTRY_FACTS_GUIDE
 from app.services.model_policy import current_model_use_policy
-from app.services.task_evidence import build_task_content_fingerprint, normalize_validation_config
+from app.services.task_evidence import (
+    build_task_content_fingerprint,
+    normalize_validation_config,
+    task_evidence_digest,
+)
 
 _ru_stemmer = snowballstemmer.stemmer("russian")
 
@@ -1066,14 +1070,10 @@ async def run_validation(
                 ).encode("utf-8")
             ).hexdigest(),
             "profile_digest": hashlib.sha256(discipline_context.encode("utf-8")).hexdigest(),
-            "task_evidence_digest": hashlib.sha256(
-                json.dumps(
-                    {"data_used": data_used, "chemistry_facts": chemistry_facts},
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    default=str,
-                ).encode("utf-8")
-            ).hexdigest(),
+            "task_evidence_digest": task_evidence_digest(
+                data_used=data_used,
+                chemistry_facts=chemistry_facts,
+            ),
         }
     )
 
