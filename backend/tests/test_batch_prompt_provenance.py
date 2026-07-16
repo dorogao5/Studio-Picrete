@@ -5,7 +5,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app.api import tasks as tasks_api
-from app.schemas import GenerationBatchRequest
+from app.schemas import GenerationBatchRequest, TaskGenerateRequest
 from app.services import taskgen
 from app.services.taskgen import GenerationError
 
@@ -117,6 +117,59 @@ def test_missing_explicit_prompt_still_returns_not_found(monkeypatch) -> None:
         )
 
     assert error.value.status_code == 404
+
+
+def test_direct_generation_rejects_model_outside_operational_allowlist(monkeypatch) -> None:
+    async def fake_assistant(*_args):
+        return SimpleNamespace(id="assistant-1")
+
+    async def fake_model(*_args):
+        return SimpleNamespace(name="Alibaba"), SimpleNamespace(model_id="qwen3.7-max")
+
+    monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    monkeypatch.setattr(tasks_api, "resolve_model", fake_model)
+
+    with pytest.raises(HTTPException, match="allowlist генерации") as error:
+        asyncio.run(
+            tasks_api.generate(
+                "assistant-1",
+                TaskGenerateRequest(model_entry_id="qwen-entry"),
+                SimpleNamespace(),
+            )
+        )
+
+    assert error.value.status_code == 422
+
+
+def test_batch_rejects_unconfigured_generator_even_with_decision_solver(monkeypatch) -> None:
+    async def fake_assistant(*_args):
+        return SimpleNamespace(id="assistant-1", default_grader_model_id=None)
+
+    async def fake_model(_db, entry_id):
+        if entry_id == "solver-entry":
+            return SimpleNamespace(name="DeepSeek"), SimpleNamespace(model_id="deepseek-v4-pro")
+        return SimpleNamespace(name="Alibaba"), SimpleNamespace(model_id="qwen3.7-max")
+
+    monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    monkeypatch.setattr(tasks_api, "resolve_model", fake_model)
+    body = GenerationBatchRequest(
+        model_entry_id="qwen-entry",
+        solver_model_entry_id="solver-entry",
+        count=1,
+    )
+
+    with pytest.raises(HTTPException, match="allowlist генерации") as error:
+        asyncio.run(
+            tasks_api.create_batch(
+                "assistant-1",
+                body,
+                BackgroundTasks(),
+                BatchDb(),
+                SimpleNamespace(id="teacher-1"),
+            )
+        )
+
+    assert error.value.status_code == 422
 
 
 class PromptResult:

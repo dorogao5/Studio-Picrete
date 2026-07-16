@@ -62,6 +62,11 @@ def test_advisory_tutor_model_requires_explicit_preview() -> None:
     assert use.decision_capable is False
 
 
+def test_preview_still_rejects_model_outside_explicit_allowlists() -> None:
+    with pytest.raises(ModelUsePolicyError, match="отсутствует в allowlist"):
+        require_decision_model(_model("qwen3.7-max"), allow_advisory=True, policy=_policy())
+
+
 def _validation_kwargs() -> dict:
     return {
         "statement": "Определите искомую массу продукта по приведённым в условии данным.",

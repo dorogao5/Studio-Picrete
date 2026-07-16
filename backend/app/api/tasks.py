@@ -150,6 +150,13 @@ async def generate(
 ) -> list[GeneratedTask]:
     assistant = await get_assistant_or_404(assistant_id, db)
     provider, model = await resolve_model(db, body.model_entry_id)
+    try:
+        require_decision_model(model, allow_advisory=True)
+    except ModelUsePolicyError as err:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Модель не входит в allowlist генерации: {err}",
+        ) from err
 
     template = None
     if body.template_id:
@@ -254,6 +261,13 @@ async def create_batch(
             "Партия банка задач всегда проходит автоматический контроль; для экспериментов используйте песочницу",
         )
     provider, model = await resolve_model(db, body.model_entry_id)
+    try:
+        require_decision_model(model, allow_advisory=True)
+    except ModelUsePolicyError as err:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Модель не входит в allowlist генерации: {err}",
+        ) from err
     solver_entry_id = (
         body.solver_model_entry_id or getattr(assistant, "default_grader_model_id", None) or body.model_entry_id
     )

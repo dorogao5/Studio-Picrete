@@ -400,6 +400,10 @@ def _canonical_quantity_label(value: str) -> str:
     )
     candidate = translated.casefold()
     candidate = re.sub(r"[_\s(){}]", "", candidate)
+    # A superscript charge marker is presentation, not part of the quantity
+    # identity: n(e^-) and n(e-) both denote the electron amount.  Limit this
+    # normalization to signs so mathematical powers such as x^2 stay distinct.
+    candidate = re.sub(r"\^(?=[+-])", "", candidate)
     # Latin w and Greek omega are the two conventional notations for mass
     # fraction. Restrict the alias to plain omega or omega(element), so indexed
     # angular frequencies such as omega_0 do not collapse into a w-label.

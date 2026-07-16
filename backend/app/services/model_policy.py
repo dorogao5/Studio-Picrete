@@ -91,6 +91,6 @@ def require_decision_model(
     model: ModelEntry | str, *, allow_advisory: bool = False, policy: ModelUsePolicy | None = None
 ) -> ModelUse:
     use = (policy or current_model_use_policy()).classify(model)
-    if use.decision_capable or allow_advisory:
+    if use.decision_capable or (allow_advisory and use.explicitly_configured):
         return use
     raise ModelUsePolicyError(f"Модель {use.model_id} не разрешена для итогового ответа: {use.reason}")

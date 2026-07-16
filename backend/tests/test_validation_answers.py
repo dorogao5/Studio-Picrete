@@ -341,6 +341,17 @@ def test_russian_analyte_name_binding_preserves_element_identity() -> None:
     assert result["matched_count"] == 0
 
 
+def test_species_charge_caret_is_optional_inside_quantity_label() -> None:
+    result = compare_answers(
+        r"$Q=73.1\ \text{Кл};~n(e^-)=7.58\cdot10^{-4}\ \text{моль};~m(Ag)=8.18\cdot10^{-2}\ \text{г}$",
+        "Q=73.1 Кл; n(e-)=7.58×10⁻⁴ моль; m(Ag)=0.0818 г",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 3
+
+
 def test_named_quantity_binding_preserves_the_compound_identity() -> None:
     result = compare_answers(
         "m_MgO = 0.09052 г; w_MgO = 22.63%",
