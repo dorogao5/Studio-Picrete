@@ -33,9 +33,7 @@ async def _set_progress(
 def _generated_candidate_should_be_discarded(task: GeneratedTask, validation: dict) -> bool:
     """Keep failed model candidates out of the teacher's exception queue."""
 
-    return validation.get("verdict") != "validated" and bool(
-        str(task.model_used or "").strip() or task.batch_id
-    )
+    return validation.get("verdict") != "validated" and bool(str(task.model_used or "").strip() or task.batch_id)
 
 
 async def _revalidate_task(
@@ -68,7 +66,13 @@ async def _revalidate_task(
         sheet_ids=sheet_ids,
         query=grounding_query,
     )
-    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
+    grounding_meta = await build_grounding_meta(
+        db,
+        sheets,
+        grounding_text,
+        grounding_query,
+        assistant_id=batch.assistant_id,
+    )
     existing = (
         (
             await db.execute(
@@ -107,7 +111,7 @@ async def _revalidate_task(
         chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
         chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
         extract_chemistry_facts_if_missing=True,
-        grounding_sheets=grounding_meta["sheets"],
+        grounding_sheets=[*grounding_meta["sheets"], *grounding_meta.get("kb_sources", [])],
     )
     validation = dict(validation)
     validation.pop("approval", None)
@@ -142,9 +146,7 @@ async def _execute_revalidation_batch(db: AsyncSession, batch: GenerationBatch) 
     if not task_ids or not solver_model_entry_id:
         raise ValueError("Партия перепроверки не содержит задач или контрольной модели")
 
-    assistant = (
-        await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))
-    ).scalar_one_or_none()
+    assistant = (await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))).scalar_one_or_none()
     if assistant is None:
         raise ValueError("Дисциплина партии перепроверки больше не существует")
     discipline_context = build_assistant_profile(assistant)

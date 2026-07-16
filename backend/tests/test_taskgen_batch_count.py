@@ -109,3 +109,55 @@ def test_refills_items_missing_structured_evidence(monkeypatch) -> None:
     assert [item["statement"] for item in items] == ["Полный evidence-контракт"]
     assert calls == 2
     assert any("data_used" in error for error in errors)
+
+
+def test_shared_call_budget_caps_initial_and_refill_waves(monkeypatch) -> None:
+    calls = 0
+
+    async def one_at_a_time(*args, **kwargs) -> list[dict]:
+        nonlocal calls
+        calls += 1
+        return [valid_item(f"Кандидат {calls}")]
+
+    async def collect() -> tuple[list[dict], list[dict], list[str], taskgen._GenerationCallBudget]:
+        budget = taskgen._GenerationCallBudget(limit=3)
+        initial, initial_errors = await taskgen._generate_batch_items(
+            SimpleNamespace(name="provider"),
+            SimpleNamespace(model_id="model"),
+            SimpleNamespace(discipline="chemistry"),
+            "prompt",
+            merged=MERGED,
+            params={"temperature": 0.2},
+            count=2,
+            grounding_text="",
+            existing_statements=[],
+            call_budget=budget,
+        )
+        refill, refill_errors = await taskgen._generate_batch_items(
+            SimpleNamespace(name="provider"),
+            SimpleNamespace(model_id="model"),
+            SimpleNamespace(discipline="chemistry"),
+            "prompt",
+            merged=MERGED,
+            params={"temperature": 0.2},
+            count=2,
+            grounding_text="",
+            existing_statements=[item["statement"] for item in initial],
+            call_budget=budget,
+        )
+        return initial, refill, initial_errors + refill_errors, budget
+
+    monkeypatch.setattr(taskgen, "generate_tasks", one_at_a_time)
+    initial, refill, errors, budget = asyncio.run(collect())
+
+    assert len(initial) == 2
+    assert len(refill) == 1
+    assert calls == 3
+    assert budget.used == budget.limit == 3
+    assert any("Исчерпан общий бюджет" in error for error in errors)
+
+
+def test_generation_call_limit_is_based_on_whole_candidate_budget() -> None:
+    assert taskgen._generation_call_limit(15) == 11
+    assert taskgen._generation_call_limit(30) == 18
+    assert taskgen._generation_call_limit(40) == 23

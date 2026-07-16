@@ -3,6 +3,7 @@ import pytest
 from app.services.chemistry_units import (
     Dimension,
     extract_assigned_measurements,
+    extract_measurements,
     parse_measurement,
 )
 
@@ -37,9 +38,7 @@ def test_measurements_are_converted_to_si(raw: str, dimension: Dimension, si_val
 
 
 def test_assignment_extraction_preserves_labels_and_units() -> None:
-    values = extract_assigned_measurements(
-        "c1 = 0.100 mol/L; V1 = 25.0 mL; mu = 3.2e-8 m2/(V*s); eta = 1.0 mPa*s"
-    )
+    values = extract_assigned_measurements("c1 = 0.100 mol/L; V1 = 25.0 mL; mu = 3.2e-8 m2/(V*s); eta = 1.0 mPa*s")
 
     assert [value.label for value in values] == ["c1", "V1", "mu", "eta"]
     assert [value.measurement.dimension for value in values] == [
@@ -48,6 +47,23 @@ def test_assignment_extraction_preserves_labels_and_units() -> None:
         Dimension.MOBILITY,
         Dimension.VISCOSITY,
     ]
+
+
+def test_latex_measurement_extraction_preserves_compound_units_and_scientific_notation() -> None:
+    values = extract_measurements(
+        r"M(Fe) = 55.85\ \text{г/моль}; "
+        r"N_A = 6.02214076 \times 10^{23}\ \text{моль}^{-1}; "
+        r"S = 229\ \text{м}^2/\text{г}"
+    )
+
+    assert [value.dimension for value in values] == [
+        Dimension.MOLAR_MASS,
+        Dimension.RECIPROCAL_AMOUNT,
+        Dimension.SPECIFIC_SURFACE,
+    ]
+    assert values[0].si_value == pytest.approx(0.05585)
+    assert values[1].si_value == pytest.approx(6.02214076e23)
+    assert values[2].si_value == pytest.approx(229000.0)
 
 
 def test_unknown_unit_is_not_silently_interpreted() -> None:

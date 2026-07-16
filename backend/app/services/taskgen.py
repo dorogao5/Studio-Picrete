@@ -1,5 +1,7 @@
 import json
+import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +23,7 @@ from app.models import (
 from app.services.assistant_profile import build_assistant_profile, with_assistant_profile
 from app.services.chemistry_facts import FACT_BLOCK_BY_CHECK, normalize_chemistry_facts
 from app.services.contracts import CHEMISTRY_FACTS_GUIDE, GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE
-from app.services.grounding import KB_HEADER, build_grounding_block
+from app.services.grounding import AUTHORITY_LABELS, KB_HEADER, build_grounding_block
 from app.services.task_approval import task_is_export_ready
 from app.services.task_evidence import evidence_matches_task, normalize_validation_config
 from app.services.validation import run_validation
@@ -32,7 +34,8 @@ FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподавател�
 единицами измерения.
 Если в сообщении приведены справочные материалы курса — табличные величины берите ТОЛЬКО из них и перечисляйте
 использованные значения в поле data_used. В data_used указывайте только реально существующий заголовок справочного
-листа и дословно взятые из него значения. Числа, которые вы сами задаёте в самодостаточном условии, не являются
+листа и дословно взятые из него значения. Копируйте в sheet_title всю строку после `###` без сокращений:
+название раздела вроде «ЛЕКЦИЯ 6» не является самостоятельным источником. Числа, которые вы сами задаёте в самодостаточном условии, не являются
 справочными данными: не добавляйте их в data_used; если справочники не использованы, верните data_used: [].
 Запрещено подставлять справочные значения из общих знаний: если нужных
 данных нет, стройте задачу на тех данных, которые приведены, либо задавайте недостающие величины прямо в условии.
@@ -47,6 +50,28 @@ GENERATION_CHUNK = 2
 # Дополнительные запросы сверх минимально необходимого числа порций. Они восполняют
 # недостающие/невалидные элементы, но не дают фоновой задаче зациклиться на плохом ответе модели.
 MAX_REFILL_ATTEMPTS = 3
+
+
+@dataclass(slots=True)
+class _GenerationCallBudget:
+    """A single paid-call budget shared by the initial request and every refill wave."""
+
+    limit: int
+    used: int = 0
+
+    def claim(self) -> bool:
+        if self.used >= self.limit:
+            return False
+        self.used += 1
+        return True
+
+
+def _generation_call_limit(candidate_budget: int) -> int:
+    """Bound provider calls needed to fill the entire candidate budget, including retries."""
+
+    minimum_calls = (candidate_budget + GENERATION_CHUNK - 1) // GENERATION_CHUNK
+    return minimum_calls + MAX_REFILL_ATTEMPTS
+
 
 TASK_KIND_LABELS = {
     "calculation": "расчётная задача",
@@ -292,6 +317,8 @@ async def build_grounding_meta(
     sheets: list[ReferenceSheet],
     grounding_text: str,
     query: str,
+    *,
+    assistant_id: str | None = None,
 ) -> dict:
     # Automatic grounding is query-aware and capped. Freeze only the sheets
     # actually rendered into the model context; otherwise provenance could
@@ -307,13 +334,45 @@ async def build_grounding_meta(
                 )
             )
         ).all()
-        documents = {
-            document_id: (authority, effective_version)
-            for document_id, authority, effective_version in rows
-        }
+        documents = {document_id: (authority, effective_version) for document_id, authority, effective_version in rows}
     kb_chunks = 0
+    kb_sources: list[dict[str, object]] = []
     if KB_HEADER in grounding_text:
-        kb_chunks = grounding_text.split(KB_HEADER, 1)[1].count("\n### ")
+        kb_text = grounding_text.split(KB_HEADER, 1)[1]
+        headers = [match.group(1).strip() for match in re.finditer(r"^###\s+(.+?)\s*$", kb_text, re.MULTILINE)]
+        kb_chunks = len(headers)
+        resolved_assistant_id = assistant_id or (sheets[0].assistant_id if sheets else None)
+        if headers and resolved_assistant_id:
+            rows = (
+                await db.execute(
+                    select(
+                        KnowledgeDocument.id,
+                        KnowledgeDocument.title,
+                        KnowledgeDocument.authority,
+                        KnowledgeDocument.effective_version,
+                    ).where(KnowledgeDocument.assistant_id == resolved_assistant_id)
+                )
+            ).all()
+            seen_headers: set[str] = set()
+            for document_id, title, authority, effective_version in rows:
+                displayed_title = f"{title} [{AUTHORITY_LABELS.get(authority, authority)}]"
+                for header in headers:
+                    if header in seen_headers or not (
+                        header == displayed_title or header.startswith(f"{displayed_title} — ")
+                    ):
+                        continue
+                    seen_headers.add(header)
+                    kb_sources.append(
+                        {
+                            "id": "",
+                            "title": header,
+                            "source_document_id": document_id,
+                            "source_document_exists": True,
+                            "source_authority": authority,
+                            "source_version": effective_version,
+                            "source_kind": "kb_chunk",
+                        }
+                    )
     return {
         "sheets": [
             {
@@ -327,6 +386,7 @@ async def build_grounding_meta(
             for sheet in rendered_sheets
         ],
         "kb_chunks": kb_chunks,
+        "kb_sources": kb_sources,
         "query": query,
     }
 
@@ -488,16 +548,24 @@ async def _generate_batch_items(
     grounding_text: str,
     existing_statements: list[str],
     on_progress: Callable[[int], Awaitable[None]] | None = None,
+    call_budget: _GenerationCallBudget | None = None,
 ) -> tuple[list[dict], list[str]]:
     items: list[dict] = []
     seen_statements = list(existing_statements)
     errors: list[str] = []
     minimum_calls = (count + GENERATION_CHUNK - 1) // GENERATION_CHUNK
     max_calls = minimum_calls + MAX_REFILL_ATTEMPTS
+    effective_call_budget = call_budget or _GenerationCallBudget(limit=max_calls)
 
     for _attempt in range(max_calls):
         missing = count - len(items)
         if missing <= 0:
+            break
+        if not effective_call_budget.claim():
+            errors.append(
+                "Исчерпан общий бюджет вызовов генератора: "
+                f"{effective_call_budget.used} из {effective_call_budget.limit}"
+            )
             break
         take = min(GENERATION_CHUNK, missing)
         try:
@@ -623,7 +691,10 @@ async def _validate_batch(
             topic=getattr(task, "topic", ""),
             chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
             chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
-            grounding_sheets=(task.grounding or {}).get("sheets"),
+            grounding_sheets=[
+                *((task.grounding or {}).get("sheets") or []),
+                *((task.grounding or {}).get("kb_sources") or []),
+            ],
         )
         await db.refresh(task)
         if not evidence_matches_task(validation, task):
@@ -709,6 +780,11 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     async def update_generation_progress(done: int) -> None:
         await _set_progress(db, batch, "Генерация условий", done, count)
 
+    # Лимит рассчитывается один раз на всю партию. Иначе каждая новая волна добора
+    # заново получает MAX_REFILL_ATTEMPTS и число оплачиваемых запросов растёт без
+    # связи с общим бюджетом кандидатов.
+    candidate_budget = min(count * 3, count + 20)
+    call_budget = _GenerationCallBudget(limit=_generation_call_limit(candidate_budget))
     items, gen_errors = await _generate_batch_items(
         provider,
         model,
@@ -720,11 +796,18 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         grounding_text=grounding_text,
         existing_statements=list(existing),
         on_progress=update_generation_progress,
+        call_budget=call_budget,
     )
     if not items and gen_errors:
         raise llm.LlmError(" || ".join(gen_errors[:3]))
 
-    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
+    grounding_meta = await build_grounding_meta(
+        db,
+        sheets,
+        grounding_text,
+        grounding_query,
+        assistant_id=batch.assistant_id,
+    )
     validation_contract = build_validation_contract(merged, grounding_meta)
 
     async def persist_candidates(candidate_items: list[dict]) -> list[GeneratedTask]:
@@ -773,7 +856,6 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     # Пользователь заказывает готовые задачи, а не число сырых ответов модели.
     # Непрошедший кандидат сохраняется для аудита как rejected и автоматически
     # заменяется новым в пределах ограниченного бюджета.
-    candidate_budget = min(count * 3, count + 20)
     while validation_enabled and batch.validated_count < count and batch.generated_count < candidate_budget:
         missing = count - batch.validated_count
         remaining_budget = candidate_budget - batch.generated_count
@@ -795,6 +877,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             count=refill_count,
             grounding_text=grounding_text,
             existing_statements=list(existing) + [task.statement for task in created],
+            call_budget=call_budget,
         )
         gen_errors.extend(refill_errors)
         if not refill_items:
@@ -838,6 +921,8 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             "discarded_count": len(rejected),
             "discarded_by_reason": failure_counts,
             "candidate_budget": candidate_budget,
+            "generation_calls_used": call_budget.used,
+            "generation_call_limit": call_budget.limit,
         },
     }
     _mark_batch_finished(

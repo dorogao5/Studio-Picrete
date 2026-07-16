@@ -82,7 +82,8 @@ ANSWER_FORMAT_HINTS = {
 DUPLICATE_THRESHOLD = 0.85
 
 _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
-_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?", re.IGNORECASE)
+_SUBSCRIPTS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
+_NUMBER_RE = re.compile(r"(?<![a-zа-яё_])[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?", re.IGNORECASE)
 _INTEGER_RE = re.compile(r"[-+]?\d+")
 _WORD_RE = re.compile(r"\w+")
 _UNIT_ALIASES = {
@@ -203,6 +204,8 @@ def normalize_numeric_text(text: str) -> str:
     text = re.sub(r"_\{?\d+\}?", " ", text)
     text = re.sub(r"\\[,;!:]", "", text)
     text = re.sub(r"\\[a-zA-Z]+|\\ ", " ", text)
+    text = re.sub(r"\s*\^\s*", "^", text)
+    text = re.sub(r"\s*/\s*", "/", text)
     text = re.sub(r"(?<=\d)[\u00a0\u2007\u2009\u202f](?=\d)", "", text)
     text = re.sub(r"\s*[·×∙⋅*]\s*10\s*\^?\s*(?=[-+]?\d)", "e", text)
     text = re.sub(r"(?<![\d.,eE])10\s*\^\s*(?=[-+]?\d)", "1e", text)
@@ -243,7 +246,7 @@ def _explicit_label_before(normalized: str, number_start: int) -> str | None:
     match = _EXPLICIT_LABEL_RE.search(segment)
     if match is None:
         return None
-    candidate = match.group(1).casefold()
+    candidate = match.group(1).translate(_SUBSCRIPTS).casefold()
     # In ``... / 100 mL = 0.010 mol/L`` the token before ``=`` is a
     # denominator unit, not the label of the result.
     return None if unit_definition(candidate) is not None else candidate
@@ -1096,13 +1099,10 @@ async def run_validation(
     source_lineage = source_lineage_check(data_used, grounding_sheets, provenance_text)
     if source_lineage["unbound_sources"]:
         reasons.append(
-            "Справочные данные не связаны с исходным документом: "
-            + ", ".join(source_lineage["unbound_sources"][:10])
+            "Справочные данные не связаны с исходным документом: " + ", ".join(source_lineage["unbound_sources"][:10])
         )
     if source_lineage.get("invalid_entries"):
-        reasons.append(
-            "Некорректная привязка к источникам: " + "; ".join(source_lineage["invalid_entries"][:5])
-        )
+        reasons.append("Некорректная привязка к источникам: " + "; ".join(source_lineage["invalid_entries"][:5]))
 
     sanity = sanity_check(
         {
@@ -1227,8 +1227,7 @@ async def run_validation(
             if result.get("state") in {"fail", "warning", "indeterminate", "error"}
         ]
         reasons.extend(
-            f"Предметный контроль ({result.get('check_id')}): {result.get('message')}"
-            for result in unsafe_results
+            f"Предметный контроль ({result.get('check_id')}): {result.get('message')}" for result in unsafe_results
         )
         reported = {result.get("check_id") for result in unsafe_results}
         reasons.extend(
@@ -1295,9 +1294,7 @@ async def run_validation(
         else {"verdict": "skipped"}
     )
     strict_comparison_candidate = bool(
-        solver.get("status") == "match"
-        and verifier.get("status") == "match"
-        and cross_comparison["verdict"] == "match"
+        solver.get("status") == "match" and verifier.get("status") == "match" and cross_comparison["verdict"] == "match"
     )
     semantic_entailment_candidate = _semantic_entailment_candidate(
         answer_format,
@@ -1325,9 +1322,7 @@ async def run_validation(
             chemistry_facts=normalized_facts or {},
         )
 
-    semantic_entailment_applied = bool(
-        semantic_entailment_candidate and _critic_confirms_semantic_entailment(critic)
-    )
+    semantic_entailment_applied = bool(semantic_entailment_candidate and _critic_confirms_semantic_entailment(critic))
     if semantic_entailment_applied:
         solver = _promote_solver_report(solver)
         verifier = _promote_solver_report(verifier)

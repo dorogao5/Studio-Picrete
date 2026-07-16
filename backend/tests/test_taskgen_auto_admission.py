@@ -33,6 +33,15 @@ class FakeDb:
         return None
 
 
+class FakeKbDb(FakeDb):
+    async def execute(self, _statement):
+        class Result:
+            def all(self):
+                return [("doc-1", "Коллоидная химия · курс лекций", "course_lecture", "2026-r3")]
+
+        return Result()
+
+
 def _task(task_id: str) -> SimpleNamespace:
     return SimpleNamespace(
         id=task_id,
@@ -50,12 +59,8 @@ def _task(task_id: str) -> SimpleNamespace:
 
 
 def test_grounding_metadata_contains_only_sheets_rendered_for_the_generator() -> None:
-    visible = SimpleNamespace(
-        id="visible", title="COL-01 · Модель БЭТ", source_document_id="doc-colloid"
-    )
-    omitted = SimpleNamespace(
-        id="omitted", title="ANA-03 · Закон Фарадея", source_document_id="doc-analytical"
-    )
+    visible = SimpleNamespace(id="visible", title="COL-01 · Модель БЭТ", source_document_id="doc-colloid")
+    omitted = SimpleNamespace(id="omitted", title="ANA-03 · Закон Фарадея", source_document_id="doc-analytical")
 
     metadata = asyncio.run(
         taskgen.build_grounding_meta(
@@ -74,6 +79,32 @@ def test_grounding_metadata_contains_only_sheets_rendered_for_the_generator() ->
             "source_document_exists": False,
             "source_authority": "",
             "source_version": "",
+        }
+    ]
+
+
+def test_grounding_metadata_freezes_exact_kb_header_and_document_lineage() -> None:
+    header = "Коллоидная химия · курс лекций [материал курса] — ЛЕКЦИЯ 6"
+    metadata = asyncio.run(
+        taskgen.build_grounding_meta(
+            FakeKbDb(),
+            [],
+            f"{taskgen.KB_HEADER}\n\n### {header}\nданные",
+            "БЭТ",
+            assistant_id="assistant-1",
+        )
+    )
+
+    assert metadata["kb_chunks"] == 1
+    assert metadata["kb_sources"] == [
+        {
+            "id": "",
+            "title": header,
+            "source_document_id": "doc-1",
+            "source_document_exists": True,
+            "source_authority": "course_lecture",
+            "source_version": "2026-r3",
+            "source_kind": "kb_chunk",
         }
     ]
 

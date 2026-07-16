@@ -295,7 +295,7 @@
         "name": "Коллоиды · удельная поверхность по ёмкости монослоя",
         "topic": "Полимолекулярная адсорбция и пористость",
         "difficulty": "medium",
-        "instructions": "Дай ёмкость монослоя am в mol/g или mmol/g, площадь одной молекулы s0 в nm2 и явное численное значение постоянной Авогадро NA=6.02214076e23 1/mol. Попроси найти Ssp в m2/g и показать все переводы am и nm2 в SI. В chemistry_facts.bet обязательно задай variant=\"surface_area\", monolayer_amount_per_mass, molecular_cross_section, avogadro_constant и specific_surface с единицами; NA из structured facts должна дословно присутствовать в условии. Не подставляй площадь молекулы или NA из памяти и не описывай измерение изотермы.",
+        "instructions": "Дай ёмкость монослоя am в mol/g или mmol/g, площадь одной молекулы s0 в nm2 и явное численное значение постоянной Авогадро NA=6.02214076e23 1/mol. Попроси найти Ssp в m2/g и показать все переводы am и nm2 в SI; краткий answer обязан содержать Ssp с единицей. В chemistry_facts.bet обязательно задай variant=\"surface_area\", monolayer_amount_per_mass, molecular_cross_section, avogadro_constant и specific_surface с единицами; NA из structured facts должна дословно присутствовать в условии. Если s0 взята из контекста, data_used.sheet_title должен дословно повторять полный заголовок после `###`, а не только название раздела. Не подставляй площадь молекулы или NA из памяти и не описывай измерение изотермы.",
         "example": "",
         "task_kind": "calculation",
         "answer_format": "numeric",

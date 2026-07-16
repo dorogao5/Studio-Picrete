@@ -203,7 +203,13 @@ async def generate(
     except llm.LlmError as err:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
 
-    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
+    grounding_meta = await build_grounding_meta(
+        db,
+        sheets,
+        grounding_text,
+        grounding_query,
+        assistant_id=assistant_id,
+    )
     validation_contract = build_validation_contract(merged, grounding_meta)
     created: list[GeneratedTask] = []
     for item in items:
@@ -437,10 +443,14 @@ async def revalidate_task(
     grounding_query = contract["kb_query"] or task.topic
     sheet_ids = contract["sheet_ids"] or None
     sheets = await load_reference_sheets(db, assistant_id, sheet_ids)
-    grounding_text = await build_generation_grounding(
-        db, assistant_id, sheet_ids=sheet_ids, query=grounding_query
+    grounding_text = await build_generation_grounding(db, assistant_id, sheet_ids=sheet_ids, query=grounding_query)
+    grounding_meta = await build_grounding_meta(
+        db,
+        sheets,
+        grounding_text,
+        grounding_query,
+        assistant_id=assistant_id,
     )
-    grounding_meta = await build_grounding_meta(db, sheets, grounding_text, grounding_query)
     existing = (
         (
             await db.execute(
@@ -476,7 +486,7 @@ async def revalidate_task(
         chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
         chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
         extract_chemistry_facts_if_missing=True,
-        grounding_sheets=grounding_meta["sheets"],
+        grounding_sheets=[*grounding_meta["sheets"], *grounding_meta.get("kb_sources", [])],
     )
     validation = dict(validation)
     validation.pop("approval", None)

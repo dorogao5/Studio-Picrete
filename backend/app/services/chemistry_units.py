@@ -415,9 +415,27 @@ _MEASUREMENT_RE = re.compile(
 )
 
 
+def normalize_measurement_text(text: str) -> str:
+    """Expose measurements written in ordinary chemistry LaTeX to the unit parser."""
+
+    normalized = text or ""
+    normalized = re.sub(
+        rf"(?P<base>{_NUMBER_PATTERN})\s*\\(?:times|cdot)\s*10\s*\^\s*\{{\s*(?P<exp>[-+]?\d+)\s*\}}",
+        lambda match: f"{match.group('base')}e{match.group('exp')}",
+        normalized,
+    )
+    normalized = re.sub(r"\\(?:text|mathrm)\s*\{([^{}]*)\}", r" \1 ", normalized)
+    normalized = re.sub(r"\^\s*\{\s*([-+]?\d+)\s*\}", r"^\1", normalized)
+    normalized = re.sub(r"\\[,;!:]|\\\s", " ", normalized)
+    normalized = normalized.replace("{", "").replace("}", "").replace("$", "")
+    normalized = re.sub(r"\s*\^\s*", "^", normalized)
+    normalized = re.sub(r"\s*/\s*", "/", normalized)
+    return re.sub(r"\s+", " ", normalized)
+
+
 def extract_assigned_measurements(text: str) -> list[AssignedMeasurement]:
     found: list[AssignedMeasurement] = []
-    for match in _ASSIGNMENT_RE.finditer(text or ""):
+    for match in _ASSIGNMENT_RE.finditer(normalize_measurement_text(text)):
         try:
             value = float(match.group("number").replace(",", "."))
         except ValueError:
@@ -440,7 +458,7 @@ def extract_assigned_measurements(text: str) -> list[AssignedMeasurement]:
 
 def extract_measurements(text: str) -> list[Measurement]:
     found: list[Measurement] = []
-    for match in _MEASUREMENT_RE.finditer(text or ""):
+    for match in _MEASUREMENT_RE.finditer(normalize_measurement_text(text)):
         try:
             value = float(match.group("number").replace(",", "."))
         except ValueError:

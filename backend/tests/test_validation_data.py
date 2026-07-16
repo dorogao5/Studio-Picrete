@@ -139,6 +139,27 @@ def test_source_lineage_rejects_reference_sheet_without_source_document() -> Non
     assert result["unbound_sources"] == ["Сиротская карточка"]
 
 
+def test_source_lineage_accepts_exact_kb_header_bound_to_trusted_document() -> None:
+    title = "Коллоидная химия · курс лекций [материал курса] — ЛЕКЦИЯ 6"
+    result = source_lineage_check(
+        [{"sheet_title": title, "values": ["s0 = 0.162 нм²"]}],
+        [
+            {
+                "title": title,
+                "source_document_id": "doc-1",
+                "source_document_exists": True,
+                "source_authority": "course_lecture",
+                "source_version": "2026-r3",
+                "source_kind": "kb_chunk",
+            }
+        ],
+        f"### {title}\ns0 = 0.162 нм²",
+    )
+
+    assert result["status"] == "ok"
+    assert result["unbound_sources"] == []
+
+
 def test_source_lineage_does_not_accept_title_substring_as_document_lineage() -> None:
     result = source_lineage_check(
         [{"sheet_title": "Учебник [материал курса] — раздел", "values": ["F = 96485"]}],

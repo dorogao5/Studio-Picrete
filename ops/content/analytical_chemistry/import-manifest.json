@@ -340,7 +340,7 @@
         "name": "Аналитика · гравиметрический фактор",
         "topic": "Осаждение и гравиметрия",
         "difficulty": "medium",
-        "instructions": "Сгенерируй только расчётную задачу. Дай формулы определяемого компонента и гравиметрической формы, явную уравненную стехиометрическую связь, обе молярные массы с единицами, массу гравиметрической формы и массу образца. Запроси Fg, массу компонента и массовую долю. В chemistry_facts.gravimetry обязательно запиши analyte_stoichiometric_coefficient, weighing_form_stoichiometric_coefficient, analyte_molar_mass, weighing_form_molar_mass, gravimetric_factor, weighing_form_mass и analyte_mass; исходные массы и молярные массы должны дословно присутствовать в условии. Не описывай этапы выполнения гравиметрического определения.",
+        "instructions": "Сгенерируй только расчётную задачу. Дай формулы определяемого компонента и гравиметрической формы, явную уравненную стехиометрическую связь, обе молярные массы с единицами, массу гравиметрической формы и массу образца. Запроси Fg, массу компонента и массовую долю; все три результата с названиями и единицами обязательно повтори в кратком answer. В chemistry_facts.gravimetry обязательно запиши analyte_stoichiometric_coefficient, weighing_form_stoichiometric_coefficient, analyte_molar_mass, weighing_form_molar_mass, gravimetric_factor, weighing_form_mass и analyte_mass; исходные массы и молярные массы должны дословно присутствовать в условии. Не описывай этапы выполнения гравиметрического определения.",
         "example": "",
         "task_kind": "calculation",
         "answer_format": "numeric",

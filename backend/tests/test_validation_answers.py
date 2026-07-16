@@ -92,6 +92,27 @@ def test_intermediate_numbers_are_allowed_inside_reference_solution() -> None:
     assert result["extra_numbers_allowed"] is True
 
 
+def test_identifier_digits_are_not_treated_as_numeric_outputs() -> None:
+    result = compare_answers(
+        "c₂ = 0.125 моль/л; n₁ = n₂ = 0.125 моль; V₁ = 100 мл",
+        "c2 = 0.125 моль/л; n1 = n2 = 0.125 моль; V1 = 100 мл",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert 2.0 not in result["solver_numbers"]
+
+
+def test_latex_compound_unit_matches_unicode_display_unit() -> None:
+    result = compare_answers(
+        "S = 229 м²/г",
+        r"S = 229\ \text{м}^2/\text{г}",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+
+
 def test_explicit_quantity_labels_prevent_same_unit_value_swaps() -> None:
     result = compare_answers(
         "m_start = 5 г; m_end = 3 г",
