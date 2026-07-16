@@ -177,8 +177,15 @@ class _NumberOccurrence:
     label: str | None
 
 
-_EXPLICIT_LABEL_RE = re.compile(r"([a-zа-яёζδφ][\wа-яёζδφ]*)\s*=\s*$", re.IGNORECASE)
+_EXPLICIT_LABEL_RE = re.compile(
+    r"([a-zа-яёζδφω][\wа-яёζδφω]*(?:\s*\([^()]+\))?)\s*=\s*$",
+    re.IGNORECASE,
+)
 _CLAIM_SPLIT_RE = re.compile(r"[;\n.!?]+")
+_OUTPUT_CUE_RE = re.compile(
+    r"(?<!\w)(?:ответ|итог|результат|получаем|получен[оаы]?|требуется|нужн[оа]|составляет|равен|равна|равно)(?!\w)",
+    re.IGNORECASE,
+)
 _CLAIM_STOPWORDS = {
     "and",
     "or",
@@ -223,7 +230,14 @@ def normalize_numeric_text(text: str) -> str:
     )
     text = re.sub(r"_\s*\{\s*([a-zA-Zа-яА-ЯёЁ]+)\s*\}", r"_\1", text)
     text = re.sub(r"\\(?:text|mathrm|operatorname)\s*\{([^{}]*)\}", r" \1 ", text)
-    text = re.sub(r"_\{?\d+\}?", " ", text)
+    # ``~`` is commonly used as a non-breaking space before a LaTeX unit.
+    # Normalize only the number-to-unit form so approximate-value separators
+    # remain available to the equivalent-representation parser.
+    text = re.sub(r"(?<=\d)~(?=\s*(?:[%a-zA-Zа-яА-ЯёЁ]))", " ", text)
+    # Keep numeric indices inside quantity identifiers. ``_`` prevents them
+    # from becoming answer numbers, while preserving enough information to
+    # bind LaTeX ``c_2`` to Unicode ``c₂`` later.
+    text = re.sub(r"_\{?(\d+)\}?", r"_\1", text)
     text = re.sub(r"\\[,;!:]", "", text)
     text = re.sub(r"\\[a-zA-Z]+|\\ ", " ", text)
     text = re.sub(r"\s*\^\s*", "^", text)
@@ -263,12 +277,25 @@ def _unit_after(normalized: str, number_end: int) -> tuple[str | None, int | Non
     return _canonical_unit(match.group(1)), match.end()
 
 
+def _canonical_quantity_label(value: str) -> str:
+    translated = value.translate(_SUBSCRIPTS).casefold().strip()
+    mass_fraction_omega = re.fullmatch(r"ω(?:\s*\([^()]+\))?", translated) is not None
+    candidate = translated
+    candidate = re.sub(r"[_\s(){}]", "", candidate)
+    # Latin w and Greek omega are the two conventional notations for mass
+    # fraction. Restrict the alias to plain omega or omega(element), so indexed
+    # angular frequencies such as omega_0 do not collapse into a w-label.
+    if mass_fraction_omega:
+        candidate = "w" + candidate[1:]
+    return candidate
+
+
 def _explicit_label_before(normalized: str, number_start: int) -> str | None:
     segment = re.split(r"[;\n,.!?]", normalized[:number_start])[-1]
     match = _EXPLICIT_LABEL_RE.search(segment)
     if match is None:
         return None
-    candidate = match.group(1).translate(_SUBSCRIPTS).casefold()
+    candidate = _canonical_quantity_label(match.group(1))
     # In ``... / 100 mL = 0.010 mol/L`` the token before ``=`` is a
     # denominator unit, not the label of the result.
     return None if unit_definition(candidate) is not None else candidate
@@ -387,38 +414,53 @@ def extract_numbers(text: str) -> list[float]:
 
 
 def extract_units(text: str) -> set[str]:
-    normalized = normalize_numeric_text(text).casefold()
-    normalized = re.sub(r"\^\s*\{?\s*([+-]?\d+)\s*\}?", r"^\1", normalized)
-    normalized = re.sub(r"\s*/\s*", "/", normalized)
-    normalized = re.sub(r"\s+", " ", normalized)
-    units = {_canonical_unit(match.group(1)) for match in _UNIT_RE.finditer(normalized)}
-    return units
+    _, occurrences = _number_occurrences(text)
+    return {occurrence.unit for occurrence in occurrences if occurrence.unit is not None}
 
 
 def _close(a: float, b: float, rel: float) -> bool:
     return math.isclose(a, b, rel_tol=rel, abs_tol=1e-15)
 
 
-def _drop_context_numbers(values: list[float], context_values: list[float]) -> list[float]:
-    return [v for v in values if not any(_close(v, c, 1e-6) for c in context_values)]
+def _is_explicit_output_occurrence(occurrence: _NumberOccurrence, normalized: str) -> bool:
+    if occurrence.label is not None:
+        return True
+    clause_start = max(normalized.rfind(separator, 0, occurrence.start) for separator in (";", "\n", ".", "!", "?"))
+    prefix = normalized[clause_start + 1 : occurrence.start]
+    return _OUTPUT_CUE_RE.search(prefix) is not None
 
 
-def _drop_context_occurrences(
-    occurrences: list[_NumberOccurrence], context_values: list[float]
+def _drop_reference_context_occurrences(
+    occurrences: list[_NumberOccurrence], context_values: list[float], normalized: str
+) -> list[_NumberOccurrence]:
+    return [
+        occurrence
+        for occurrence in occurrences
+        if _is_explicit_output_occurrence(occurrence, normalized)
+        or not any(_close(occurrence.value, context, 1e-6) for context in context_values)
+    ]
+
+
+def _drop_solver_context_occurrences(
+    occurrences: list[_NumberOccurrence],
+    context_values: list[float],
+    references: list[_NumberOccurrence],
+    rel: float,
 ) -> list[_NumberOccurrence]:
     return [
         occurrence
         for occurrence in occurrences
         if not any(_close(occurrence.value, context, 1e-6) for context in context_values)
+        or any(_occurrences_match(reference, occurrence, rel) for reference in references)
     ]
 
 
 def _drop_context_groups(
-    groups: list[list[_NumberOccurrence]], context_values: list[float]
+    groups: list[list[_NumberOccurrence]], context_values: list[float], normalized: str
 ) -> list[list[_NumberOccurrence]]:
     filtered: list[list[_NumberOccurrence]] = []
     for group in groups:
-        remaining = _drop_context_occurrences(group, context_values)
+        remaining = _drop_reference_context_occurrences(group, context_values, normalized)
         if remaining:
             filtered.append(remaining)
     return filtered
@@ -476,7 +518,7 @@ def compare_answers(
     result: dict = {"verdict": "uncertain", "reference": ref_text, "solver": solver_text}
     if not ref_text or not solver_text:
         return result
-    _, ref_occurrence_groups = _number_occurrence_groups(ref_text)
+    ref_normalized, ref_occurrence_groups = _number_occurrence_groups(ref_text)
     _, solver_occurrences = _number_occurrences(solver_text)
     ref_numbers = [occurrence.value for group in ref_occurrence_groups for occurrence in group]
     solver_numbers = [occurrence.value for occurrence in solver_occurrences]
@@ -484,8 +526,14 @@ def compare_answers(
         rel = tolerance_pct / 100
         # Числа из условия (T=298, табличные значения) — контекст, а не ответ: убираем их с обеих сторон.
         context_values = extract_numbers(context)
-        ref_grouped = _drop_context_groups(ref_occurrence_groups, context_values)
-        solver_filtered = _drop_context_occurrences(solver_occurrences, context_values)
+        ref_grouped = _drop_context_groups(ref_occurrence_groups, context_values, ref_normalized)
+        required_occurrences = [occurrence for group in ref_grouped for occurrence in group]
+        solver_filtered = _drop_solver_context_occurrences(
+            solver_occurrences,
+            context_values,
+            required_occurrences,
+            rel,
+        )
         if not ref_grouped or not solver_filtered:
             ref_grouped, solver_filtered = ref_occurrence_groups, solver_occurrences
         ref_filtered = [occurrence.value for group in ref_grouped for occurrence in group]

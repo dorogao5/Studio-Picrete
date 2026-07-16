@@ -161,6 +161,123 @@ def test_explicit_quantity_labels_prevent_same_unit_value_swaps() -> None:
     assert result["verdict"] != "match"
 
 
+def test_latex_and_unicode_numeric_subscripts_bind_the_same_quantities() -> None:
+    reference = (
+        "$c_2 = 0.150$ моль/л; $n_1 = 0.0300$ моль; $n_2 = 0.0300$ моль; "
+        "для приготовления 100.0 мл 0.300 моль/л раствора требуется 25.0 мл исходного раствора."
+    )
+    solver = "c₂ = 0.150 моль/л; n₁ = 0.0300 моль; n₂ = 0.0300 моль; V исходного = 25.0 мл"
+    statement = (
+        "Для разбавления водного раствора хлорида калия взяли $V_1 = 25.0$ мл исходного раствора с "
+        "концентрацией $c_1 = 1.20$ моль/л и довели объём дистиллированной водой до $V_2 = 200.0$ мл. "
+        "Считая, что количество растворённого вещества сохраняется, вычислите концентрацию $c_2$ полученного раствора. "
+        "Проверьте, что количество вещества до и после разбавления одинаково, вычислив $n_1$ и $n_2$. Выполните обратную проверку: "
+        "рассчитайте, какой объём исходного раствора потребуется для приготовления $100.0$ мл раствора с концентрацией $0.300$ моль/л."
+    )
+    result = compare_answers(reference, solver, tolerance_pct=0.5, context=statement)
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 4
+
+    missing_reverse_volume = compare_answers(
+        reference,
+        "c₂ = 0.150 моль/л; n₁ = 0.0300 моль; n₂ = 0.0300 моль",
+        tolerance_pct=0.5,
+        context=statement,
+    )
+    assert missing_reverse_volume["verdict"] == "incomplete"
+    assert missing_reverse_volume["missing_reference_numbers"] == [25.0]
+
+
+def test_labeled_output_equal_to_context_value_remains_required() -> None:
+    result = compare_answers(
+        "c_2=0.150 моль/л; V_исх=25.0 мл",
+        "c₂=0.150 моль/л",
+        tolerance_pct=0.5,
+        context="Исходные данные: V_1=25.0 мл.",
+    )
+
+    assert result["verdict"] == "incomplete"
+    assert result["required_count"] == 2
+    assert result["missing_reference_numbers"] == [25.0]
+
+
+def test_labeled_solver_input_from_context_is_not_an_unexpected_output() -> None:
+    result = compare_answers(
+        "c_2=0.150 моль/л",
+        "c_1=1.20 моль/л; c_2=0.150 моль/л",
+        tolerance_pct=0.5,
+        context="Исходная концентрация c_1=1.20 моль/л.",
+    )
+
+    assert result["verdict"] == "match"
+    assert result["unexpected_solver_numbers"] == []
+
+
+def test_numeric_subscript_binding_still_rejects_swapped_concentrations() -> None:
+    result = compare_answers(
+        "$c_1=0.100$ моль/л; $c_2=0.150$ моль/л",
+        "c₁=0.150 моль/л; c₂=0.100 моль/л",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+
+
+def test_gravimetric_factor_and_mass_fraction_notation_variants_match() -> None:
+    result = compare_answers(
+        r"$F_g = 0.2032;~ m(\mathrm{Ni}) = 0.04538~\text{г};~ w(\mathrm{Ni}) = 9.08~\%$",
+        "Fg = 0.2031, m(Ni) = 0.04538 г, ω(Ni) = 9.076%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 3
+    assert result["reference_units"] == ["%", "г"]
+
+
+@pytest.mark.parametrize(
+    ("reference", "solver"),
+    [("F_g=0.2031", "Fg=0.2031"), ("Fg=0.2031", "F_g=0.2031")],
+)
+def test_gravimetric_factor_label_normalization_is_symmetric_and_dimensionless(reference: str, solver: str) -> None:
+    result = compare_answers(reference, solver, tolerance_pct=0.5)
+
+    assert result["verdict"] == "match"
+    assert result["reference_units"] == result["solver_units"] == []
+
+
+def test_latex_spacing_does_not_hide_a_wrong_mass_unit() -> None:
+    result = compare_answers(
+        r"$F_g=0.2032;~m(\mathrm{Ni})=0.04538~\text{г};~w(\mathrm{Ni})=9.08~\%$",
+        "Fg=0.2032; m(Ni)=0.04538 мг; ω(Ni)=9.08%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+    assert result["missing_reference_units"] == ["г"]
+
+
+def test_mass_fraction_alias_keeps_element_binding_when_values_are_swapped() -> None:
+    result = compare_answers(
+        "w(Ni)=10 %; w(Co)=20 %",
+        "ω(Ni)=20 %; ω(Co)=10 %",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+
+
+def test_mass_fraction_alias_does_not_collapse_indexed_angular_frequency() -> None:
+    result = compare_answers(
+        "w_0=10 с",
+        "ω_0=10 с",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+
+
 @pytest.mark.parametrize(
     ("reference", "solver"),
     [
