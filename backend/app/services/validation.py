@@ -717,7 +717,11 @@ def _required_text_claims(text: str) -> list[tuple[str, frozenset[str]]]:
         clause = raw_clause.strip()
         if not clause or _number_tokens(clause):
             continue
-        words = [word.casefold() for word in _WORD_RE.findall(clause)]
+        # Formula subscripts are typography, not lexical content: ``SO₃`` and
+        # ``SO3`` must contribute the same claim token.  Keep this conversion
+        # local to claim matching so chemical subscripts never become numeric
+        # answer occurrences.
+        words = [word.casefold().translate(_SUBSCRIPTS) for word in _WORD_RE.findall(clause)]
         words = [word for word in words if len(word) > 1 and word not in _CLAIM_STOPWORDS]
         stems = frozenset(_ru_stemmer.stemWords(words))
         if stems:
@@ -841,7 +845,11 @@ def compare_answers(
                 if occurrence.unit is not None
             }
         )
-        solver_stems = set(_ru_stemmer.stemWords([word.casefold() for word in _WORD_RE.findall(solver_text)]))
+        solver_stems = set(
+            _ru_stemmer.stemWords(
+                [word.casefold().translate(_SUBSCRIPTS) for word in _WORD_RE.findall(solver_text)]
+            )
+        )
         missing_text_claims = [
             claim for claim, stems in _required_text_claims(ref_text) if not stems.issubset(solver_stems)
         ]

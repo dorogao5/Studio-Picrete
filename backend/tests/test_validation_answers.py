@@ -441,6 +441,17 @@ def test_numeric_match_does_not_hide_contradictory_text_claim(reference: str, so
     assert result["missing_text_claims"]
 
 
+def test_unicode_formula_subscripts_do_not_create_missing_text_claims() -> None:
+    result = compare_answers(
+        "Окислитель: MnO₄⁻, восстановитель: SO₃²⁻. Лимитирующий реагент: SO₃²⁻. n=0,00210 моль.",
+        "Окислитель MnO4^-; восстановитель SO3^2-. Лимитирующий реагент: SO3^2-. n=0,00210 моль.",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["missing_text_claims"] == []
+
+
 def test_equivalent_litre_notation_is_normalized() -> None:
     result = compare_answers("V = 2 л", "V = 2 дм^3", tolerance_pct=2)
 
