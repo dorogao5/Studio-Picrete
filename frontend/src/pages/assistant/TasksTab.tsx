@@ -43,7 +43,7 @@ import type {
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
 import MathText from "../../components/MathText";
 import { RubricEditor, rubricValidationError } from "../../components/RubricEditor";
-import { modelOptions } from "./PromptsTab";
+import { deepSeekV4Options } from "./PromptsTab";
 
 type Tone = "default" | "success" | "warning" | "destructive" | "info" | "accent";
 type TasksSection = "templates" | "batches" | "bank";
@@ -1599,13 +1599,15 @@ function BatchLaunchModal({
   onClose: () => void;
   onLaunched: (batch: GenerationBatch) => void;
 }) {
-  const production = useMemo(() => modelOptions(providers, true), [providers]);
+  const production = useMemo(() => deepSeekV4Options(providers), [providers]);
   const controlModels = useMemo(() => production.filter((model) => !isKnownAdvisoryModel(model)), [production]);
   const hiddenAdvisoryCount = production.length - controlModels.length;
   const generatorPrompts = useMemo(() => prompts.filter((p) => p.role === "generator"), [prompts]);
-  const preferredGeneratorId = production.some((model) => model.id === assistant.default_generator_model_id)
-    ? assistant.default_generator_model_id!
-    : (production[0]?.id ?? "");
+  const preferredGeneratorId =
+    production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro")?.id ??
+    (production.some((model) => model.id === assistant.default_generator_model_id)
+      ? assistant.default_generator_model_id!
+      : (production[0]?.id ?? ""));
   const preferredSolverId = controlModels.some((model) => model.id === assistant.default_grader_model_id)
     ? assistant.default_grader_model_id!
     : (controlModels.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro")?.id ??
@@ -1673,7 +1675,7 @@ function BatchLaunchModal({
         </Field>
         <Field label="Производственная модель">
           <Select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-            {production.length === 0 && <option value="">— подключите production-провайдера —</option>}
+            {production.length === 0 && <option value="">— подключите DeepSeek V4 —</option>}
             {production.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}

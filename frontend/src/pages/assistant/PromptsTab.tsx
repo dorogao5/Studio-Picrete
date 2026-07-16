@@ -20,6 +20,18 @@ export function modelOptions(providers: Provider[], productionOnly: boolean) {
     );
 }
 
+export function deepSeekV4Options(providers: Provider[], productionOnly = true) {
+  return modelOptions(providers, productionOnly).filter(
+    (model) =>
+      model.family.toLocaleLowerCase() === "deepseek" &&
+      /deepseek-v4-(?:pro|flash)/i.test(model.modelId),
+  );
+}
+
+function preferredDeepSeekV4(models: ReturnType<typeof deepSeekV4Options>) {
+  return models.find((model) => /deepseek-v4-pro(?:$|[^a-z])/i.test(model.modelId)) ?? models[0];
+}
+
 const ROLE_LABELS: Record<string, string> = {
   grader: "Проверка решений",
   generator: "Генерация заданий",
@@ -54,9 +66,9 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
   }, [prompts]);
 
   const bulkGenerate = async () => {
-    const target = modelOptions(providers, true)[0];
+    const target = preferredDeepSeekV4(deepSeekV4Options(providers));
     if (!target) {
-      setError("Сначала подключите production-провайдера (например DeepSeek)");
+      setError("Сначала подключите production-модель DeepSeek V4 Pro или Flash");
       return;
     }
     setError("");
@@ -290,7 +302,7 @@ function GenerateModal({
   providers: Provider[];
   onCreated: () => void;
 }) {
-  const production = useMemo(() => modelOptions(providers, true), [providers]);
+  const production = useMemo(() => deepSeekV4Options(providers), [providers]);
 
   const [role, setRole] = useState("grader");
   const [targetId, setTargetId] = useState("");
@@ -299,7 +311,7 @@ function GenerateModal({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!targetId && production[0]) setTargetId(production[0].id);
+    if (!targetId && production[0]) setTargetId(preferredDeepSeekV4(production)?.id ?? "");
   }, [production, targetId]);
 
   const submit = async () => {
@@ -332,10 +344,10 @@ function GenerateModal({
         </Field>
         <Field
           label="Целевая модель (кто будет работать по промпту)"
-          hint="Промпт адаптируется под особенности семейства: DeepSeek V4, Qwen 3.x, YandexGPT, Alice AI"
+          hint="Рабочие промпты ассистентов адаптируются под DeepSeek V4 Pro/Flash"
         >
           <Select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-            {production.length === 0 && <option value="">— подключите провайдера —</option>}
+            {production.length === 0 && <option value="">— подключите DeepSeek V4 —</option>}
             {production.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}

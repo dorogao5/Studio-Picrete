@@ -42,7 +42,7 @@ import type {
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Tabs, Textarea } from "../components/ui";
 import MathText from "../components/MathText";
 import { taskIsAutoReady, taskIsManualReady } from "../lib/taskExport";
-import { modelOptions } from "./assistant/PromptsTab";
+import { deepSeekV4Options, modelOptions } from "./assistant/PromptsTab";
 
 type RubricCriterion = GeneratedTask["rubric"][number];
 
@@ -1070,7 +1070,7 @@ function StepOutput({ step }: { step: PipelineRun["steps_log"][number] }) {
 const TASK_STATUS_ORDER: Record<string, number> = { approved: 0, validated: 1 };
 
 function TutorMode({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
-  const production = useMemo(() => modelOptions(providers, true), [providers]);
+  const production = useMemo(() => deepSeekV4Options(providers), [providers]);
   const [tasks, setTasks] = useState<GeneratedTask[]>([]);
   const [tutorPrompts, setTutorPrompts] = useState<PromptVersion[]>([]);
   const [taskId, setTaskId] = useState("");
@@ -1123,14 +1123,20 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
     setTaskId("");
     setManualTask("");
     setStudentWork("");
+    setModelEntryId("");
     setHistoryOpen(false);
     setHistory(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistant.id]);
 
   useEffect(() => {
-    if (!modelEntryId && production[0]) setModelEntryId(production[0].id);
-  }, [production, modelEntryId]);
+    if (modelEntryId && production.some((model) => model.id === modelEntryId)) return;
+    const preferred =
+      production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro") ??
+      production.find((model) => model.id === assistant.default_generator_model_id) ??
+      production[0];
+    setModelEntryId(preferred?.id ?? "");
+  }, [assistant.default_generator_model_id, modelEntryId, production]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "nearest" });
@@ -1243,9 +1249,9 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
           <Field label="Решение / вопрос студента" hint="Контекст, который ассистент будет разбирать в диалоге">
             <Textarea rows={4} value={studentWork} onChange={(e) => setStudentWork(e.target.value)} />
           </Field>
-          <Field label="Модель">
+          <Field label="Модель" hint="DeepSeek V4 Pro — основной режим; Flash доступен только для явных быстрых прогонов">
             <Select value={modelEntryId} onChange={(e) => setModelEntryId(e.target.value)}>
-              {production.length === 0 && <option value="">— подключите провайдера —</option>}
+              {production.length === 0 && <option value="">— подключите DeepSeek V4 —</option>}
               {production.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}

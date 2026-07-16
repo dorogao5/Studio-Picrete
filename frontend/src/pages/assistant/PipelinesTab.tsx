@@ -5,7 +5,7 @@ import { apiErrorMessage, pipelinesApi } from "../../lib/api";
 import { isKnownAdvisoryModel } from "../../lib/modelPolicy";
 import type { Assistant, Pipeline, PipelineStep, Provider } from "../../lib/types";
 import { Button, Card, EmptyState, ErrorNote, Field, Input, Select, Spinner } from "../../components/ui";
-import { modelOptions } from "./PromptsTab";
+import { deepSeekV4Options, modelOptions } from "./PromptsTab";
 
 type ModelOption = ReturnType<typeof modelOptions>[number];
 
@@ -98,7 +98,7 @@ export default function PipelinesTab({ assistant, providers }: { assistant: Assi
     setCreating(true);
     setError("");
     try {
-      const production = modelOptions(providers, true).filter((model) => !isKnownAdvisoryModel(model));
+      const production = deepSeekV4Options(providers).filter((model) => !isKnownAdvisoryModel(model));
       const defaultModel = preferredDecisionModelId(production, assistant.default_grader_model_id);
       if (!defaultModel) {
         setError("Подключите production-модель DeepSeek для итоговых решений; облегчённые и Flash-модели здесь не используются.");
@@ -190,7 +190,7 @@ function PipelineEditor({
   onChanged: () => void;
 }) {
   const production = useMemo(
-    () => modelOptions(providers, true).filter((model) => !isKnownAdvisoryModel(model)),
+    () => deepSeekV4Options(providers).filter((model) => !isKnownAdvisoryModel(model)),
     [providers],
   );
   const preferredGraderId = preferredDecisionModelId(production, assistant.default_grader_model_id);
