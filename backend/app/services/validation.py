@@ -1252,21 +1252,59 @@ def _semantic_entailment_candidate(
     solver: dict,
     verifier: dict,
     cross_comparison: dict,
+    *,
+    chemistry_verified: bool = False,
 ) -> bool:
-    """Allow a critic to resolve only lexical uncertainty, never a detected contradiction."""
+    """Allow the critic to resolve representation uncertainty, never missing evidence.
+
+    Formula-heavy chemistry answers often render the same coefficient as a
+    charge, subscript or pseudo-unit in different notation.  The numeric parser
+    then reports ``incomplete`` even though the missing values reappear exactly
+    among the unmatched values.  Such a case may reach the semantic critic only
+    after deterministic chemistry has passed; a genuinely absent result cannot.
+    """
 
     if answer_format not in SEMANTIC_ENTAILMENT_ANSWER_FORMATS:
         return False
     if not (_solver_outcome_complete(solver) and _solver_outcome_complete(verifier)):
         return False
-    verdicts = {
-        str((solver.get("comparison") or {}).get("verdict") or solver.get("status") or ""),
-        str((verifier.get("comparison") or {}).get("verdict") or verifier.get("status") or ""),
-        str(cross_comparison.get("verdict") or ""),
-    }
-    # A critic may interpret paraphrases/equivalent symbolic forms. It must not
-    # erase a deterministic mismatch, incomplete answer, or solver error.
-    return verdicts.issubset({"match", "uncertain"}) and "uncertain" in verdicts
+    comparisons = [solver.get("comparison") or {}, verifier.get("comparison") or {}, cross_comparison]
+    verdicts = {str(comparison.get("verdict") or "") for comparison in comparisons}
+    if verdicts.issubset({"match", "uncertain"}) and "uncertain" in verdicts:
+        return True
+    if not chemistry_verified or "incomplete" not in verdicts or not verdicts.issubset(
+        {"match", "uncertain", "incomplete"}
+    ):
+        return False
+    return all(_representation_only_incomplete(comparison) for comparison in comparisons)
+
+
+def _representation_only_incomplete(comparison: dict) -> bool:
+    verdict = comparison.get("verdict")
+    if verdict in {"match", "uncertain"}:
+        return True
+    if verdict != "incomplete" or comparison.get("missing_text_claims"):
+        return False
+    missing_groups = comparison.get("missing_reference_groups") or []
+    if not missing_groups:
+        # All required outputs matched; only additional symbolic coefficients
+        # remain for the critic to interpret.
+        return comparison.get("matched_count") == comparison.get("required_count")
+    unexpected = list(comparison.get("unexpected_solver_numbers") or [])
+    for group in missing_groups:
+        alternatives = group if isinstance(group, list) else [group]
+        match_index = next(
+            (
+                index
+                for index, candidate in enumerate(unexpected)
+                if any(_close(float(reference), float(candidate), 1e-9) for reference in alternatives)
+            ),
+            None,
+        )
+        if match_index is None:
+            return False
+        unexpected.pop(match_index)
+    return True
 
 
 def _critic_confirms_semantic_entailment(critic: dict) -> bool:
@@ -1725,6 +1763,7 @@ async def run_validation(
         solver,
         verifier,
         cross_comparison,
+        chemistry_verified=chemistry.get("admission_effect") == "pass",
     )
 
     critic: dict = {"status": "skipped", "checks": {}, "issues": []}

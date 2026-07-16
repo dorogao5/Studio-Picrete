@@ -420,3 +420,69 @@ def test_text_paraphrases_stay_blocked_when_critic_omits_reference_entailment(mo
     assert result["verdict"] == "needs_review"
     assert result["solver"]["status"] == "uncertain"
     assert result["cross_comparison"]["verdict"] == "match"
+
+
+def test_formula_representation_only_incomplete_can_reach_critic_after_chemistry_pass() -> None:
+    solver = {
+        "status": "incomplete",
+        "answer": "Cr2O7^2- + 14H+ + 6e- -> 2Cr^3+ + 7H2O; n=0.0120 mol",
+        "solution": "Полное решение",
+        "comparison": {
+            "verdict": "incomplete",
+            "matched_count": 1,
+            "required_count": 1,
+            "missing_reference_groups": [],
+            "unexpected_solver_numbers": [14, 6, 7],
+            "missing_text_claims": [],
+        },
+    }
+    verifier = {
+        **solver,
+        "comparison": {
+            "verdict": "match",
+            "matched_count": 1,
+            "required_count": 1,
+            "missing_reference_groups": [],
+            "unexpected_solver_numbers": [],
+            "missing_text_claims": [],
+        },
+    }
+    cross = {
+        "verdict": "incomplete",
+        "matched_count": 5,
+        "required_count": 7,
+        "missing_reference_groups": [[7], [7]],
+        "unexpected_solver_numbers": [7, 7],
+        "missing_text_claims": [],
+    }
+
+    assert validation._semantic_entailment_candidate(
+        "text", solver, verifier, cross, chemistry_verified=True
+    )
+    assert not validation._semantic_entailment_candidate(
+        "text", solver, verifier, cross, chemistry_verified=False
+    )
+
+
+def test_semantic_critic_never_receives_a_genuinely_missing_formula_result() -> None:
+    report = {
+        "status": "incomplete",
+        "answer": "Только часть ответа",
+        "solution": "Неполное решение",
+        "comparison": {
+            "verdict": "incomplete",
+            "matched_count": 1,
+            "required_count": 2,
+            "missing_reference_groups": [[0.012]],
+            "unexpected_solver_numbers": [],
+            "missing_text_claims": [],
+        },
+    }
+
+    assert not validation._semantic_entailment_candidate(
+        "text",
+        report,
+        report,
+        report["comparison"],
+        chemistry_verified=True,
+    )
