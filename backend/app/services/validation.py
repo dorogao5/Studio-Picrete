@@ -192,6 +192,103 @@ _NAMED_MASS_FRACTION_RE = re.compile(
 _NAMED_MASS_RE = re.compile(
     rf"(?<!\w)(?i:масс(?:а|у))\s+(?P<formula>{_CHEMICAL_FORMULA_PATTERN})\s*=\s*$",
 )
+_NAMED_ANALYTE_MASS_FRACTION_RE = re.compile(
+    r"(?<!\w)(?i:массов(?:ая|ую)\s+дол(?:я|ю))\s+(?P<name>[а-яё-]+)"
+    r"(?:\s+(?:в|из)\s+[а-яё-]+(?:\s+[а-яё-]+){0,2})?\s*=\s*$",
+    re.IGNORECASE,
+)
+_NAMED_ANALYTE_MASS_RE = re.compile(
+    r"(?<!\w)(?i:масс(?:а|у))\s+(?P<name>[а-яё-]+)"
+    r"(?:\s+(?:в|из)\s+[а-яё-]+(?:\s+[а-яё-]+){0,2})?\s*=\s*$",
+    re.IGNORECASE,
+)
+# Controlled aliases for analyte names that DeepSeek commonly writes in prose
+# instead of conventional m(X)/w(X) notation.  Unknown nouns intentionally do
+# not become quantity aliases: ``масса образца`` must not silently match
+# ``m_sample``.  Both nominative and the genitive required after ``масса`` are
+# listed so the rule is deterministic and independent of a morphological model.
+_RUSSIAN_ELEMENT_ALIASES = {
+    "алюминий": "Al",
+    "алюминия": "Al",
+    "барий": "Ba",
+    "бария": "Ba",
+    "бор": "B",
+    "бора": "B",
+    "бром": "Br",
+    "брома": "Br",
+    "ванадий": "V",
+    "ванадия": "V",
+    "водород": "H",
+    "водорода": "H",
+    "вольфрам": "W",
+    "вольфрама": "W",
+    "железо": "Fe",
+    "железа": "Fe",
+    "золото": "Au",
+    "золота": "Au",
+    "йод": "I",
+    "йода": "I",
+    "кадмий": "Cd",
+    "кадмия": "Cd",
+    "калий": "K",
+    "калия": "K",
+    "кальций": "Ca",
+    "кальция": "Ca",
+    "кобальт": "Co",
+    "кобальта": "Co",
+    "кремний": "Si",
+    "кремния": "Si",
+    "литий": "Li",
+    "лития": "Li",
+    "магний": "Mg",
+    "магния": "Mg",
+    "марганец": "Mn",
+    "марганца": "Mn",
+    "медь": "Cu",
+    "меди": "Cu",
+    "молибден": "Mo",
+    "молибдена": "Mo",
+    "мышьяк": "As",
+    "мышьяка": "As",
+    "натрий": "Na",
+    "натрия": "Na",
+    "никель": "Ni",
+    "никеля": "Ni",
+    "олово": "Sn",
+    "олова": "Sn",
+    "палладий": "Pd",
+    "палладия": "Pd",
+    "платина": "Pt",
+    "платины": "Pt",
+    "ртуть": "Hg",
+    "ртути": "Hg",
+    "свинец": "Pb",
+    "свинца": "Pb",
+    "селен": "Se",
+    "селена": "Se",
+    "сера": "S",
+    "серы": "S",
+    "серебро": "Ag",
+    "серебра": "Ag",
+    "стронций": "Sr",
+    "стронция": "Sr",
+    "сурьма": "Sb",
+    "сурьмы": "Sb",
+    "титан": "Ti",
+    "титана": "Ti",
+    "углерод": "C",
+    "углерода": "C",
+    "фосфор": "P",
+    "фосфора": "P",
+    "фтор": "F",
+    "фтора": "F",
+    "хлор": "Cl",
+    "хлора": "Cl",
+    "хром": "Cr",
+    "хрома": "Cr",
+    "цинк": "Zn",
+    "цинка": "Zn",
+}
 _ELEMENT_SYMBOLS = frozenset(
     "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
     "Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu "
@@ -326,6 +423,16 @@ def _named_quantity_label(segment: str) -> str | None:
             continue
         formula = match.group("formula")
         if all(element in _ELEMENT_SYMBOLS for element in re.findall(r"[A-Z][a-z]?", formula)):
+            return _canonical_quantity_label(f"{symbol}({formula})")
+    for pattern, symbol in (
+        (_NAMED_ANALYTE_MASS_FRACTION_RE, "w"),
+        (_NAMED_ANALYTE_MASS_RE, "m"),
+    ):
+        match = pattern.search(segment)
+        if match is None:
+            continue
+        formula = _RUSSIAN_ELEMENT_ALIASES.get(match.group("name").casefold())
+        if formula is not None:
             return _canonical_quantity_label(f"{symbol}({formula})")
     return None
 

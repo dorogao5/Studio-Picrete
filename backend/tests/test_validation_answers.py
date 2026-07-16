@@ -316,6 +316,31 @@ def test_unambiguous_russian_quantity_names_bind_to_chemical_formula_labels() ->
     assert result["matched_count"] == result["required_count"] == 3
 
 
+def test_russian_analyte_names_with_sample_context_bind_to_element_labels() -> None:
+    result = compare_answers(
+        r"$F_g = 0.2783$; $m(\mathrm{P}) = 0.1703\ \text{г}$; $w(\mathrm{P}) = 22.71\%$.",
+        (
+            "Гравиметрический фактор F_g = 0.2783; масса фосфора в навеске = 0.1703 г; "
+            "массовая доля фосфора в удобрении = 22.71%."
+        ),
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 3
+
+
+def test_russian_analyte_name_binding_preserves_element_identity() -> None:
+    result = compare_answers(
+        "m(P) = 0.1703 г; w(P) = 22.71%",
+        "масса азота в навеске = 0.1703 г; массовая доля азота в образце = 22.71%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+    assert result["matched_count"] == 0
+
+
 def test_named_quantity_binding_preserves_the_compound_identity() -> None:
     result = compare_answers(
         "m_MgO = 0.09052 г; w_MgO = 22.63%",
