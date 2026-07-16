@@ -289,7 +289,7 @@ function PipelineEditor({
         <Button
           variant="destructive"
           loading={deleting}
-          className="self-start sm:self-auto"
+          className="w-full sm:ml-auto sm:w-auto"
           aria-label={`Удалить сценарий «${pipeline.name}»`}
           onClick={async () => {
             if (confirm(`Удалить сценарий «${pipeline.name}»?`)) {
@@ -307,6 +307,7 @@ function PipelineEditor({
           }}
         >
           <Trash2 className="h-4 w-4" />
+          Удалить сценарий
         </Button>
       </div>
 

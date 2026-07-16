@@ -135,37 +135,45 @@ export function Tabs({
   active: string;
   onChange: (key: string) => void;
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const activeRef = useRef<HTMLButtonElement>(null);
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  useEffect(() => {
-    const list = listRef.current;
-    const button = activeRef.current;
-    if (!list || !button) return;
-    const left = button.offsetLeft - (list.clientWidth - button.clientWidth) / 2;
-    list.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
-  }, [active]);
+  const moveFocus = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    const nextTab = tabs[nextIndex];
+    if (!nextTab) return;
+    onChange(nextTab.key);
+    buttonRefs.current[nextIndex]?.focus();
+  };
 
   return (
     <div
-      ref={listRef}
       role="tablist"
       aria-label="Режимы работы"
-      className="tabs-scroll flex snap-x gap-1 overflow-x-auto overscroll-x-contain border-b border-border"
+      className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/30 p-1 sm:grid-cols-4"
     >
-      {tabs.map((tab) => (
+      {tabs.map((tab, index) => (
         <button
-          ref={active === tab.key ? activeRef : undefined}
+          ref={(element) => {
+            buttonRefs.current[index] = element;
+          }}
           type="button"
           role="tab"
           aria-selected={active === tab.key}
+          tabIndex={active === tab.key ? 0 : -1}
           key={tab.key}
           onClick={() => onChange(tab.key)}
+          onKeyDown={(event) => moveFocus(event, index)}
           className={clsx(
-            "-mb-px shrink-0 snap-start whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors sm:px-4",
+            "min-w-0 rounded-md px-2.5 py-2 text-center text-sm font-medium leading-tight transition-colors sm:px-3",
             active === tab.key
-              ? "border-accent text-accent"
-              : "border-transparent text-muted-foreground hover:text-foreground",
+              ? "bg-card text-foreground shadow-soft"
+              : "text-muted-foreground hover:bg-card/60 hover:text-foreground",
           )}
         >
           {tab.label}

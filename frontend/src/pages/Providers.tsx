@@ -219,21 +219,28 @@ function ProviderCard({
         </div>
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+      <form
+        className="flex flex-col gap-2 sm:flex-row sm:items-end"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveKey();
+        }}
+      >
         <div className="min-w-0 flex-1">
           <Field label={provider.has_api_key ? "Заменить API-ключ" : "API-ключ"}>
-          <Input
-            type="password"
-            value={keyInput}
-            onChange={(e) => setKeyInput(e.target.value)}
-            placeholder="вставьте ключ"
-          />
+            <Input
+              type="password"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="вставьте ключ"
+              autoComplete="off"
+            />
           </Field>
         </div>
-        <Button variant="secondary" className="w-full sm:w-auto" onClick={saveKey} disabled={!keyInput.trim()}>
+        <Button type="submit" variant="secondary" className="w-full sm:w-auto" disabled={!keyInput.trim()}>
           Сохранить
         </Button>
-      </div>
+      </form>
 
       <div>
         <p className="text-sm font-medium mb-2">Модели</p>

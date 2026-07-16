@@ -64,6 +64,11 @@ function normTopic(topic: string): string {
   return topic.trim().toLowerCase();
 }
 
+function courseScopeLabel(courseScope: string, discipline: string): string {
+  const isUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(courseScope);
+  return isUuid ? discipline : courseScope;
+}
+
 const ACCEPTED = ".pdf,.md,.txt,.json,.jpg,.jpeg,.png,.webp";
 
 function detectDocType(filename: string): KnowledgeDocType {
@@ -397,7 +402,7 @@ function DocumentsSection({
                   </p>
                   <p className={`mt-1 text-xs ${doc.course_scope && doc.effective_version ? "text-muted-foreground" : "text-warning"}`}>
                     {doc.course_scope && doc.effective_version
-                      ? `Область: ${doc.course_scope} · версия: ${doc.effective_version}`
+                      ? `Курс: ${courseScopeLabel(doc.course_scope, assistant.discipline)} · версия: ${doc.effective_version}`
                       : "Не заданы область действия и версия источника"}
                   </p>
                   {doc.status === "failed" && doc.error && (
