@@ -4,6 +4,7 @@ from app.services.chemistry_equations import (
     ChemistryParseError,
     check_reaction_balance,
     parse_species,
+    reaction_candidates,
 )
 
 
@@ -52,3 +53,26 @@ def test_unbalanced_neutral_equation_exposes_element_delta() -> None:
 def test_parser_refuses_unsupported_free_text_instead_of_guessing() -> None:
     with pytest.raises(ChemistryParseError):
         check_reaction_balance("перманганат + Fe^2+ -> продукты")
+
+
+def test_reaction_candidate_extracts_equation_before_followup_explanation() -> None:
+    candidates = reaction_candidates(
+        "1. По уравнению реакции 3 MnO₂ → Mn₃O₄ + O₂ определяем количество вещества: "
+        "для навески используем следующий расчёт."
+    )
+
+    assert candidates == ["3 MnO₂ → Mn₃O₄ + O₂"]
+    assert check_reaction_balance(candidates[0]).balanced is True
+
+
+def test_reaction_candidate_uses_parser_for_prefix_and_preserves_full_stoichiometry() -> None:
+    candidates = reaction_candidates("По уравнению: 2 H₂ + O₂ → 2 H₂O, затем вычисляем объём.")
+
+    assert candidates == ["2 H₂ + O₂ → 2 H₂O"]
+    assert check_reaction_balance(candidates[0]).balanced is True
+
+
+def test_unsupported_reaction_notation_remains_a_blocking_candidate() -> None:
+    text = "По схеме: перманганат + Fe^2+ -> продукты, затем продолжаем расчёт"
+
+    assert reaction_candidates(text) == [text]

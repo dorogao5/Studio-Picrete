@@ -187,6 +187,56 @@ def test_decision_solver_requires_two_matching_passes_and_critic(monkeypatch) ->
     assert critic_calls == ["deepseek-v4-pro"]
 
 
+def test_numeric_critic_cannot_override_proven_tolerance_match() -> None:
+    critic = {
+        "status": "fail",
+        "checks": {
+            "reference_consistent": True,
+            "solver_agreement": False,
+            "solver_matches_reference": False,
+            "statement_self_contained": True,
+            "structured_facts_grounded": True,
+            "units_and_chemistry_consistent": True,
+            "verifier_matches_reference": True,
+        },
+        "issues": ["Solver outputs 146.3 м²/г instead of 146 м²/г, breaching significant figure rules."],
+    }
+
+    reconciled = validation._apply_deterministic_numeric_critic_evidence(
+        critic,
+        answer_format="numeric",
+        solver={"status": "match", "answer": "146.3 м²/г"},
+        verifier={"status": "match", "answer": "146 м²/г"},
+        cross_comparison={"verdict": "match"},
+    )
+
+    assert reconciled["status"] == "pass"
+    assert reconciled["issues"] == []
+    assert reconciled["overridden_issues"] == critic["issues"]
+    assert reconciled["deterministic_overrides"] == ["solver_agreement", "solver_matches_reference"]
+    assert reconciled["basis"] == "deterministic_numeric_tolerance"
+
+
+def test_numeric_critic_still_blocks_independent_chemistry_failure() -> None:
+    critic = {
+        "status": "fail",
+        "checks": {key: True for key in validation.CRITIC_REQUIRED_CHECKS},
+        "issues": ["Нарушен атомный баланс"],
+    }
+    critic["checks"]["solver_agreement"] = False
+    critic["checks"]["units_and_chemistry_consistent"] = False
+
+    reconciled = validation._apply_deterministic_numeric_critic_evidence(
+        critic,
+        answer_format="numeric",
+        solver={"status": "match"},
+        verifier={"status": "match"},
+        cross_comparison={"verdict": "match"},
+    )
+
+    assert reconciled == critic
+
+
 def test_decision_solver_is_not_green_when_critic_finds_a_problem(monkeypatch) -> None:
     policy = _policy()
 

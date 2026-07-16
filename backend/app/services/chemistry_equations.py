@@ -269,6 +269,61 @@ def check_reaction_balance(equation: str) -> ReactionBalance:
     )
 
 
+_REACTION_SPAN_BOUNDARY_LIMIT = 64
+_REACTION_EDGE_PUNCTUATION = " \t\r\n$`:,.…"
+
+
+def _parseable_reaction_spans(fragment: str) -> list[str]:
+    """Extract complete parseable equations around every arrow in a prose fragment.
+
+    A solution step often embeds an equation between an introductory phrase and
+    a follow-up calculation.  Trying every nearby whitespace boundary lets the
+    grammar, rather than punctuation heuristics, decide where the equation ends.
+    The cap keeps malformed or adversarially long prose bounded; callers retain
+    the original arrow-containing fragment when no supported span is found.
+    """
+
+    whitespace = list(re.finditer(r"\s+", fragment))
+    spans: list[str] = []
+    for arrow in _ARROW_RE.finditer(fragment):
+        starts = sorted({0, *(match.end() for match in whitespace if match.end() <= arrow.start())})
+        ends = sorted({len(fragment), *(match.start() for match in whitespace if match.start() >= arrow.end())})
+        starts = starts[-_REACTION_SPAN_BOUNDARY_LIMIT:]
+        ends = ends[:_REACTION_SPAN_BOUNDARY_LIMIT]
+
+        best_left: tuple[tuple[int, int, int], str] | None = None
+        for start in starts:
+            side = fragment[start : arrow.start()].strip(_REACTION_EDGE_PUNCTUATION)
+            if not side:
+                continue
+            try:
+                terms = _split_reaction_side(side)
+            except ChemistryParseError:
+                continue
+            score = (len(terms), sum(term.coefficient != 1 for term in terms), -len(side))
+            if best_left is None or score > best_left[0]:
+                best_left = (score, side)
+
+        best_right: tuple[tuple[int, int, int], str] | None = None
+        for end in ends:
+            side = fragment[arrow.end() : end].strip(_REACTION_EDGE_PUNCTUATION)
+            if not side:
+                continue
+            try:
+                terms = _split_reaction_side(side)
+            except ChemistryParseError:
+                continue
+            score = (len(terms), sum(term.coefficient != 1 for term in terms), -len(side))
+            if best_right is None or score > best_right[0]:
+                best_right = (score, side)
+
+        if best_left is not None and best_right is not None:
+            candidate = f"{best_left[1]} {arrow.group()} {best_right[1]}"
+            if candidate not in spans:
+                spans.append(candidate)
+    return spans
+
+
 def reaction_candidates(text: str) -> list[str]:
     """Return conservative equation-looking fragments from solution text."""
 
@@ -276,9 +331,14 @@ def reaction_candidates(text: str) -> list[str]:
     for fragment in re.split(r"[\n;]+", text or ""):
         if not _ARROW_RE.search(fragment):
             continue
+        spans = _parseable_reaction_spans(fragment)
+        if spans:
+            candidates.extend(candidate for candidate in spans if candidate not in candidates)
+            continue
+        # Fail closed for unsupported notation: preserve the arrow-containing
+        # fragment so the balance check reports INDETERMINATE instead of
+        # silently pretending there was no equation.
         candidate = fragment.strip().strip("$` ")
-        if ":" in candidate:
-            candidate = candidate.rsplit(":", 1)[-1].strip()
-        if candidate:
+        if candidate and candidate not in candidates:
             candidates.append(candidate)
     return candidates

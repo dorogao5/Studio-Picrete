@@ -56,7 +56,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v9-semantic-entailment"
+VALIDATION_POLICY_VERSION = "evidence-gate-v10-deterministic-numeric-authority"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {
@@ -71,6 +71,14 @@ CRITIC_REQUIRED_CHECKS = frozenset(
 )
 SEMANTIC_ENTAILMENT_ANSWER_FORMATS = frozenset({"formula", "text"})
 SEMANTIC_ENTAILMENT_BASIS = "subject_critic_semantic_entailment"
+DETERMINISTIC_NUMERIC_BASIS = "deterministic_numeric_tolerance"
+NUMERIC_RELATION_CHECKS = frozenset(
+    {
+        "solver_matches_reference",
+        "verifier_matches_reference",
+        "solver_agreement",
+    }
+)
 
 ANSWER_FORMAT_HINTS = {
     "numeric": "число с единицами измерения",
@@ -199,8 +207,22 @@ def normalize_numeric_text(text: str) -> str:
     # LaTeX: -28{,}7\\,\\text{кДж}, 2\\cdot10^{-5}, H_2O — чистим макросы и индексы до извлечения чисел.
     text = text.replace("\\cdot", "·").replace("\\times", "×")
     text = text.replace("{,}", ",")
+    # Math delimiters are presentation only. In common model output they split a
+    # value from its unit (``99.7$ м$^2$/г``), which must still be parsed as one
+    # measurement. Escaped percent signs are units rather than LaTeX commands.
+    text = text.replace("$", "")
+    text = re.sub(r"\\[()\[\]]", "", text)
+    text = text.replace(r"\%", "%")
     text = re.sub(r"\^\s*\{\s*([-+]?\d+)\s*\}", r"^\1", text)
-    text = re.sub(r"\\text\s*\{([^{}]*)\}", r" \1 ", text)
+    # Preserve textual subscripts as labels before unwrapping LaTeX text macros:
+    # S_{\text{уд}}, w_{\mathrm{Al}} -> S_уд, w_Al.
+    text = re.sub(
+        r"_\s*\{\s*\\(?:text|mathrm)\s*\{([^{}]*)\}\s*\}",
+        r"_\1",
+        text,
+    )
+    text = re.sub(r"_\s*\{\s*([a-zA-Zа-яА-ЯёЁ]+)\s*\}", r"_\1", text)
+    text = re.sub(r"\\(?:text|mathrm|operatorname)\s*\{([^{}]*)\}", r" \1 ", text)
     text = re.sub(r"_\{?\d+\}?", " ", text)
     text = re.sub(r"\\[,;!:]", "", text)
     text = re.sub(r"\\[a-zA-Z]+|\\ ", " ", text)
@@ -899,6 +921,51 @@ def _critic_confirms_semantic_entailment(critic: dict) -> bool:
     )
 
 
+def _apply_deterministic_numeric_critic_evidence(
+    critic: dict,
+    *,
+    answer_format: str,
+    solver: dict,
+    verifier: dict,
+    cross_comparison: dict,
+) -> dict:
+    """Prevent a semantic critic from overruling proven numeric equivalence.
+
+    The critic remains authoritative for self-containment, reference logic,
+    structured facts, units and chemistry. Only the three answer-relation flags
+    are replaced, and only when every corresponding deterministic comparison
+    has already matched within the frozen task tolerance.
+    """
+
+    if answer_format != "numeric":
+        return critic
+    deterministic_relations = {
+        "solver_matches_reference": solver.get("status") == "match",
+        "verifier_matches_reference": verifier.get("status") == "match",
+        "solver_agreement": cross_comparison.get("verdict") == "match",
+    }
+    if not all(deterministic_relations.values()):
+        return critic
+
+    checks = critic.get("checks") if isinstance(critic.get("checks"), dict) else {}
+    false_checks = {key for key in CRITIC_REQUIRED_CHECKS if checks.get(key) is not True}
+    overridden_checks = false_checks & NUMERIC_RELATION_CHECKS
+    if not overridden_checks or false_checks - NUMERIC_RELATION_CHECKS:
+        return critic
+
+    reconciled_checks = {key: checks.get(key) is True for key in CRITIC_REQUIRED_CHECKS}
+    reconciled_checks.update(deterministic_relations)
+    return {
+        **critic,
+        "status": "pass",
+        "checks": {key: reconciled_checks[key] for key in sorted(CRITIC_REQUIRED_CHECKS)},
+        "issues": [],
+        "overridden_issues": list(critic.get("issues") or []),
+        "deterministic_overrides": sorted(overridden_checks),
+        "basis": DETERMINISTIC_NUMERIC_BASIS,
+    }
+
+
 def _promote_comparison(comparison: dict) -> dict:
     return {
         **comparison,
@@ -1320,6 +1387,13 @@ async def run_validation(
             verifier=verifier,
             discipline_context=discipline_context,
             chemistry_facts=normalized_facts or {},
+        )
+        critic = _apply_deterministic_numeric_critic_evidence(
+            critic,
+            answer_format=answer_format,
+            solver=solver,
+            verifier=verifier,
+            cross_comparison=cross_comparison,
         )
 
     semantic_entailment_applied = bool(semantic_entailment_candidate and _critic_confirms_semantic_entailment(critic))

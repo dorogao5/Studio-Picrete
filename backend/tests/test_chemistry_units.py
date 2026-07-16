@@ -66,6 +66,61 @@ def test_latex_measurement_extraction_preserves_compound_units_and_scientific_no
     assert values[2].si_value == pytest.approx(229000.0)
 
 
+def test_production_gravimetry_latex_exposes_masses_and_molar_masses() -> None:
+    values = extract_measurements(
+        r"Навеска $m_{\text{нав}} = 0.5000~\text{г}$; осадок "
+        r"$m_{\text{ос}} = 0.2234~\text{г}$. "
+        r"$M(\mathrm{Ni}) = 58.69~\text{г/моль}$; "
+        r"$M(\mathrm{Mg}) = 24.31\ \text{г·моль}^{-1}$; "
+        r"$M(\mathrm{Mg}_2\mathrm{P}_2\mathrm{O}_7) = 222.6\ \text{г·моль}^{-1}$."
+    )
+
+    masses = [value.si_value for value in values if value.dimension == Dimension.MASS]
+    molar_masses = [value.si_value for value in values if value.dimension == Dimension.MOLAR_MASS]
+    assert masses == pytest.approx([0.0005, 0.0002234])
+    assert molar_masses == pytest.approx([0.05869, 0.02431, 0.2226])
+
+
+def test_production_dilution_chain_does_not_rebind_operands_or_units() -> None:
+    values = extract_assigned_measurements(
+        r"$V_1 = 30.0$ мл; $c_1 = 0.400$ моль/л; $V_2 = 200.0$ мл. "
+        r"$c_2 = \frac{0.400\,\text{моль/л}\times0.0300\,\text{л}}"
+        r"{0.200\,\text{л}} = 0.0600$ моль/л. "
+        r"$n_1 = c_1 V_1 = 0.400\,\text{моль/л}\times0.0300\,\text{л} = 0.0120$ моль. "
+        r"$V_{\text{треб}} = 150.0$ мл; $c_{\text{треб}} = 0.0200$ моль/л."
+    )
+
+    dimensions_by_label = {value.normalized_label: value.measurement.dimension for value in values}
+    assert dimensions_by_label == {
+        "v1": Dimension.VOLUME,
+        "c1": Dimension.AMOUNT_CONCENTRATION,
+        "v2": Dimension.VOLUME,
+        "vтреб": Dimension.VOLUME,
+        "cтреб": Dimension.AMOUNT_CONCENTRATION,
+    }
+
+
+def test_bare_species_in_prose_is_not_treated_as_a_quantity_label() -> None:
+    values = extract_assigned_measurements("масса MnO₂ = 0,4583 г; массовая доля MnO₂ = 91,66 %; m(MnO₂) = 0,4583 г")
+
+    assert [(value.label, value.measurement.dimension) for value in values] == [("m(MnO₂)", Dimension.MASS)]
+
+
+def test_single_element_species_is_not_treated_as_a_quantity_label() -> None:
+    values = extract_assigned_measurements("масса Fe = 0,5000 г; m(Fe) = 0,5000 г")
+
+    assert [(value.label, value.measurement.dimension) for value in values] == [("m(Fe)", Dimension.MASS)]
+
+
+def test_conjunction_separates_independent_assignments() -> None:
+    values = extract_assigned_measurements("m = 5 г и V = 3 мл")
+
+    assert [(value.label, value.measurement.dimension) for value in values] == [
+        ("m", Dimension.MASS),
+        ("V", Dimension.VOLUME),
+    ]
+
+
 def test_unknown_unit_is_not_silently_interpreted() -> None:
     assert parse_measurement("5 arbitrary_units") is None
 

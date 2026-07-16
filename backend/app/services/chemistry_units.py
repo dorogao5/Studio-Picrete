@@ -253,6 +253,13 @@ _SUPERSCRIPT_TRANSLATION = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123
 _SUBSCRIPT_TRANSLATION = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
 _NUMBER_PATTERN = r"[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?"
 
+# A one-letter quantity may also be a unit symbol (``V`` or ``S``).  Preserve
+# conventional quantity labels while rejecting unambiguous unit names that can
+# occur immediately before ``=`` in a conversion chain (``0.0300 л = 30 мл``).
+_AMBIGUOUS_QUANTITY_SYMBOLS = frozenset(
+    {"A", "C", "F", "G", "I", "K", "M", "N", "P", "Q", "R", "S", "T", "V", "c", "i", "k", "m", "n", "p", "q", "t", "v"}
+)
+
 
 def _normalise_unit_key(raw: str) -> str:
     value = (raw or "").strip().strip(".,;:")
@@ -424,18 +431,76 @@ def normalize_measurement_text(text: str) -> str:
         lambda match: f"{match.group('base')}e{match.group('exp')}",
         normalized,
     )
-    normalized = re.sub(r"\\(?:text|mathrm)\s*\{([^{}]*)\}", r" \1 ", normalized)
+    # Do not inject whitespace around LaTeX text: in ``V_{\text{final}}`` it is
+    # part of the quantity label, while an existing LaTeX spacing command still
+    # provides the boundary in ``24.31\ \text{g/mol}``.
+    normalized = re.sub(r"\\(?:text|mathrm)\s*\{([^{}]*)\}", r"\1", normalized)
     normalized = re.sub(r"\^\s*\{\s*([-+]?\d+)\s*\}", r"^\1", normalized)
     normalized = re.sub(r"\\[,;!:]|\\\s", " ", normalized)
-    normalized = normalized.replace("{", "").replace("}", "").replace("$", "")
+    normalized = normalized.replace("~", " ").replace("{", "").replace("}", "").replace("$", "\n")
+    normalized = normalized.replace("\\cdot", "·")
     normalized = re.sub(r"\s*\^\s*", "^", normalized)
+    normalized = re.sub(r"\s*·\s*", "·", normalized)
+    normalized = re.sub(r"\s*\*\s*", "*", normalized)
+    # Molar mass and charge-per-amount units are commonly typeset as a product
+    # with an inverse mole.  Canonicalise that notation before matching against
+    # the slash-based unit vocabulary.
+    normalized = re.sub(
+        r"(?P<numerator>kg|кг|g|г|C|Кл)·(?P<denominator>mol|моль)\^-1",
+        r"\g<numerator>/\g<denominator>",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     normalized = re.sub(r"\s*/\s*", "/", normalized)
-    return re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"[^\S\n]+", " ", normalized)
+    return re.sub(r"\n+", "\n", normalized)
+
+
+_ASSIGNMENT_BOUNDARY_RE = re.compile(
+    r"[;$\n]|(?<!\d),(?!\d)|(?<!\d)\.(?!\d)|\b(?:and|и)\b",
+    re.IGNORECASE,
+)
+_BARE_CHEMICAL_FORMULA_RE = re.compile(r"(?:[A-Z][a-z]?\d*)+")
+
+
+def _ambiguous_assignment(text: str, match: re.Match[str]) -> bool:
+    label = match.group("label")
+
+    # A unit at the end of the left-hand expression is not a quantity label.
+    if label not in _AMBIGUOUS_QUANTITY_SYMBOLS and unit_definition(label) is not None:
+        return True
+
+    # Bare species in prose (``масса MnO2 = ...``) name the material, not the
+    # physical quantity.  Quantity notation such as ``m(MnO2)`` remains valid.
+    formula_label = label.translate(_SUBSCRIPT_TRANSLATION)
+    if (
+        "_" not in formula_label
+        and "(" not in formula_label
+        and _BARE_CHEMICAL_FORMULA_RE.fullmatch(formula_label)
+        and not (formula_label[:1] in _AMBIGUOUS_QUANTITY_SYMBOLS and formula_label[1:].isdigit())
+        and (any(char.islower() for char in formula_label) or any(char.isdigit() for char in formula_label))
+    ):
+        return True
+
+    # In ``n1 = c1 V1 = 0.400 mol/L`` the second equality is a substitution,
+    # not a new assignment to V1.  The same rule rejects a denominator unit in
+    # ``c2 = ... / 0.200 L = 0.060 mol/L``.  Work only inside the current math
+    # or prose clause so independent assignments separated by punctuation stay
+    # available to deterministic checks.
+    prefix = text[: match.start()]
+    boundary = -1
+    for boundary_match in _ASSIGNMENT_BOUNDARY_RE.finditer(prefix):
+        boundary = boundary_match.end() - 1
+    clause = prefix[boundary + 1 :]
+    return "=" in clause
 
 
 def extract_assigned_measurements(text: str) -> list[AssignedMeasurement]:
     found: list[AssignedMeasurement] = []
-    for match in _ASSIGNMENT_RE.finditer(normalize_measurement_text(text)):
+    normalized = normalize_measurement_text(text)
+    for match in _ASSIGNMENT_RE.finditer(normalized):
+        if _ambiguous_assignment(normalized, match):
+            continue
         try:
             value = float(match.group("number").replace(",", "."))
         except ValueError:

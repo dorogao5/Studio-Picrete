@@ -113,6 +113,44 @@ def test_latex_compound_unit_matches_unicode_display_unit() -> None:
     assert result["verdict"] == "match"
 
 
+def test_reference_solution_matches_unit_split_by_latex_math_delimiters() -> None:
+    result = compare_answers(
+        "99.7 м²/г; значение соответствует типичному диапазону 10–1000 м²/г.",
+        r"""
+        $S_{уд} \approx 9.9727 \times 10^1 = 99.727$ м$^2$/г.
+        После округления: $S_{уд} \approx 99.7$ м$^2$/г.
+        Значение около $100$ м$^2$/г лежит в интервале $10$–$1000$ м$^2$/г.
+        """,
+        tolerance_pct=0.5,
+        context="Оцените диапазон 10–1000 м$^2$/г.",
+        allow_extra_numbers=True,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 1
+    assert result["missing_reference_units"] == []
+
+
+def test_latex_text_subscript_and_escaped_percent_match_plain_result() -> None:
+    result = compare_answers(
+        "w_Al = 31.73 %",
+        r"$результат\ w_{\mathrm{Al}} = 31.73$\%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+
+
+def test_latex_display_delimiters_do_not_obscure_numeric_answer() -> None:
+    result = compare_answers(
+        "S = 99.7 м²/г",
+        r"\(S = 99.7\ \text{м}^2/\text{г}\)",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+
+
 def test_explicit_quantity_labels_prevent_same_unit_value_swaps() -> None:
     result = compare_answers(
         "m_start = 5 г; m_end = 3 г",
