@@ -124,6 +124,12 @@ export default function Playground() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (assistantId && selectedId !== assistantId && assistants.some((item) => item.id === assistantId)) {
+      setSelectedId(assistantId);
+    }
+  }, [assistantId, assistants, selectedId, setSelectedId]);
+
   return (
     <div className="max-w-6xl space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
