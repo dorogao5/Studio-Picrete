@@ -62,7 +62,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v13-cross-answer-lexical-audit"
+VALIDATION_POLICY_VERSION = "evidence-gate-v14-reference-anchored-consensus"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {
@@ -78,6 +78,7 @@ CRITIC_REQUIRED_CHECKS = frozenset(
 SEMANTIC_ENTAILMENT_ANSWER_FORMATS = frozenset({"formula", "text"})
 SEMANTIC_ENTAILMENT_BASIS = "subject_critic_semantic_entailment"
 SOLUTION_BACKED_ENTAILMENT_BASIS = "solution_backed_subject_critic"
+REFERENCE_ANCHORED_ENTAILMENT_BASIS = "reference_anchored_subject_critic"
 SOLVER_EVIDENCE_CHAR_LIMIT = 4000
 DETERMINISTIC_NUMERIC_BASIS = "deterministic_numeric_tolerance"
 NUMERIC_RELATION_CHECKS = frozenset(
@@ -1357,6 +1358,25 @@ def _solution_backed_entailment_candidate(
     )
 
 
+def _reference_anchored_entailment_candidate(
+    solver: dict,
+    verifier: dict,
+    cross_comparison: dict,
+    *,
+    chemistry_verified: bool = False,
+) -> bool:
+    """Let the critic resolve cross-format noise after two canonical matches."""
+
+    return bool(
+        chemistry_verified
+        and _solver_outcome_complete(solver)
+        and _solver_outcome_complete(verifier)
+        and solver.get("status") == "match"
+        and verifier.get("status") == "match"
+        and cross_comparison.get("verdict") in {"incomplete", "uncertain"}
+    )
+
+
 def _representation_only_incomplete(comparison: dict) -> bool:
     verdict = comparison.get("verdict")
     if verdict in {"match", "uncertain"}:
@@ -1923,6 +1943,12 @@ async def run_validation(
         cross_comparison,
         chemistry_verified=chemistry.get("admission_effect") == "pass",
     )
+    reference_anchored_entailment_candidate = _reference_anchored_entailment_candidate(
+        solver,
+        verifier,
+        cross_comparison,
+        chemistry_verified=chemistry.get("admission_effect") == "pass",
+    )
 
     critic: dict = {"status": "skipped", "checks": {}, "issues": []}
     if (
@@ -1933,6 +1959,7 @@ async def run_validation(
             strict_comparison_candidate
             or semantic_entailment_candidate
             or solution_backed_entailment_candidate
+            or reference_anchored_entailment_candidate
         )
     ):
         critic = await critic_check(
@@ -1957,12 +1984,22 @@ async def run_validation(
     critic_confirmed = _critic_confirms_semantic_entailment(critic)
     solution_backed_entailment_applied = bool(solution_backed_entailment_candidate and critic_confirmed)
     semantic_entailment_applied = bool(semantic_entailment_candidate and critic_confirmed)
+    reference_anchored_entailment_applied = bool(reference_anchored_entailment_candidate and critic_confirmed)
     entailment_basis = (
         SOLUTION_BACKED_ENTAILMENT_BASIS
         if solution_backed_entailment_applied
-        else SEMANTIC_ENTAILMENT_BASIS
+        else (
+            REFERENCE_ANCHORED_ENTAILMENT_BASIS
+            if reference_anchored_entailment_applied
+            else SEMANTIC_ENTAILMENT_BASIS
+        )
     )
-    if solution_backed_entailment_applied or semantic_entailment_applied:
+    entailment_applied = bool(
+        solution_backed_entailment_applied
+        or semantic_entailment_applied
+        or reference_anchored_entailment_applied
+    )
+    if entailment_applied:
         solver = _promote_solver_report(solver, basis=entailment_basis)
         verifier = _promote_solver_report(verifier, basis=entailment_basis)
         cross_comparison = _promote_comparison(cross_comparison, basis=entailment_basis)
@@ -1986,9 +2023,7 @@ async def run_validation(
         context=statement,
         allow_extra_numbers=True,
     )
-    if (
-        solution_backed_entailment_applied or semantic_entailment_applied
-    ) and reference_solution_check["verdict"] == "uncertain":
+    if entailment_applied and reference_solution_check["verdict"] == "uncertain":
         reference_solution_check = _promote_comparison(reference_solution_check, basis=entailment_basis)
     if reference_solution_check["verdict"] != "match":
         reasons.append("Эталонное решение не содержит полный финальный ответ")

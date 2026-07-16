@@ -531,6 +531,36 @@ def test_representation_safe_answer_and_lexical_only_cross_difference_reach_crit
     )
 
 
+def test_two_canonical_matches_anchor_numeric_cross_format_audit() -> None:
+    report = {
+        "status": "match",
+        "answer": "c2=0.0600 моль/л; n1=n2=0.0120 моль; V=15.0 мл",
+        "solution": "Полное независимое решение",
+        "comparison": {"verdict": "match"},
+    }
+    cross = {
+        "verdict": "incomplete",
+        "matched_count": 3,
+        "required_count": 4,
+        "missing_reference_groups": [[15.0]],
+        "unexpected_solver_numbers": [],
+        "missing_text_claims": ["n1 = n2"],
+    }
+
+    assert validation._reference_anchored_entailment_candidate(
+        report, report, cross, chemistry_verified=True
+    )
+    assert not validation._reference_anchored_entailment_candidate(
+        report, report, cross, chemistry_verified=False
+    )
+    assert not validation._reference_anchored_entailment_candidate(
+        {**report, "status": "incomplete"}, report, cross, chemistry_verified=True
+    )
+    assert not validation._reference_anchored_entailment_candidate(
+        report, report, {**cross, "verdict": "mismatch"}, chemistry_verified=True
+    )
+
+
 def test_semantic_critic_never_receives_a_genuinely_missing_formula_result() -> None:
     report = {
         "status": "incomplete",
