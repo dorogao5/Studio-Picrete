@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.validation import compare_answers
+from app.services.validation import compare_answers, extract_number_groups
 
 
 def test_numeric_comparison_requires_every_reference_output() -> None:
@@ -179,6 +179,13 @@ def test_latex_and_unicode_numeric_subscripts_bind_the_same_quantities() -> None
     assert result["verdict"] == "match"
     assert result["matched_count"] == result["required_count"] == 4
 
+    chained_verifier = (
+        "c₂ = 0.150 моль/л; n₁ = n₂ = 0.0300 моль; объём исходного раствора для обратной проверки: 25.0 мл"
+    )
+    chained_result = compare_answers(reference, chained_verifier, tolerance_pct=0.5, context=statement)
+    assert chained_result["verdict"] == "match"
+    assert chained_result["matched_count"] == chained_result["required_count"] == 4
+
     missing_reverse_volume = compare_answers(
         reference,
         "c₂ = 0.150 моль/л; n₁ = 0.0300 моль; n₂ = 0.0300 моль",
@@ -224,6 +231,57 @@ def test_numeric_subscript_binding_still_rejects_swapped_concentrations() -> Non
     assert result["verdict"] != "match"
 
 
+@pytest.mark.parametrize(
+    ("reference", "solver"),
+    [
+        (
+            "c₂=0.150 моль/л; n₁=0.0300 моль; n₂=0.0300 моль; V=25.0 мл",
+            "c₂=0.150 моль/л; n₁ = n₂ = 0.0300 моль; V=25.0 мл",
+        ),
+        (
+            "c₂=0.150 моль/л; n₁ = n₂ = 0.0300 моль; V=25.0 мл",
+            "c₂=0.150 моль/л; n₁=0.0300 моль; n₂=0.0300 моль; V=25.0 мл",
+        ),
+    ],
+)
+def test_chained_equal_labels_expand_to_separate_required_outputs(reference: str, solver: str) -> None:
+    result = compare_answers(reference, solver, tolerance_pct=0.5)
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 4
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "n=c V=0.0300 моль",
+        "n₁+n₂=0.0300 моль",
+        "n₁/n₂=0.0300 моль",
+        "n+n₁=n₂=0.0300 моль",
+        "n=c V=n₁=n₂=0.0300 моль",
+    ],
+)
+def test_arbitrary_formula_operands_are_not_expanded_as_equal_labels(expression: str) -> None:
+    assert extract_number_groups(expression) == [[0.03]]
+
+
+@pytest.mark.parametrize(
+    "solver",
+    [
+        "n₁ = n₂ = 0.0300 г",
+        "n₁ = n₂ = 0.0400 моль",
+    ],
+)
+def test_chained_equal_labels_preserve_unit_and_value_protection(solver: str) -> None:
+    result = compare_answers(
+        "n₁=0.0300 моль; n₂=0.0300 моль",
+        solver,
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+
+
 def test_gravimetric_factor_and_mass_fraction_notation_variants_match() -> None:
     result = compare_answers(
         r"$F_g = 0.2032;~ m(\mathrm{Ni}) = 0.04538~\text{г};~ w(\mathrm{Ni}) = 9.08~\%$",
@@ -234,6 +292,28 @@ def test_gravimetric_factor_and_mass_fraction_notation_variants_match() -> None:
     assert result["verdict"] == "match"
     assert result["matched_count"] == result["required_count"] == 3
     assert result["reference_units"] == ["%", "г"]
+
+
+def test_element_subscript_labels_match_parenthesized_analytical_notation() -> None:
+    result = compare_answers(
+        r"$F_g=0.2032;~m(\mathrm{Ni})=0.04538~\text{г};~w(\mathrm{Ni})=9.08~\%$",
+        "гравиметрический фактор F_g = 0.2031, масса никеля m_Ni = 0.04538 г, массовая доля никеля ω_Ni = 9.076%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 3
+
+
+@pytest.mark.parametrize("suffix", ["rate", "Max", "NI", "Nickel"])
+def test_omega_alias_rejects_non_element_suffixes(suffix: str) -> None:
+    result = compare_answers(
+        f"w_{suffix}=9.08 %",
+        f"ω_{suffix}=9.08 %",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
 
 
 @pytest.mark.parametrize(

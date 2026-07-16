@@ -177,10 +177,13 @@ class _NumberOccurrence:
     label: str | None
 
 
-_EXPLICIT_LABEL_RE = re.compile(
-    r"([a-zа-яёζδφω][\wа-яёζδφω]*(?:\s*\([^()]+\))?)\s*=\s*$",
+_LABEL_TOKEN_PATTERN = r"[a-zа-яёζδφω][\wа-яёζδφω]*(?:\s*\([^()]+\))?"
+_EXPLICIT_LABEL_RE = re.compile(rf"({_LABEL_TOKEN_PATTERN})\s*=\s*$", re.IGNORECASE)
+_CHAINED_EQUAL_LABELS_RE = re.compile(
+    rf"({_LABEL_TOKEN_PATTERN})\s*=\s*({_LABEL_TOKEN_PATTERN})\s*=\s*$",
     re.IGNORECASE,
 )
+_UNSAFE_CHAIN_PREFIX_RE = re.compile(r"[=+\-*/^<>~≈→←↔⇌()\[\]{}]|\d")
 _CLAIM_SPLIT_RE = re.compile(r"[;\n.!?]+")
 _OUTPUT_CUE_RE = re.compile(
     r"(?<!\w)(?:ответ|итог|результат|получаем|получен[оаы]?|требуется|нужн[оа]|составляет|равен|равна|равно)(?!\w)",
@@ -278,9 +281,13 @@ def _unit_after(normalized: str, number_end: int) -> tuple[str | None, int | Non
 
 
 def _canonical_quantity_label(value: str) -> str:
-    translated = value.translate(_SUBSCRIPTS).casefold().strip()
-    mass_fraction_omega = re.fullmatch(r"ω(?:\s*\([^()]+\))?", translated) is not None
-    candidate = translated
+    translated = value.translate(_SUBSCRIPTS).strip()
+    mass_fraction_omega = (
+        translated == "ω"
+        or re.fullmatch(r"ω\s*\(\s*[A-Z][a-z]?\s*\)", translated) is not None
+        or re.fullmatch(r"ω_[A-Z][a-z]?", translated) is not None
+    )
+    candidate = translated.casefold()
     candidate = re.sub(r"[_\s(){}]", "", candidate)
     # Latin w and Greek omega are the two conventional notations for mass
     # fraction. Restrict the alias to plain omega or omega(element), so indexed
@@ -290,15 +297,27 @@ def _canonical_quantity_label(value: str) -> str:
     return candidate
 
 
-def _explicit_label_before(normalized: str, number_start: int) -> str | None:
+def _explicit_labels_before(normalized: str, number_start: int) -> tuple[str, ...]:
     segment = re.split(r"[;\n,.!?]", normalized[:number_start])[-1]
-    match = _EXPLICIT_LABEL_RE.search(segment)
-    if match is None:
-        return None
-    candidate = _canonical_quantity_label(match.group(1))
-    # In ``... / 100 mL = 0.010 mol/L`` the token before ``=`` is a
-    # denominator unit, not the label of the result.
-    return None if unit_definition(candidate) is not None else candidate
+    chained = _CHAINED_EQUAL_LABELS_RE.search(segment)
+    if chained is not None and _UNSAFE_CHAIN_PREFIX_RE.search(segment[: chained.start()]) is None:
+        raw_labels = chained.groups()
+    else:
+        explicit = _EXPLICIT_LABEL_RE.search(segment)
+        if explicit is None:
+            return ()
+        raw_labels = (explicit.group(1),)
+    labels: list[str] = []
+    for raw_label in raw_labels:
+        candidate = _canonical_quantity_label(raw_label)
+        # In ``... / 100 mL = 0.010 mol/L`` the token before ``=`` is a
+        # denominator unit, not the label of the result. A chained equality is
+        # expanded only when every term is a real quantity label.
+        if unit_definition(candidate) is not None:
+            return ()
+        if candidate not in labels:
+            labels.append(candidate)
+    return tuple(labels)
 
 
 def _number_occurrences(text: str) -> tuple[str, list[_NumberOccurrence]]:
@@ -312,15 +331,17 @@ def _number_occurrences(text: str) -> tuple[str, list[_NumberOccurrence]]:
         except ValueError:
             continue
         unit, unit_end = _unit_after(normalized, match.end())
-        occurrences.append(
+        labels: tuple[str | None, ...] = _explicit_labels_before(normalized, match.start()) or (None,)
+        occurrences.extend(
             _NumberOccurrence(
                 value=value,
                 start=match.start(),
                 end=match.end(),
                 unit=unit,
                 unit_end=unit_end,
-                label=_explicit_label_before(normalized, match.start()),
+                label=label,
             )
+            for label in labels
         )
     return normalized, occurrences
 
