@@ -58,9 +58,10 @@ async def tutor_chat(
     try:
         require_decision_model(model, allow_advisory=body.preview)
     except ModelUsePolicyError as err:
+        detail = str(err) if body.preview else f"{err}. Для тестового запуска передайте preview=true."
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"{err}. Для тестового запуска передайте preview=true.",
+            detail,
         ) from err
     prompt = await _resolve_tutor_prompt(db, assistant, body.prompt_version_id)
     system_prompt = prompt.system_prompt if prompt else FALLBACK_TUTOR_PROMPT.format(discipline=assistant.discipline)
