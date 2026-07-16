@@ -154,6 +154,58 @@ def test_structured_stoichiometry_matches_ionic_species_by_charge() -> None:
     assert result.evidence["limiting_reagents"] == ["Fe^3+"]
 
 
+def test_stoichiometry_accepts_explicit_excess_medium_species() -> None:
+    result = StoichiometryCheck().evaluate(
+        ChemistryTask(
+            "Неорганическая химия",
+            "К дихромату и иодиду добавили H+ в явном избытке.",
+            facts={
+                "stoichiometry": {
+                    "reaction": "Cr2O7^2- + 6I^- + 14H+ -> 2Cr^3+ + 3I2 + 7H2O",
+                    "reactant_amounts": {"Cr2O7^2-": "0.00500 mol", "I^-": "0.0100 mol"},
+                    "excess_reactants": ["H+"],
+                    "target_species": "I2",
+                    "target_amount": "0.00500 mol",
+                    "limiting_reagent": "I^-",
+                }
+            },
+        )
+    )
+
+    assert result.state == CheckState.PASS
+    assert result.evidence["limiting_reagents"] == ["I^-"]
+    assert result.evidence["excess_reactants"] == ["H+"]
+
+
+@pytest.mark.parametrize(
+    ("excess_reactants", "statement"),
+    [
+        ([], "К дихромату и иодиду добавили кислоту."),
+        (["H+"], "К дихромату и иодиду добавили кислоту."),
+    ],
+)
+def test_stoichiometry_does_not_assume_an_unquantified_reagent_is_excess(
+    excess_reactants: list[str], statement: str
+) -> None:
+    result = StoichiometryCheck().evaluate(
+        ChemistryTask(
+            "Неорганическая химия",
+            statement,
+            facts={
+                "stoichiometry": {
+                    "reaction": "Cr2O7^2- + 6I^- + 14H+ -> 2Cr^3+ + 3I2 + 7H2O",
+                    "reactant_amounts": {"Cr2O7^2-": "0.00500 mol", "I^-": "0.0100 mol"},
+                    "excess_reactants": excess_reactants,
+                    "target_species": "I2",
+                    "target_amount": "0.00500 mol",
+                }
+            },
+        )
+    )
+
+    assert result.state == CheckState.INDETERMINATE
+
+
 def test_dilution_material_balance_works_across_unit_scales() -> None:
     result = DilutionCheck().evaluate(
         ChemistryTask(
@@ -383,6 +435,7 @@ def test_dlvo_checks_debye_length_and_derjaguin_geometry() -> None:
         ChemistryTask(
             "Коллоидная химия",
             "Оценка двойного электрического слоя",
+            answer="κ^-1 = 3.04 nm; h/a = 0.020; приближение Дерягина допустимо.",
             facts={
                 "dlvo": {
                     "debye_model": "water_1_1_25c",
@@ -398,6 +451,36 @@ def test_dlvo_checks_debye_length_and_derjaguin_geometry() -> None:
 
     assert result.state == CheckState.PASS
     assert result.evidence["expected_debye_length_nm"] == pytest.approx(3.04)
+
+
+@pytest.mark.parametrize(
+    ("answer", "claim"),
+    [
+        ("κ^-1 = 3.04 nm; приближение Дерягина допустимо.", True),
+        ("κ^-1 = 3.04 nm; h/a = 0.020; приближение Дерягина недопустимо.", True),
+        ("κ^-1 = 3.04 nm; h/a = 0.020; приближение Дерягина допустимо.", False),
+    ],
+)
+def test_dlvo_requires_ratio_and_consistent_applicability_in_short_answer(answer: str, claim: bool) -> None:
+    result = DlvoCheck().evaluate(
+        ChemistryTask(
+            "Коллоидная химия",
+            "Оценка двойного электрического слоя",
+            answer=answer,
+            facts={
+                "dlvo": {
+                    "debye_model": "water_1_1_25c",
+                    "ionic_strength": "0.0100 mol/L",
+                    "debye_length": "3.04 nm",
+                    "particle_radius": "100 nm",
+                    "separation": "2 nm",
+                    "claims_derjaguin": claim,
+                }
+            },
+        )
+    )
+
+    assert result.state == CheckState.FAIL
 
 
 def test_dlvo_refuses_hidden_medium_assumption() -> None:

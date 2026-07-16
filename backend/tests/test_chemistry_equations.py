@@ -25,6 +25,18 @@ def test_redox_equation_checks_atoms_and_charge() -> None:
     assert result.charge_delta == 0
 
 
+def test_plain_equals_is_supported_as_a_single_reaction_separator() -> None:
+    result = check_reaction_balance("NO + KMnO4 = KNO3 + MnO2")
+
+    assert result.balanced is True
+
+
+@pytest.mark.parametrize("equation", ["H2 = O2 = H2O", "x = 1", "= H2O"])
+def test_plain_equals_does_not_enable_ambiguous_or_nonchemical_expressions(equation: str) -> None:
+    with pytest.raises(ChemistryParseError):
+        check_reaction_balance(equation)
+
+
 def test_unicode_subscripts_and_superscript_charge_remain_distinct() -> None:
     sulfate = parse_species("SO₄²⁻")
     ammonium = parse_species("NH₄⁺")
@@ -72,7 +84,31 @@ def test_reaction_candidate_uses_parser_for_prefix_and_preserves_full_stoichiome
     assert check_reaction_balance(candidates[0]).balanced is True
 
 
+def test_reaction_candidate_accepts_one_parseable_handbook_equals() -> None:
+    candidates = reaction_candidates("Молекулярное уравнение: NO + KMnO4 = KNO3 + MnO2.")
+
+    assert candidates == ["NO + KMnO4 = KNO3 + MnO2"]
+    assert check_reaction_balance(candidates[0]).balanced is True
+
+
+def test_reaction_candidate_does_not_treat_calculation_or_equals_chain_as_reaction() -> None:
+    assert reaction_candidates("n = cV = 0.030 mol") == []
+    assert reaction_candidates("H2 = O2 = H2O") == []
+
+
 def test_unsupported_reaction_notation_remains_a_blocking_candidate() -> None:
     text = "По схеме: перманганат + Fe^2+ -> продукты, затем продолжаем расчёт"
 
     assert reaction_candidates(text) == [text]
+
+
+def test_oxidation_state_transition_in_prose_is_not_a_reaction_candidate() -> None:
+    text = "Окислитель: Cr2O7^2- (Cr: +6 → +3). Восстановитель: I^- (I: -1 → 0)."
+
+    assert reaction_candidates(text) == []
+
+
+def test_oxidation_state_note_does_not_hide_a_real_equation() -> None:
+    text = "Cr: +6 → +3; Cr2O7^2- + 14H+ + 6e- → 2Cr^3+ + 7H2O"
+
+    assert reaction_candidates(text) == ["Cr2O7^2- + 14H+ + 6e- → 2Cr^3+ + 7H2O"]

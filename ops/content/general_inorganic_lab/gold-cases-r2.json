@@ -1,7 +1,7 @@
 {
   "schema_version": "picrete-chemistry-gold-cases-v1",
   "content_version": "LAB-CURATED-2026-07-R3",
-  "validator_version": "chemistry-evidence-v2",
+  "validator_version": "chemistry-evidence-v3",
   "cases": [
     {
       "id": "inorg-units-pass",

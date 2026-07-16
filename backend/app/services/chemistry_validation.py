@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Any, Mapping, Protocol
 
 
-CHEMISTRY_VALIDATION_VERSION = "chemistry-evidence-v2"
+CHEMISTRY_VALIDATION_VERSION = "chemistry-evidence-v3"
 
 
 class ChemistryDiscipline(StrEnum):

@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.task_evidence import evidence_matches_task
 from app.services.validation import data_check, run_validation, source_lineage_check
 
@@ -158,6 +160,132 @@ def test_source_lineage_accepts_exact_kb_header_bound_to_trusted_document() -> N
 
     assert result["status"] == "ok"
     assert result["unbound_sources"] == []
+
+
+def test_source_lineage_accepts_exact_kb_heading_copied_with_markdown_marker() -> None:
+    title = "Задачник Свиридова [справочный источник] — § 14. p-Элементы V группы"
+    result = source_lineage_check(
+        [{"sheet_title": f"### {title}", "values": ["NO + KMnO4 = MnO2 + KNO3"]}],
+        [
+            {
+                "title": title,
+                "source_document_id": "doc-sviridov",
+                "source_document_exists": True,
+                "source_authority": "reference",
+                "source_version": "launch-2026",
+                "source_kind": "kb_chunk",
+            }
+        ],
+        f"### {title}\nNO + KMnO4 = MnO2 + KNO3",
+    )
+
+    assert result["status"] == "ok"
+    assert result["unbound_sources"] == []
+
+
+@pytest.mark.parametrize("copied", ["## {title}", "### {title} — продолжение"])
+def test_source_lineage_does_not_fuzz_markdown_prefixed_kb_titles(copied: str) -> None:
+    title = "Задачник Свиридова [справочный источник] — § 14"
+    rendered = copied.format(title=title)
+    result = source_lineage_check(
+        [{"sheet_title": rendered, "values": ["NO + KMnO4 = MnO2 + KNO3"]}],
+        [
+            {
+                "title": title,
+                "source_document_id": "doc-sviridov",
+                "source_document_exists": True,
+                "source_authority": "reference",
+                "source_version": "launch-2026",
+                "source_kind": "kb_chunk",
+            }
+        ],
+        f"### {title}\nNO + KMnO4 = MnO2 + KNO3",
+    )
+
+    assert result["status"] == "warn"
+
+
+def test_source_lineage_accepts_rendered_reference_sheet_heading() -> None:
+    base_title = "LAB-04 · Расчёты для растворов"
+    rendered_title = f"{base_title} (Формулы, справочный источник)"
+    result = source_lineage_check(
+        [{"sheet_title": rendered_title, "values": ["c = n/V"]}],
+        [
+            {
+                "title": base_title,
+                "source_document_id": "doc-lab-04",
+                "source_document_exists": True,
+                "source_authority": "reference",
+                "source_version": "2026-r3",
+            }
+        ],
+        f"## СПРАВОЧНЫЕ МАТЕРИАЛЫ КУРСА\n### {rendered_title}\nc = n/V",
+    )
+
+    assert result["status"] == "ok"
+    assert result["unbound_sources"] == []
+
+
+def test_source_lineage_rendered_alias_requires_exact_grounding_heading() -> None:
+    base_title = "LAB-04 · Расчёты для растворов"
+    rendered_title = f"{base_title} (Формулы, справочный источник)"
+    sheet = {
+        "title": base_title,
+        "source_document_id": "doc-lab-04",
+        "source_document_exists": True,
+        "source_authority": "reference",
+        "source_version": "2026-r3",
+    }
+
+    absent = source_lineage_check(
+        [{"sheet_title": rendered_title, "values": ["c = n/V"]}],
+        [sheet],
+        f"### {base_title}\nc = n/V",
+    )
+    substring = source_lineage_check(
+        [{"sheet_title": rendered_title, "values": ["c = n/V"]}],
+        [sheet],
+        f"### {rendered_title} — дополнение\nc = n/V",
+    )
+
+    assert absent["status"] == "warn"
+    assert absent["unbound_sources"] == [rendered_title]
+    assert substring["status"] == "warn"
+    assert substring["unbound_sources"] == [rendered_title]
+
+
+def test_source_lineage_rendered_alias_does_not_override_authority_or_document_checks() -> None:
+    base_title = "LAB-04 · Расчёты для растворов"
+    rendered_title = f"{base_title} (Формулы, справочный источник)"
+    data_used = [{"sheet_title": rendered_title, "values": ["c = n/V"]}]
+    provenance = f"### {rendered_title}\nc = n/V"
+
+    for metadata in (
+        {
+            "title": base_title,
+            "source_document_id": "missing",
+            "source_document_exists": False,
+            "source_authority": "reference",
+            "source_version": "2026-r3",
+        },
+        {
+            "title": base_title,
+            "source_document_id": "doc-lab-04",
+            "source_document_exists": True,
+            "source_authority": "unverified",
+            "source_version": "2026-r3",
+        },
+        {
+            "title": base_title,
+            "source_document_id": "doc-lab-04",
+            "source_document_exists": True,
+            "source_authority": "course_lecture",
+            "source_version": "2026-r3",
+        },
+    ):
+        result = source_lineage_check(data_used, [metadata], provenance)
+        assert result["status"] == "warn"
+        assert result["unbound_sources"] == [rendered_title]
 
 
 def test_source_lineage_does_not_accept_title_substring_as_document_lineage() -> None:

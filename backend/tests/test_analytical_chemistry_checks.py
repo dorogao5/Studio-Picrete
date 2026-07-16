@@ -17,7 +17,7 @@ def _gravimetry_facts(**changes: object) -> dict:
         "weighing_form_stoichiometric_coefficient": 1,
         "analyte_molar_mass": "55.845 g/mol",
         "weighing_form_molar_mass": "159.687 g/mol",
-        "gravimetric_factor": 0.69944,
+        "gravimetric_factor": 0.69943,
         "weighing_form_mass": "0.5000 g",
         "analyte_mass": "0.34972 g",
     }
@@ -67,6 +67,86 @@ def test_gravimetry_checks_factor_and_mass_chain() -> None:
         2 * 55.845 / 159.687
     )
     assert result.evidence["expected_analyte_mass_kg"] == pytest.approx(0.00034972, rel=1e-4)
+    assert result.evidence["rounding_audit"]["gravimetric_factor"]["status"] == "pass"
+
+
+@pytest.mark.parametrize(
+    ("factor", "expected_at_precision"),
+    [
+        (0.20315, "0.20314"),
+        (0.2032, "0.2031"),
+        (0.3622, "0.3621"),
+    ],
+)
+def test_gravimetry_rejects_close_but_impossibly_rounded_factor(
+    factor: float, expected_at_precision: str
+) -> None:
+    if factor == 0.3622:
+        statement = (
+            "Получено m(G)=1.0000 g. Используйте M(X)=36.2084 g/mol "
+            "и M(G)=100.000 g/mol; стехиометрия 1:1."
+        )
+        facts = _gravimetry_facts(
+            analyte_stoichiometric_coefficient=1,
+            analyte_molar_mass="36.2084 g/mol",
+            weighing_form_molar_mass="100.000 g/mol",
+            gravimetric_factor=factor,
+            weighing_form_mass="1.0000 g",
+            analyte_mass="0.36208 g",
+        )
+    else:
+        statement = (
+            "Получено m(Ni(Dm)2)=0.2234 g. Используйте M(Ni)=58.69 g/mol "
+            "и M(Ni(Dm)2)=288.91 g/mol; стехиометрия 1:1."
+        )
+        facts = _gravimetry_facts(
+            analyte_stoichiometric_coefficient=1,
+            analyte_molar_mass="58.69 g/mol",
+            weighing_form_molar_mass="288.91 g/mol",
+            gravimetric_factor=factor,
+            weighing_form_mass="0.2234 g",
+            analyte_mass="0.04538 g",
+        )
+
+    result = GravimetryCheck().evaluate(_gravimetry_task(statement=statement, facts=facts))
+
+    assert result.state == CheckState.FAIL
+    factor_error = next(
+        error for error in result.evidence["rounding_errors"] if error["field"] == "gravimetric_factor"
+    )
+    assert factor_error["expected_at_declared_precision"] == expected_at_precision
+
+
+def test_gravimetry_accepts_correct_rounding_at_input_precision_or_better() -> None:
+    statement = (
+        "Получено m(Ni(Dm)2)=0.2234 g. Используйте M(Ni)=58.69 g/mol "
+        "и M(Ni(Dm)2)=288.91 g/mol; стехиометрия 1:1."
+    )
+    four_digits = _gravimetry_facts(
+        analyte_stoichiometric_coefficient=1,
+        analyte_molar_mass="58.69 g/mol",
+        weighing_form_molar_mass="288.91 g/mol",
+        gravimetric_factor=0.2031,
+        weighing_form_mass="0.2234 g",
+        analyte_mass="0.04538 g",
+    )
+    five_digits = _gravimetry_facts(
+        analyte_stoichiometric_coefficient=1,
+        analyte_molar_mass="58.69 g/mol",
+        weighing_form_molar_mass="288.91 g/mol",
+        gravimetric_factor=0.20314,
+        weighing_form_mass="0.2234 g",
+        analyte_mass="0.045382 g",
+    )
+
+    assert (
+        GravimetryCheck().evaluate(_gravimetry_task(statement=statement, facts=four_digits)).state
+        == CheckState.PASS
+    )
+    assert (
+        GravimetryCheck().evaluate(_gravimetry_task(statement=statement, facts=five_digits)).state
+        == CheckState.PASS
+    )
 
 
 @pytest.mark.parametrize(
@@ -202,7 +282,7 @@ def test_fact_registry_and_admission_require_explicit_new_check() -> None:
     evidence = chemistry_admission_evidence(
         discipline="Аналитическая химия",
         statement=_gravimetry_task().statement,
-        reference_solution="F=0.69944; m(Fe)=0.34972 g.",
+        reference_solution="F=0.69943; m(Fe)=0.34972 g.",
         answer="0.34972 g",
         topic="Гравиметрия",
         facts=facts,

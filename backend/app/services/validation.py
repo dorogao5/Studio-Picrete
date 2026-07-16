@@ -3,6 +3,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import snowballstemmer
 
@@ -184,6 +185,19 @@ _CHAINED_EQUAL_LABELS_RE = re.compile(
     re.IGNORECASE,
 )
 _UNSAFE_CHAIN_PREFIX_RE = re.compile(r"[=+\-*/^<>~≈→←↔⇌()\[\]{}]|\d")
+_CHEMICAL_FORMULA_PATTERN = r"(?:[A-Z][a-z]?\d*|\((?:[A-Z][a-z]?\d*)+\)\d*)+"
+_NAMED_MASS_FRACTION_RE = re.compile(
+    rf"(?<!\w)(?i:массов(?:ая|ую)\s+дол(?:я|ю))\s+(?P<formula>{_CHEMICAL_FORMULA_PATTERN})\s*=\s*$",
+)
+_NAMED_MASS_RE = re.compile(
+    rf"(?<!\w)(?i:масс(?:а|у))\s+(?P<formula>{_CHEMICAL_FORMULA_PATTERN})\s*=\s*$",
+)
+_ELEMENT_SYMBOLS = frozenset(
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
+    "Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu "
+    "Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg "
+    "Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og".split()
+)
 _CLAIM_SPLIT_RE = re.compile(r"[;\n.!?]+")
 _OUTPUT_CUE_RE = re.compile(
     r"(?<!\w)(?:ответ|итог|результат|получаем|получен[оаы]?|требуется|нужн[оа]|составляет|равен|равна|равно)(?!\w)",
@@ -297,8 +311,30 @@ def _canonical_quantity_label(value: str) -> str:
     return candidate
 
 
+def _named_quantity_label(segment: str) -> str | None:
+    """Bind a small set of unambiguous Russian quantity names to symbols.
+
+    Models often render ``m_MgO`` as ``масса MgO`` and ``w_MgO`` as
+    ``массовая доля MgO``.  The chemical formula is mandatory and must be the
+    final token before ``=``; free prose such as ``масса образца`` therefore
+    cannot silently acquire a reference label.
+    """
+
+    for pattern, symbol in ((_NAMED_MASS_FRACTION_RE, "w"), (_NAMED_MASS_RE, "m")):
+        match = pattern.search(segment)
+        if match is None:
+            continue
+        formula = match.group("formula")
+        if all(element in _ELEMENT_SYMBOLS for element in re.findall(r"[A-Z][a-z]?", formula)):
+            return _canonical_quantity_label(f"{symbol}({formula})")
+    return None
+
+
 def _explicit_labels_before(normalized: str, number_start: int) -> tuple[str, ...]:
     segment = re.split(r"[;\n,.!?]", normalized[:number_start])[-1]
+    named_quantity = _named_quantity_label(segment)
+    if named_quantity is not None:
+        return (named_quantity,)
     chained = _CHAINED_EQUAL_LABELS_RE.search(segment)
     if chained is not None and _UNSAFE_CHAIN_PREFIX_RE.search(segment[: chained.start()]) is None:
         raw_labels = chained.groups()
@@ -397,6 +433,71 @@ def _is_equivalent_unit_representation(
         if current.unit_end is None or re.match(r"\s*[)\]]", normalized[current.unit_end :]) is None:
             return False
     return True
+
+
+def _significant_digits(token: str) -> int | None:
+    """Return explicit significant digits, rejecting ambiguous trailing-zero integers."""
+
+    unsigned = token.strip().lower().lstrip("+-")
+    mantissa = unsigned.split("e", 1)[0]
+    digits = mantissa.replace(".", "").lstrip("0")
+    if not digits:
+        return None
+    if "." not in mantissa and "e" not in unsigned and mantissa.endswith("0"):
+        return None
+    return len(digits)
+
+
+def _is_safe_rounded_value(rounded: _NumberOccurrence, exact: _NumberOccurrence, normalized: str) -> bool:
+    rounded_token = normalized[rounded.start : rounded.end]
+    exact_token = normalized[exact.start : exact.end]
+    rounded_digits = _significant_digits(rounded_token)
+    exact_digits = _significant_digits(exact_token)
+    if rounded_digits is None or exact_digits is None or rounded_digits >= exact_digits or exact.value == 0:
+        return False
+    try:
+        exact_decimal = Decimal(exact_token)
+        rounded_decimal = Decimal(rounded_token)
+        quantum = Decimal(1).scaleb(exact_decimal.copy_abs().adjusted() - rounded_digits + 1)
+        return exact_decimal.quantize(quantum, rounding=ROUND_HALF_UP) == rounded_decimal
+    except (InvalidOperation, ValueError):
+        return False
+
+
+def _is_parenthetical_same_quantity(
+    left: _NumberOccurrence,
+    right: _NumberOccurrence,
+    normalized: str,
+) -> bool:
+    """Recognize a compact ``value unit (value unit)`` restatement only."""
+
+    first, second = sorted((left, right), key=lambda occurrence: occurrence.start)
+    if first.unit is None or second.unit is None or first.unit != second.unit:
+        return False
+    if first.label is not None and second.label is not None and first.label != second.label:
+        return False
+    if first.unit_end is None or second.unit_end is None:
+        return False
+    opening = normalized[first.unit_end : second.start]
+    if re.fullmatch(r"\s*[\[(]\s*", opening) is None:
+        return False
+    return re.match(r"\s*[)\]]", normalized[second.unit_end :]) is not None
+
+
+def _is_harmless_rounded_duplicate(
+    candidate: _NumberOccurrence,
+    matched: _NumberOccurrence,
+    reference: _NumberOccurrence,
+    normalized: str,
+) -> bool:
+    """Allow only an explicitly coarser parenthetical rendering of one result."""
+
+    if not _is_parenthetical_same_quantity(candidate, matched, normalized):
+        return False
+    inherited_label = candidate.label or matched.label
+    if inherited_label is not None and reference.label is not None and inherited_label != reference.label:
+        return False
+    return _is_safe_rounded_value(candidate, matched, normalized)
 
 
 def _number_occurrence_groups(text: str) -> tuple[str, list[list[_NumberOccurrence]]]:
@@ -540,7 +641,7 @@ def compare_answers(
     if not ref_text or not solver_text:
         return result
     ref_normalized, ref_occurrence_groups = _number_occurrence_groups(ref_text)
-    _, solver_occurrences = _number_occurrences(solver_text)
+    solver_normalized, solver_occurrences = _number_occurrences(solver_text)
     ref_numbers = [occurrence.value for group in ref_occurrence_groups for occurrence in group]
     solver_numbers = [occurrence.value for occurrence in solver_occurrences]
     if ref_numbers and solver_numbers:
@@ -582,6 +683,20 @@ def compare_answers(
         missing_groups = [[occurrence.value for occurrence in group] for group in missing_occurrence_groups]
         missing: list[float | list[float]] = [group[0] if len(group) == 1 else group for group in missing_groups]
         reference_occurrences = [occurrence for group in ref_grouped for occurrence in group]
+        rounded_solver_duplicate_indexes = {
+            index
+            for index in unmatched_solver
+            if any(
+                _is_harmless_rounded_duplicate(
+                    solver_filtered[index],
+                    matched_solver_occurrence,
+                    matched_reference_occurrence,
+                    solver_normalized,
+                )
+                for matched_reference_occurrence, matched_solver_occurrence in matched
+            )
+        }
+        rounded_solver_duplicates = [solver_filtered[index].value for index in sorted(rounded_solver_duplicate_indexes)]
         unexpected_solver_numbers = [
             solver_filtered[index].value
             for index in unmatched_solver
@@ -589,6 +704,7 @@ def compare_answers(
                 _occurrences_match(reference_occurrence, solver_filtered[index], rel)
                 for reference_occurrence in reference_occurrences
             )
+            and index not in rounded_solver_duplicate_indexes
         ]
         result.update(
             reference_number=ref_filtered[-1],
@@ -601,6 +717,7 @@ def compare_answers(
             missing_reference_numbers=missing,
             missing_reference_groups=missing_groups,
             unexpected_solver_numbers=unexpected_solver_numbers,
+            rounded_solver_duplicates=rounded_solver_duplicates,
             extra_numbers_allowed=allow_extra_numbers,
         )
         reference_units = extract_units(ref_text)
@@ -750,6 +867,65 @@ def data_check(statement: str, sheets_text: str, data_used: list | None = None) 
     return {"status": "warn" if unknown else "ok", "unknown_numbers": unknown[:20], "unknown_sources": []}
 
 
+_GROUNDING_SHEET_KIND_LABELS = frozenset({"Таблица данных", "Глоссарий", "Обозначения", "Формулы", "Справка"})
+_GROUNDING_AUTHORITY_LABELS = {
+    "course_policy": "правила курса",
+    "course_lecture": "материал курса",
+    "reference": "справочный источник",
+}
+
+
+def _source_title_key(value: object) -> str:
+    """Normalize only casing and whitespace; punctuation remains significant."""
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _grounding_heading_keys(provenance_text: str) -> set[str]:
+    return {_source_title_key(match.group(1)) for match in re.finditer(r"(?m)^###\s+(.+?)\s*$", provenance_text or "")}
+
+
+def _resolve_lineage_sheet(
+    title: str,
+    sheets: list[dict],
+    by_title: dict[str, dict],
+    grounding_headings: set[str],
+) -> dict | None:
+    title_key = _source_title_key(title)
+    sheet = by_title.get(title_key)
+    if sheet is not None:
+        return sheet
+
+    # A model can copy the Markdown marker together with a KB heading. Strip
+    # exactly the platform's level-three marker only when the remaining title
+    # is both a real provenance heading and an exact trusted metadata title.
+    markdown_heading = re.fullmatch(r"###\s+(.+)", title.strip())
+    if markdown_heading is not None:
+        unmarked_key = _source_title_key(markdown_heading.group(1))
+        if unmarked_key in grounding_headings:
+            sheet = by_title.get(unmarked_key)
+            if sheet is not None:
+                return sheet
+
+    # ``build_grounding_block`` renders a canonical sheet as
+    # ``<title> (<kind label>, <authority label>)``. The generator sees and
+    # correctly copies that complete heading, while the frozen lineage record
+    # deliberately keeps the undecorated database title. Accept only this
+    # finite, platform-produced alias and only when that exact heading was in
+    # the context. This is not substring/fuzzy title matching.
+    if title_key not in grounding_headings:
+        return None
+    for candidate in sheets:
+        authority_label = _GROUNDING_AUTHORITY_LABELS.get(str(candidate.get("source_authority") or ""))
+        if authority_label is None:
+            continue
+        base_title = str(candidate.get("title") or "").strip()
+        for kind_label in _GROUNDING_SHEET_KIND_LABELS:
+            alias = f"{base_title} ({kind_label}, {authority_label})"
+            if title_key == _source_title_key(alias):
+                return candidate
+    return None
+
+
 def source_lineage_check(
     data_used: list | None,
     grounding_sheets: list | None,
@@ -767,7 +943,8 @@ def source_lineage_check(
     if not data_used:
         return {"status": "ok", "unbound_sources": [], "kb_sources": [], "invalid_entries": []}
     sheets = [sheet for sheet in (grounding_sheets or []) if isinstance(sheet, dict)]
-    by_title = {str(sheet.get("title") or "").strip().casefold(): sheet for sheet in sheets}
+    by_title = {_source_title_key(sheet.get("title")): sheet for sheet in sheets}
+    grounding_headings = _grounding_heading_keys(provenance_text)
     unbound: list[str] = []
     kb_sources: list[str] = []
     invalid_entries: list[str] = []
@@ -781,7 +958,7 @@ def source_lineage_check(
             invalid_entries.append(f"data_used[{index}].sheet_title не задан")
         if not isinstance(values, list) or not values or any(not str(value).strip() for value in values):
             invalid_entries.append(f"data_used[{index}].values должен быть непустым массивом")
-        sheet = by_title.get(title.casefold())
+        sheet = _resolve_lineage_sheet(title, sheets, by_title, grounding_headings)
         source_ok = bool(
             sheet is not None
             and str(sheet.get("source_document_id") or "").strip()

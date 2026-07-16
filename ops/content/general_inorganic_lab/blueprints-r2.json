@@ -1,7 +1,7 @@
 {
   "schema_version": "picrete-typed-blueprints-v1",
   "content_version": "LAB-CURATED-2026-07-R3",
-  "validator_version": "chemistry-evidence-v2",
+  "validator_version": "chemistry-evidence-v3",
   "admission_contract": {
     "certification": "one_time_per_source_and_blueprint_version",
     "per_task_teacher_approval": false,
@@ -26,10 +26,11 @@
       "chemistry_facts_schema": {
         "block": "stoichiometry",
         "required": ["reaction", "reactant_amounts", "target_species", "target_amount"],
-        "optional": ["limiting_reagent"],
+        "optional": ["limiting_reagent", "excess_reactants"],
         "types": {
-          "reaction": "string parseable as one equation with one arrow",
+          "reaction": "string parseable as one equation with exactly one -> arrow",
           "reactant_amounts": "object: species formula -> amount with explicit mol unit",
+          "excess_reactants": "array of species formulas explicitly stated as excess in the task",
           "target_species": "string species formula including ionic charge where applicable",
           "target_amount": "measurement with amount dimension",
           "limiting_reagent": "string species formula"

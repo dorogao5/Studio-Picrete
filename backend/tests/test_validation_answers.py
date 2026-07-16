@@ -305,6 +305,39 @@ def test_element_subscript_labels_match_parenthesized_analytical_notation() -> N
     assert result["matched_count"] == result["required_count"] == 3
 
 
+def test_unambiguous_russian_quantity_names_bind_to_chemical_formula_labels() -> None:
+    result = compare_answers(
+        "F_g = 0.3621; m_MgO = 0.09052 г; w_MgO = 22.63%",
+        "F_g = 0.3621; масса MgO = 0.09052 г; массовая доля MgO = 22.63%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["matched_count"] == result["required_count"] == 3
+
+
+def test_named_quantity_binding_preserves_the_compound_identity() -> None:
+    result = compare_answers(
+        "m_MgO = 0.09052 г; w_MgO = 22.63%",
+        "масса CaO = 0.09052 г; массовая доля CaO = 22.63%",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+    assert result["matched_count"] == 0
+
+
+@pytest.mark.parametrize("name", ["образца", "sample", "rate"])
+def test_free_prose_mass_name_does_not_infer_a_compound_label(name: str) -> None:
+    result = compare_answers(
+        f"m_{name} = 0.09052 г",
+        f"масса {name} = 0.09052 г",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] != "match"
+
+
 @pytest.mark.parametrize("suffix", ["rate", "Max", "NI", "Nickel"])
 def test_omega_alias_rejects_non_element_suffixes(suffix: str) -> None:
     result = compare_answers(
@@ -392,6 +425,35 @@ def test_explicit_rounded_alternative_is_one_required_output() -> None:
     assert result["reference_number_groups"] == [[10.4975, 10.498], [0.0025], [0.024]]
     assert result["matched_count"] == result["required_count"] == 3
     assert result["missing_reference_numbers"] == []
+
+
+def test_coarser_parenthetical_rendering_of_same_quantity_is_not_an_extra_output() -> None:
+    result = compare_answers(
+        "S_уд = 183 м²/г",
+        "S_уд = 1.8·10² м²/г (183 м²/г)",
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["unexpected_solver_numbers"] == []
+    assert result["rounded_solver_duplicates"] == [180.0]
+
+
+@pytest.mark.parametrize(
+    "solver",
+    [
+        "S_уд = 1.7·10² м²/г (183 м²/г)",
+        "S_уд = 1.8·10² м²/кг (183 м²/г)",
+        "S_rough = 1.8·10² м²/г; S_уд = 183 м²/г",
+        "x = 1.8·10² м²/г (183 м²/г)",
+        "S_уд = 180 м²/г (183 м²/г)",
+    ],
+)
+def test_unrelated_or_unproven_extra_number_is_not_accepted_as_rounding(solver: str) -> None:
+    result = compare_answers("S_уд = 183 м²/г", solver, tolerance_pct=0.5)
+
+    assert result["verdict"] != "match"
+    assert result["unexpected_solver_numbers"]
 
 
 @pytest.mark.parametrize("connector", ["или", "либо", "or", "OR"])

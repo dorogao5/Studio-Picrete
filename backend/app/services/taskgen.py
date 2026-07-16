@@ -255,6 +255,22 @@ def merge_template_params(template: TaskTemplate | None, *, topic: str, difficul
     }
 
 
+def merge_batch_template_params(template: TaskTemplate | None, params: dict) -> dict:
+    """Apply only explicit batch overrides, preserving the template contract.
+
+    Empty request fields mean "use the template".  In particular, eagerly
+    replacing an empty difficulty with ``medium`` here silently downgraded hard
+    templates before generation.
+    """
+
+    return merge_template_params(
+        template,
+        topic=str(params.get("topic") or ""),
+        difficulty=str(params.get("difficulty") or ""),
+        instructions=str(params.get("instructions") or ""),
+    )
+
+
 async def resolve_generator_prompt_version(
     db: AsyncSession, assistant_id: str, prompt_version_id: str | None
 ) -> PromptVersion | None:
@@ -744,12 +760,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         if template is None:
             raise GenerationError("Шаблон не найден")
 
-    merged = merge_template_params(
-        template,
-        topic=str(params.get("topic") or ""),
-        difficulty=str(params.get("difficulty") or "medium"),
-        instructions=str(params.get("instructions") or ""),
-    )
+    merged = merge_batch_template_params(template, params)
     system_prompt = await resolve_generator_prompt(db, batch.assistant_id, params.get("prompt_version_id"))
 
     await _set_progress(db, batch, "Сбор справочных материалов", 0, count)

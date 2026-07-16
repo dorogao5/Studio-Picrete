@@ -6,6 +6,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 from typing import Any
 
 from app.services.chemistry_equations import (
@@ -52,6 +53,79 @@ def _float(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if math.isfinite(parsed) else None
+
+
+def _numeric_literals(text: str) -> list[float]:
+    values: list[float] = []
+    for match in re.finditer(_NUMBER_RE, text or ""):
+        try:
+            value = float(match.group(0).replace(",", "."))
+        except ValueError:
+            continue
+        if math.isfinite(value):
+            values.append(value)
+    return values
+
+
+def _decimal_literal(value: object) -> Decimal | None:
+    """Return the declared decimal, preserving the precision written by the generator."""
+
+    if isinstance(value, Mapping):
+        value = value.get("value")
+    if isinstance(value, bool):
+        return None
+    match = re.search(_NUMBER_RE, str(value))
+    if match is None:
+        return None
+    try:
+        parsed = Decimal(match.group(0).replace(",", "."))
+    except InvalidOperation:
+        return None
+    return parsed if parsed.is_finite() else None
+
+
+def _significant_digits(value: object) -> int | None:
+    parsed = _decimal_literal(value)
+    if parsed is None:
+        return None
+    digits = parsed.as_tuple().digits
+    return len(digits) if any(digits) else 1
+
+
+def _rounding_audit(
+    actual_value: object,
+    expected_value: Decimal,
+    *,
+    minimum_significant_digits: int,
+) -> dict[str, Any]:
+    """Prove that a derived literal is a correctly rounded view of the exact result.
+
+    A broad relative tolerance is useful for comparing independently presented
+    answers, but it cannot distinguish 0.20315 from the correctly rounded
+    0.20314.  Here the exponent written by the generator is the rounding
+    contract: more displayed digits are welcome, but every displayed digit must
+    agree with the deterministic calculation.
+    """
+
+    actual = _decimal_literal(actual_value)
+    if actual is None:
+        return {"status": "invalid_literal"}
+    significant_digits = _significant_digits(actual_value) or 0
+    try:
+        with localcontext() as context:
+            context.prec = 50
+            quantum = Decimal(1).scaleb(actual.as_tuple().exponent)
+            expected_rounded = expected_value.quantize(quantum, rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return {"status": "invalid_precision"}
+    matches = actual == expected_rounded and significant_digits >= minimum_significant_digits
+    return {
+        "status": "pass" if matches else "fail",
+        "actual": str(actual),
+        "expected_at_declared_precision": str(expected_rounded),
+        "declared_significant_digits": significant_digits,
+        "minimum_significant_digits": minimum_significant_digits,
+    }
 
 
 def _mapping(value: object) -> Mapping[str, Any] | None:
@@ -342,6 +416,7 @@ class StoichiometryCheck:
                 "Расчёт опирается на несбалансированное уравнение реакции.",
                 reaction=balance.as_dict(),
             )
+
         def species_key(raw: str) -> tuple[tuple[tuple[str, int], ...], int]:
             parsed = parse_species(raw)
             return tuple(sorted(parsed.atoms.items())), parsed.charge
@@ -358,6 +433,30 @@ class StoichiometryCheck:
             sign = "+" if charge > 0 else "-"
             magnitude = "" if abs(charge) == 1 else str(abs(charge))
             return f"{term.species.formula}^{magnitude}{sign}"
+
+        excess_raw = facts.get("excess_reactants") or []
+        if not isinstance(excess_raw, list) or any(not str(item).strip() for item in excess_raw):
+            return _result(
+                self.check_id,
+                CheckState.INDETERMINATE,
+                "excess_reactants должен быть массивом формул явно избыточных реагентов.",
+            )
+        try:
+            excess_keys = {species_key(str(item)) for item in excess_raw}
+        except ChemistryParseError as exc:
+            return _result(
+                self.check_id,
+                CheckState.INDETERMINATE,
+                "Не удалось разобрать формулу явно избыточного реагента.",
+                error=str(exc),
+            )
+        if excess_keys and "избыт" not in task.full_text.casefold():
+            return _result(
+                self.check_id,
+                CheckState.INDETERMINATE,
+                "Избыточный реагент должен быть явно обозначен в условии или решении.",
+                excess_reactants=[str(item) for item in excess_raw],
+            )
 
         try:
             target_key = species_key(target_species)
@@ -394,6 +493,8 @@ class StoichiometryCheck:
                     break
             parsed_amount = parse_measurement(raw_amount, expected=Dimension.AMOUNT)
             if parsed_amount is None:
+                if term_key(term) in excess_keys:
+                    continue
                 return _result(
                     self.check_id,
                     CheckState.INDETERMINATE,
@@ -409,6 +510,12 @@ class StoichiometryCheck:
                     amount_mol=parsed_amount.si_value,
                 )
             extents[amount_label] = parsed_amount.si_value / float(term.coefficient)
+        if not extents:
+            return _result(
+                self.check_id,
+                CheckState.INDETERMINATE,
+                "Нужен хотя бы один количественно заданный реагент.",
+            )
         limiting_extent = min(extents.values())
         expected_amount = limiting_extent * float(target_term.coefficient)
         error = _relative_error(target_amount.si_value, expected_amount)
@@ -449,6 +556,7 @@ class StoichiometryCheck:
             expected_mol=expected_amount,
             actual_mol=target_amount.si_value,
             limiting_reagents=limiting,
+            excess_reactants=[str(item) for item in excess_raw],
         )
 
     def _evaluate_amount_concentration_relation(self, task: ChemistryTask) -> CheckResult:
@@ -729,6 +837,81 @@ class GravimetryCheck:
             / (weighing_form_coefficient * weighing_form_molar_mass.si_value)
         )
         expected_analyte_mass = weighing_form_mass.si_value * expected_factor
+
+        # Decimal-place correctness is stricter than the broad physical-value
+        # tolerance below.  It catches a recurrent generator failure where the
+        # value is numerically close but the last printed digit is impossible
+        # (for example 58.69/288.91 -> 0.20315 instead of 0.20314, followed by
+        # the wrong four-significant-digit answer 0.2032 instead of 0.2031).
+        coefficient_a_decimal = _decimal_literal(facts.get("analyte_stoichiometric_coefficient"))
+        coefficient_f_decimal = _decimal_literal(facts.get("weighing_form_stoichiometric_coefficient"))
+        analyte_molar_mass_decimal = Decimal(str(analyte_molar_mass.si_value))
+        weighing_form_molar_mass_decimal = Decimal(str(weighing_form_molar_mass.si_value))
+        weighing_form_mass_decimal = Decimal(str(weighing_form_mass.si_value))
+        with localcontext() as context:
+            context.prec = 50
+            assert coefficient_a_decimal is not None
+            assert coefficient_f_decimal is not None
+            exact_factor = (
+                coefficient_a_decimal
+                * analyte_molar_mass_decimal
+                / (coefficient_f_decimal * weighing_form_molar_mass_decimal)
+            )
+            exact_analyte_mass = weighing_form_mass_decimal * exact_factor
+
+        factor_input_precisions = [
+            digits
+            for digits in (
+                _significant_digits(facts.get("analyte_molar_mass")),
+                _significant_digits(facts.get("weighing_form_molar_mass")),
+            )
+            if digits is not None
+        ]
+        factor_minimum_digits = min(factor_input_precisions) if factor_input_precisions else 1
+        factor_rounding = _rounding_audit(
+            facts.get("gravimetric_factor"),
+            exact_factor,
+            minimum_significant_digits=factor_minimum_digits,
+        )
+
+        raw_analyte_mass = _decimal_literal(facts.get("analyte_mass"))
+        actual_analyte_mass_si = Decimal(str(analyte_mass.si_value))
+        if raw_analyte_mass is None or raw_analyte_mass == 0:
+            mass_rounding = {"status": "invalid_literal"}
+        else:
+            # Express the exact SI result in the unit used by the generated
+            # literal so that its written decimal exponent remains meaningful.
+            unit_scale = actual_analyte_mass_si / raw_analyte_mass
+            exact_mass_in_declared_unit = exact_analyte_mass / unit_scale
+            weighing_mass_digits = _significant_digits(facts.get("weighing_form_mass"))
+            mass_minimum_digits = min(
+                factor_minimum_digits,
+                weighing_mass_digits if weighing_mass_digits is not None else factor_minimum_digits,
+            )
+            mass_rounding = _rounding_audit(
+                facts.get("analyte_mass"),
+                exact_mass_in_declared_unit,
+                minimum_significant_digits=mass_minimum_digits,
+            )
+
+        rounding_errors = [
+            {"field": field, **audit}
+            for field, audit in (
+                ("gravimetric_factor", factor_rounding),
+                ("analyte_mass", mass_rounding),
+            )
+            if audit.get("status") != "pass"
+        ]
+        if rounding_errors:
+            return _result(
+                self.check_id,
+                CheckState.FAIL,
+                "Вычисляемые величины гравиметрии округлены арифметически неверно или с недостаточной точностью.",
+                rounding_errors=rounding_errors,
+                exact_gravimetric_factor=str(exact_factor),
+                exact_analyte_mass_kg=str(exact_analyte_mass),
+            )
+
         factor_error = _relative_error(gravimetric_factor, expected_factor)
         mass_error = _relative_error(analyte_mass.si_value, expected_analyte_mass)
         claimed_chain_error = _relative_error(
@@ -743,6 +926,10 @@ class GravimetryCheck:
             "factor_relative_error": factor_error,
             "mass_relative_error": mass_error,
             "claimed_chain_relative_error": claimed_chain_error,
+            "rounding_audit": {
+                "gravimetric_factor": factor_rounding,
+                "analyte_mass": mass_rounding,
+            },
         }
         if max(factor_error, mass_error, claimed_chain_error) > DEFAULT_RELATIVE_TOLERANCE:
             return _result(
@@ -1566,19 +1753,26 @@ class DlvoCheck:
                 CheckState.INDETERMINATE,
                 "separation не распознано как длина с единицей.",
             )
-        if facts.get("claims_derjaguin") is not None and not isinstance(facts.get("claims_derjaguin"), bool):
+        claims_derjaguin = facts.get("claims_derjaguin")
+        if claims_derjaguin is not None and not isinstance(claims_derjaguin, bool):
             return _result(
                 self.check_id,
                 CheckState.INDETERMINATE,
                 "claims_derjaguin должен быть логическим значением.",
             )
-        if facts.get("claims_derjaguin") is not None and (particle_radius is None or separation is None):
+        if claims_derjaguin is not None and (particle_radius is None or separation is None):
             return _result(
                 self.check_id,
                 CheckState.INDETERMINATE,
                 "Для проверки приближения Дерягина нужны particle_radius и separation.",
             )
         if particle_radius and separation:
+            if not isinstance(claims_derjaguin, bool):
+                return _result(
+                    self.check_id,
+                    CheckState.INDETERMINATE,
+                    "Для геометрической проверки нужен явный boolean claims_derjaguin.",
+                )
             performed = True
             if particle_radius.si_value <= 0:
                 failures.append("particle_radius_non_positive")
@@ -1587,9 +1781,25 @@ class DlvoCheck:
             if particle_radius.si_value > 0 and separation.si_value > 0:
                 ratio = separation.si_value / particle_radius.si_value
                 evidence["separation_to_radius"] = ratio
-                if facts.get("claims_derjaguin") is True and ratio > 0.1:
+                answer_numbers = _numeric_literals(task.answer)
+                ratio_in_answer = any(_relative_error(value, ratio) <= 0.01 for value in answer_numbers)
+                answer_text = task.answer.casefold()
+                negative_conclusion = re.search(r"(?:не\s+(?:допуст|примен)|недопуст|непримен)", answer_text)
+                positive_conclusion = re.search(r"(?:допуст|примен)", answer_text)
+                conclusion_matches = (
+                    claims_derjaguin is True and positive_conclusion is not None and negative_conclusion is None
+                ) or (claims_derjaguin is False and negative_conclusion is not None)
+                evidence.update(
+                    ratio_present_in_answer=ratio_in_answer,
+                    applicability_conclusion_matches=conclusion_matches,
+                )
+                if not ratio_in_answer:
+                    failures.append("answer_missing_separation_to_radius")
+                if not conclusion_matches:
+                    failures.append("answer_applicability_conclusion_mismatch")
+                if claims_derjaguin is True and ratio > 0.1:
                     failures.append("derjaguin_requires_h_much_less_than_radius")
-                elif facts.get("claims_derjaguin") is True and ratio > 0.05:
+                elif claims_derjaguin is True and ratio > 0.05:
                     warnings.append("derjaguin_borderline_geometry")
 
         sufficiency_claim = facts.get("claims_dlvo_sufficient")

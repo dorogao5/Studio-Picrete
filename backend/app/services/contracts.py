@@ -52,15 +52,20 @@ CHEMISTRY_FACTS_GUIDE = """
 Если поддерживаемого численного расчёта нет, верните {}.
 
 Поддерживаемые блоки:
-- stoichiometry: reaction, reactant_amounts (формула -> "число unit"), target_species,
-  target_amount (обязательно количество вещества), limiting_reagent при наличии;
+- stoichiometry: reaction с единственной стрелкой -> (не знаком =), reactant_amounts
+  (формула -> "число unit") для всех количественно заданных реагентов, target_species,
+  target_amount (обязательно количество вещества), limiting_reagent при наличии.
+  Если компонент среды явно дан в избытке без количества, перечислите его формулу в
+  excess_reactants (JSON-массив); не объявляйте избыток без прямого указания в условии;
 - dilution: c1, v1, c2, v2 — каждое значение строкой с единицей;
 - titration: analyte и titrant, внутри concentration, volume и equivalent_factor
   либо stoichiometric_coefficient;
 - gravimetry: analyte_stoichiometric_coefficient, weighing_form_stoichiometric_coefficient,
   analyte_molar_mass, weighing_form_molar_mass, gravimetric_factor, weighing_form_mass,
   analyte_mass. Массы и молярные массы задаются с единицами; исходные молярные массы и масса
-  весовой формы должны быть явно даны в условии. Проверяются F=(ν_a M_a)/(ν_f M_f) и m_a=F m_f;
+  весовой формы должны быть явно даны в условии. Проверяются F=(ν_a M_a)/(ν_f M_f) и m_a=F m_f.
+  F и m_a вычисляйте из неокруглённого промежуточного результата: каждая показанная цифра обязана
+  совпадать с арифметически правильным округлением, а точность результата — не ниже точности исходных данных;
 - conductometry: resistance, conductance, cell_constant, conductivity — все четыре величины
   с явными единицами. В условии должны быть даны R или G и постоянная ячейки; проверяются
   G=1/R и κ=K_cell G без неявных коэффициентов перевода;
@@ -75,7 +80,9 @@ CHEMISTRY_FACTS_GUIDE = """
 - smoluchowski: mobility, viscosity, relative_permittivity, vacuum_permittivity, zeta,
   при наличии kappa_a и claims_applicable; численное ε0 должно быть дано в условии студенту;
 - dlvo: ionic_strength, debye_length и debye_model="water_1_1_25c" только для воды,
-  1:1 электролита при 25 °C; либо particle_radius, separation, claims_derjaguin;
+  1:1 электролита при 25 °C; либо particle_radius, separation, claims_derjaguin.
+  claims_derjaguin — строго JSON boolean, не строка; если задача просит проверку геометрии,
+  answer обязан содержать и длину Дебая, и численное h/a, и краткий вывод о применимости;
   claims_dlvo_sufficient и non_dlvo_forces_present — только если это прямо сформулировано.
 
 Физические величины всегда задавайте как "число unit" или {"value": число, "unit": "unit"}.

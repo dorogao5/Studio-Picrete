@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app import main
 from app.models import TaskTemplate
 from app.schemas import TaskTemplateCreate, TaskTemplateUpdate
-from app.services.taskgen import build_generation_user_message, merge_template_params, task_from_item
+from app.services.taskgen import (
+    build_generation_user_message,
+    merge_batch_template_params,
+    merge_template_params,
+    task_from_item,
+)
 
 
 RUBRIC = [
@@ -78,6 +83,33 @@ def test_merge_template_params_carries_exact_rubric_and_empty_fallback() -> None
 
     assert merged["rubric"] == RUBRIC
     assert merge_template_params(None, topic="", difficulty="", instructions="")["rubric"] == []
+
+
+def test_batch_empty_difficulty_preserves_hard_template_contract() -> None:
+    template = TaskTemplate(
+        name="Продвинутая задача",
+        rubric=RUBRIC,
+        topic="Кулонометрия",
+        difficulty="hard",
+        instructions="Интегрировать кусочно-заданный ток",
+        task_kind="calculation",
+        answer_format="numeric",
+        numeric_tolerance_pct=0.5,
+        reference_sheet_ids=[],
+        example_tasks=[],
+        kb_query="заряд по профилю тока",
+        validation_solver=True,
+        validation_data_check=True,
+    )
+
+    merged = merge_batch_template_params(
+        template,
+        {"topic": "", "difficulty": "", "instructions": ""},
+    )
+
+    assert merged["difficulty"] == "hard"
+    assert merged["topic"] == "Кулонометрия"
+    assert merged["instructions"] == "Интегрировать кусочно-заданный ток"
 
 
 def test_generation_message_marks_template_rubric_as_an_exact_contract() -> None:

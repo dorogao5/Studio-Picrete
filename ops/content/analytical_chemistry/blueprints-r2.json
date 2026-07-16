@@ -1,7 +1,7 @@
 {
   "schema_version": "picrete-typed-blueprints-v1",
   "content_version": "ANALYTICAL-CURATED-2026-07-R3",
-  "validator_version": "chemistry-evidence-v2",
+  "validator_version": "chemistry-evidence-v3",
   "admission_contract": {
     "certification": "one_time_per_source_and_blueprint_version",
     "per_task_teacher_approval": false,

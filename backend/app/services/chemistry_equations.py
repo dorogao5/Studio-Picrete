@@ -53,6 +53,7 @@ class ReactionBalance:
 
 
 _ARROW_RE = re.compile(r"(?:<=>|<->|=>|->|⇌|↔|→|⟶)")
+_EQUALS_RE = re.compile(r"(?<![<>=])=(?!=)")
 _PHASE_RE = re.compile(r"\((?:aq|s|l|g|газ|ж|тв|р-?р)\)\s*$", re.IGNORECASE)
 _ELEMENT_RE = re.compile(r"[A-Z][a-z]?")
 _SUBSCRIPTS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
@@ -232,6 +233,12 @@ def _split_reaction_side(side: str) -> tuple[ReactionTerm, ...]:
 def parse_reaction(equation: str) -> tuple[tuple[ReactionTerm, ...], tuple[ReactionTerm, ...]]:
     cleaned = (equation or "").strip().strip("$` ").rstrip(".;")
     arrows = list(_ARROW_RE.finditer(cleaned))
+    # Russian chemistry handbooks commonly use one plain equals sign as the
+    # reaction separator.  Accept it only when no arrow is present and there is
+    # exactly one standalone ``=``; the normal species grammar still validates
+    # both sides, so comparisons and arbitrary prose remain unsupported.
+    if not arrows:
+        arrows = list(_EQUALS_RE.finditer(cleaned))
     if len(arrows) != 1:
         raise ChemistryParseError(f"expected exactly one reaction arrow in {equation!r}")
     arrow = arrows[0]
@@ -273,7 +280,20 @@ _REACTION_SPAN_BOUNDARY_LIMIT = 64
 _REACTION_EDGE_PUNCTUATION = " \t\r\n$`:,.…"
 
 
-def _parseable_reaction_spans(fragment: str) -> list[str]:
+def _is_oxidation_state_transition(fragment: str, arrow: re.Match[str]) -> bool:
+    """Return true for prose such as ``Cr: +6 → +3``, not an equation."""
+
+    left = fragment[: arrow.start()]
+    right = fragment[arrow.end() :]
+    left_state = re.search(r"(?:^|[\s:(])[-+−]?\d+\s*$", left)
+    right_state = re.match(r"\s*[-+−]?\d+(?=\s*(?:[).,;:]|$))", right)
+    return left_state is not None and right_state is not None
+
+
+def _parseable_reaction_spans(
+    fragment: str,
+    separator_re: re.Pattern[str] = _ARROW_RE,
+) -> list[str]:
     """Extract complete parseable equations around every arrow in a prose fragment.
 
     A solution step often embeds an equation between an introductory phrase and
@@ -285,7 +305,9 @@ def _parseable_reaction_spans(fragment: str) -> list[str]:
 
     whitespace = list(re.finditer(r"\s+", fragment))
     spans: list[str] = []
-    for arrow in _ARROW_RE.finditer(fragment):
+    for arrow in separator_re.finditer(fragment):
+        if _is_oxidation_state_transition(fragment, arrow):
+            continue
         starts = sorted({0, *(match.end() for match in whitespace if match.end() <= arrow.start())})
         ends = sorted({len(fragment), *(match.start() for match in whitespace if match.start() >= arrow.end())})
         starts = starts[-_REACTION_SPAN_BOUNDARY_LIMIT:]
@@ -329,7 +351,17 @@ def reaction_candidates(text: str) -> list[str]:
 
     candidates: list[str] = []
     for fragment in re.split(r"[\n;]+", text or ""):
-        if not _ARROW_RE.search(fragment):
+        arrows = [
+            arrow for arrow in _ARROW_RE.finditer(fragment) if not _is_oxidation_state_transition(fragment, arrow)
+        ]
+        if not arrows:
+            equals = list(_EQUALS_RE.finditer(fragment))
+            if len(equals) == 1:
+                candidates.extend(
+                    candidate
+                    for candidate in _parseable_reaction_spans(fragment, _EQUALS_RE)
+                    if candidate not in candidates
+                )
             continue
         spans = _parseable_reaction_spans(fragment)
         if spans:

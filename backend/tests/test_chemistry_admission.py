@@ -141,6 +141,65 @@ def test_deterministic_failure_stops_expensive_semantic_agents(monkeypatch) -> N
     assert any("материальный баланс" in reason.casefold() for reason in result["reasons"])
 
 
+def test_wrong_gravimetric_rounding_stops_agents_and_keeps_exact_audit(monkeypatch) -> None:
+    solver_calls = 0
+
+    async def fake_solver(*_args, **_kwargs):
+        nonlocal solver_calls
+        solver_calls += 1
+        raise AssertionError("solver must not run after deterministic rounding failure")
+
+    statement = (
+        "Получено m(Ni(Dm)2)=0.2234 g. Используйте M(Ni)=58.69 g/mol и "
+        "M(Ni(Dm)2)=288.91 g/mol; стехиометрия 1:1. Рассчитайте Fg и массу Ni."
+    )
+    facts = {
+        "gravimetry": {
+            "analyte_stoichiometric_coefficient": 1,
+            "weighing_form_stoichiometric_coefficient": 1,
+            "analyte_molar_mass": "58.69 g/mol",
+            "weighing_form_molar_mass": "288.91 g/mol",
+            "gravimetric_factor": 0.20315,
+            "weighing_form_mass": "0.2234 g",
+            "analyte_mass": "0.04538 g",
+        }
+    }
+    kwargs = {
+        **_validation_kwargs(),
+        "statement": statement,
+        "reference_solution": "Fg=58.69/288.91=0.20315; m(Ni)=0.04538 g.",
+        "reference_answer": "Fg=0.2032; m(Ni)=0.04538 g",
+        "topic": "Гравиметрия",
+        "validation_config": {
+            **_validation_kwargs()["validation_config"],
+            "chemistry_check": "analytical.gravimetry",
+        },
+    }
+
+    monkeypatch.setattr(validation, "current_model_use_policy", _policy)
+    monkeypatch.setattr(validation, "solver_check", fake_solver)
+    result = asyncio.run(
+        validation.run_validation(
+            **kwargs,
+            chemistry_facts=facts,
+            chemistry_facts_source="generator",
+            solver_provider=_provider(),
+            solver_model=_model(),
+        )
+    )
+
+    assert result["verdict"] == "needs_review"
+    assert result["chemistry"]["admission_effect"] == "block"
+    gravimetry = next(item for item in result["chemistry"]["results"] if item["check_id"] == "analytical.gravimetry")
+    factor_error = next(
+        item for item in gravimetry["evidence"]["rounding_errors"] if item["field"] == "gravimetric_factor"
+    )
+    assert factor_error["actual"] == "0.20315"
+    assert factor_error["expected_at_declared_precision"] == "0.20314"
+    assert gravimetry["evidence"]["exact_gravimetric_factor"].startswith("0.2031428472")
+    assert solver_calls == 0
+
+
 def test_legacy_task_rebuilds_facts_before_admission(monkeypatch) -> None:
     extraction_calls = 0
 
