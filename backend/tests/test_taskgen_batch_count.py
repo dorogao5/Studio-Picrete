@@ -161,3 +161,9 @@ def test_generation_call_limit_is_based_on_whole_candidate_budget() -> None:
     assert taskgen._generation_call_limit(15) == 11
     assert taskgen._generation_call_limit(30) == 18
     assert taskgen._generation_call_limit(40) == 23
+
+
+def test_hard_generation_reserves_room_for_reasoning_and_complete_json() -> None:
+    assert taskgen._generation_max_tokens("hard") == 16000
+    assert taskgen._generation_max_tokens(" HARD ") == 16000
+    assert taskgen._generation_max_tokens("medium") == 8000

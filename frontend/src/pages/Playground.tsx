@@ -42,6 +42,7 @@ import type {
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Tabs, Textarea } from "../components/ui";
 import MathText from "../components/MathText";
 import { taskIsAutoReady, taskIsManualReady } from "../lib/taskExport";
+import { isKnownAdvisoryModel } from "../lib/modelPolicy";
 import { deepSeekV4Options, modelOptions } from "./assistant/PromptsTab";
 
 type RubricCriterion = GeneratedTask["rubric"][number];
@@ -1091,6 +1092,8 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
   const [history, setHistory] = useState<TutorRun[] | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const assistantIdRef = useRef(assistant.id);
+  const selectedTutorModel = production.find((model) => model.id === modelEntryId);
+  const isPreviewModel = selectedTutorModel ? isKnownAdvisoryModel(selectedTutorModel) : false;
 
   const resetDialog = () => {
     setMessages([]);
@@ -1164,6 +1167,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
         task_id: taskId || null,
         prompt_version_id: promptVersionId || null,
         model_entry_id: modelEntryId,
+        preview: isPreviewModel,
         student_work: composedWork(),
         messages: historyMsgs,
       });
@@ -1259,6 +1263,11 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
               ))}
             </Select>
           </Field>
+          {isPreviewModel && (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Быстрый предпросмотр: ответ Flash сохраняется в истории тестов, но не используется как итоговое решение.
+            </p>
+          )}
           <Field label="Версия tutor-промпта">
             <Select value={promptVersionId} onChange={(e) => setPromptVersionId(e.target.value)}>
               <option value="">— активная версия / встроенный —</option>

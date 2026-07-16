@@ -50,6 +50,8 @@ GENERATION_CHUNK = 2
 # Дополнительные запросы сверх минимально необходимого числа порций. Они восполняют
 # недостающие/невалидные элементы, но не дают фоновой задаче зациклиться на плохом ответе модели.
 MAX_REFILL_ATTEMPTS = 3
+STANDARD_GENERATION_MAX_TOKENS = 8000
+HARD_GENERATION_MAX_TOKENS = 16000
 
 
 @dataclass(slots=True)
@@ -71,6 +73,13 @@ def _generation_call_limit(candidate_budget: int) -> int:
 
     minimum_calls = (candidate_budget + GENERATION_CHUNK - 1) // GENERATION_CHUNK
     return minimum_calls + MAX_REFILL_ATTEMPTS
+
+
+def _generation_max_tokens(difficulty: str) -> int:
+    # DeepSeek thinking tokens share the response budget with the JSON payload.
+    # Hard chemistry solutions are materially longer, so the standard ceiling
+    # can truncate an otherwise valid JSON object after the hidden reasoning.
+    return HARD_GENERATION_MAX_TOKENS if difficulty.strip().casefold() == "hard" else STANDARD_GENERATION_MAX_TOKENS
 
 
 TASK_KIND_LABELS = {
@@ -196,7 +205,13 @@ async def generate_tasks(
         chemistry_check=chemistry_check,
     )
     result = await llm.chat(
-        provider, model, prompt, user_message, temperature=temperature, json_mode=True, max_tokens=8000
+        provider,
+        model,
+        prompt,
+        user_message,
+        temperature=temperature,
+        json_mode=True,
+        max_tokens=_generation_max_tokens(difficulty),
     )
     parsed = llm.extract_json(result.text)
     tasks = _coerce_tasks(parsed)

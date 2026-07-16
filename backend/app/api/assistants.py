@@ -26,6 +26,7 @@ from app.schemas import (
 from app.security import get_current_user
 from app.services.meta_prompt import generate_system_prompt
 from app.services.evidence_invalidation import invalidate_task_evidence
+from app.services.model_policy import ModelUsePolicyError, require_decision_model
 
 router = APIRouter(prefix="/assistants", tags=["assistants"])
 
@@ -90,6 +91,24 @@ async def resolve_architect(db: AsyncSession) -> tuple[Provider, ModelEntry]:
     return provider, model
 
 
+async def require_operational_model(
+    db: AsyncSession,
+    model_entry_id: str,
+    *,
+    allow_advisory: bool,
+) -> tuple[Provider, ModelEntry]:
+    """Resolve a production entry and enforce the configured use allowlist."""
+
+    provider, model = await resolve_model(db, model_entry_id)
+    if not model.enabled:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Модель {model.model_id} отключена")
+    try:
+        require_decision_model(model, allow_advisory=allow_advisory)
+    except ModelUsePolicyError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
+    return provider, model
+
+
 @router.get("", response_model=list[AssistantOut])
 async def list_assistants(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> list[Assistant]:
     assistants = (await db.execute(select(Assistant).order_by(Assistant.discipline, Assistant.name))).scalars()
@@ -132,6 +151,10 @@ async def update_assistant(
 ) -> Assistant:
     assistant = await get_assistant_or_404(assistant_id, db)
     payload = body.model_dump(exclude_unset=True)
+    if payload.get("default_generator_model_id"):
+        await require_operational_model(db, payload["default_generator_model_id"], allow_advisory=True)
+    if payload.get("default_grader_model_id"):
+        await require_operational_model(db, payload["default_grader_model_id"], allow_advisory=False)
     profile_fields = {"discipline", "description", "audience", "language", "topics", "criteria", "nuances"}
     profile_changed = any(field in payload and getattr(assistant, field) != payload[field] for field in profile_fields)
     for field, value in payload.items():
@@ -327,7 +350,7 @@ async def generate_prompt(
     _: User = Depends(get_current_user),
 ) -> PromptVersion:
     assistant = await get_assistant_or_404(assistant_id, db)
-    _, target_model = await resolve_model(db, body.target_model_entry_id)
+    _, target_model = await require_operational_model(db, body.target_model_entry_id, allow_advisory=True)
     architect_provider, architect_model = await resolve_architect(db)
     try:
         system_prompt, design_notes = await generate_system_prompt(
@@ -367,6 +390,11 @@ async def activate_prompt(
     ).scalar_one_or_none()
     if prompt is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Версия промпта не найдена")
+    if prompt.target_family.strip().casefold() != "deepseek":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Активным промптом рабочего ассистента может быть только версия для DeepSeek",
+        )
     siblings = (
         await db.execute(
             select(PromptVersion).where(

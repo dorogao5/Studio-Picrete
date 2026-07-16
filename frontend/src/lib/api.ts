@@ -261,6 +261,7 @@ export const tutorApi = {
       task_id?: string | null;
       prompt_version_id?: string | null;
       model_entry_id: string;
+      preview?: boolean;
       student_work?: string;
       messages: TutorMessage[];
     },

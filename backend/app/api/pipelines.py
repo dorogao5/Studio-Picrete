@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.assistants import get_assistant_or_404
+from app.api.assistants import get_assistant_or_404, require_operational_model
 from app.db import get_db
 from app.models import GeneratedTask, Pipeline, PipelineRun, User
 from app.schemas import PipelineCreate, PipelineOut, PipelineRunOut, PipelineRunRequest, PipelineUpdate
@@ -17,6 +17,23 @@ def _validate_steps(steps: list) -> list[dict]:
         return validate_pipeline_steps(steps)
     except PipelineError as err:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
+
+
+async def _validate_step_models(db: AsyncSession, steps: list[dict]) -> None:
+    for index, step in enumerate(steps):
+        if step["type"] != "grade":
+            continue
+        try:
+            await require_operational_model(
+                db,
+                step["config"]["model_entry_id"],
+                allow_advisory=False,
+            )
+        except HTTPException as err:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Шаг {index + 1}: {err.detail}",
+            ) from err
 
 
 @router.get("/assistants/{assistant_id}/pipelines", response_model=list[PipelineOut])
@@ -39,6 +56,7 @@ async def create_pipeline(
 ) -> Pipeline:
     await get_assistant_or_404(assistant_id, db)
     steps = _validate_steps(body.steps)
+    await _validate_step_models(db, steps)
     pipeline = Pipeline(assistant_id=assistant_id, name=body.name, description=body.description, steps=steps)
     db.add(pipeline)
     await db.commit()
@@ -67,6 +85,7 @@ async def update_pipeline(
     payload = body.model_dump(exclude_unset=True)
     if "steps" in payload:
         payload["steps"] = _validate_steps(payload["steps"])
+        await _validate_step_models(db, payload["steps"])
     for field, value in payload.items():
         setattr(pipeline, field, value)
     await db.commit()
