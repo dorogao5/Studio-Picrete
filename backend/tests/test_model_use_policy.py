@@ -486,3 +486,227 @@ def test_semantic_critic_never_receives_a_genuinely_missing_formula_result() -> 
         report["comparison"],
         chemistry_verified=True,
     )
+
+
+def test_full_solution_evidence_can_reach_critic_when_compact_answer_omits_a_subpart() -> None:
+    answer_comparison = {
+        "verdict": "incomplete",
+        "matched_count": 4,
+        "required_count": 6,
+        "missing_reference_groups": [[8], [5]],
+        "unexpected_solver_numbers": [],
+        "missing_text_claims": ["Полуреакции"],
+    }
+    report = {
+        "status": "incomplete",
+        "answer": "Ионное уравнение и итоговое количество продукта",
+        "solution": "Полное решение с обеими полуреакциями, балансом и итогом",
+        "comparison": answer_comparison,
+        "solution_comparison": {
+            "verdict": "match",
+            "matched_count": 6,
+            "required_count": 6,
+            "missing_reference_groups": [],
+            "unexpected_solver_numbers": [0.025, 0.00525],
+            "missing_text_claims": [],
+            "extra_numbers_allowed": True,
+        },
+        "answer_solution_comparison": {
+            "verdict": "match",
+            "missing_reference_groups": [],
+            "missing_text_claims": [],
+            "extra_numbers_allowed": True,
+        },
+    }
+    complete_report = {
+        **report,
+        "status": "match",
+        "comparison": {**answer_comparison, "verdict": "match"},
+    }
+    cross = {
+        "verdict": "incomplete",
+        "matched_count": 4,
+        "required_count": 6,
+        "missing_reference_groups": [[8], [5]],
+        "unexpected_solver_numbers": [],
+        "missing_text_claims": ["Полуреакции"],
+    }
+
+    assert validation._solution_backed_entailment_candidate(
+        "text", report, complete_report, cross, chemistry_verified=True
+    )
+    assert not validation._solution_backed_entailment_candidate(
+        "text", report, complete_report, cross, chemistry_verified=False
+    )
+    assert not validation._solution_backed_entailment_candidate(
+        "text", report, report, cross, chemistry_verified=True
+    )
+    contradictory_answer = {
+        **report,
+        "answer_solution_comparison": {
+            **report["answer_solution_comparison"],
+            "verdict": "mismatch",
+        },
+    }
+    assert not validation._solution_backed_entailment_candidate(
+        "text", contradictory_answer, complete_report, cross, chemistry_verified=True
+    )
+
+
+def test_incomplete_answer_stays_blocked_when_full_solution_also_lacks_evidence() -> None:
+    comparison = {
+        "verdict": "incomplete",
+        "matched_count": 1,
+        "required_count": 2,
+        "missing_reference_groups": [[0.012]],
+        "unexpected_solver_numbers": [],
+        "missing_text_claims": [],
+    }
+    report = {
+        "status": "incomplete",
+        "answer": "Только часть ответа",
+        "solution": "Решение тоже не содержит итог",
+        "comparison": comparison,
+        "solution_comparison": {**comparison},
+        "answer_solution_comparison": {**comparison},
+    }
+
+    assert not validation._solution_backed_entailment_candidate(
+        "text", report, report, comparison, chemistry_verified=True
+    )
+
+
+def test_full_solution_fallback_still_requires_passing_subject_critic(monkeypatch) -> None:
+    policy = _policy()
+    critic_calls: list[bool] = []
+    solver_calls = 0
+
+    async def compact_solver(*_args, **_kwargs):
+        nonlocal solver_calls
+        solver_calls += 1
+        solution = (
+            "Полуреакция содержит 8 электронов; коэффициент второго реагента 5; "
+            "итоговое количество n=0.0021 моль."
+        )
+        return {
+            "status": "ok",
+            "solution": solution,
+            "answer": "n=0.0021 моль" if solver_calls % 2 else solution,
+            "error": "",
+            "duration_ms": 1,
+            "tokens_total": 10,
+        }
+
+    async def passing_critic(*_args, **_kwargs):
+        critic_calls.append(True)
+        return {
+            "status": "pass",
+            "checks": {key: True for key in validation.CRITIC_REQUIRED_CHECKS},
+            "issues": [],
+        }
+
+    def deterministic_pass(**_kwargs):
+        return {
+            "validation_version": "test-v1",
+            "discipline": "general_inorganic",
+            "deterministic_pass": True,
+            "applicable_count": 1,
+            "blocking_codes": [],
+            "indeterminate_codes": [],
+            "warning_codes": [],
+            "results": [],
+            "required_check_ids": ["chemistry.stoichiometry"],
+            "required_not_passed": [],
+            "facts_source": "test",
+            "admission_effect": "pass",
+        }
+
+    monkeypatch.setattr(validation, "current_model_use_policy", lambda: policy)
+    monkeypatch.setattr(validation, "solver_check", compact_solver)
+    monkeypatch.setattr(validation, "critic_check", passing_critic)
+    monkeypatch.setattr(validation, "chemistry_admission_evidence", deterministic_pass)
+    provider = Provider(id="provider-1", name="DeepSeek", base_url="https://example.test")
+    kwargs = {
+        **_validation_kwargs(),
+        "statement": "Для данной ОВР приведите полуреакцию, коэффициент и итоговое количество продукта.",
+        "reference_solution": (
+            "Полуреакция содержит 8 электронов; коэффициент второго реагента 5; "
+            "итоговое количество n=0.0021 моль."
+        ),
+        "reference_answer": "Полуреакция: 8 электронов; коэффициент: 5; n=0.0021 моль.",
+        "validation_config": {"task_kind": "calculation", "chemistry_check": "chemistry.stoichiometry"},
+        "discipline_context": "Общая и неорганическая химия",
+        "chemistry_facts": {},
+    }
+
+    result = asyncio.run(
+        validation.run_validation(
+            **kwargs,
+            solver_provider=provider,
+            solver_model=_model("deepseek-v4-pro"),
+        )
+    )
+
+    assert critic_calls == [True]
+    assert result["verdict"] == "validated"
+    assert result["solver"]["comparison"]["previous_verdict"] == "incomplete"
+    assert result["solver"]["solution_comparison"]["verdict"] == "match"
+    assert result["critic"]["status"] == "pass"
+    assert result["critic"]["basis"] == validation.SOLUTION_BACKED_ENTAILMENT_BASIS
+
+    async def failing_critic(*_args, **_kwargs):
+        return {
+            "status": "fail",
+            "checks": {
+                **{key: True for key in validation.CRITIC_REQUIRED_CHECKS},
+                "solver_agreement": False,
+            },
+            "issues": ["В solution присутствует противоречащий итог"],
+        }
+
+    monkeypatch.setattr(validation, "critic_check", failing_critic)
+    blocked = asyncio.run(
+        validation.run_validation(
+            **kwargs,
+            solver_provider=provider,
+            solver_model=_model("deepseek-v4-pro"),
+        )
+    )
+
+    assert blocked["verdict"] == "needs_review"
+    assert blocked["solver"]["status"] == "incomplete"
+    assert blocked["critic"]["status"] == "fail"
+
+    late_evidence_calls = 0
+
+    async def late_evidence_solver(*_args, **_kwargs):
+        nonlocal late_evidence_calls
+        late_evidence_calls += 1
+        full = (
+            "Полуреакция содержит 8 электронов; коэффициент второго реагента 5; "
+            "итоговое количество n=0.0021 моль."
+        )
+        solution = ("Промежуточный текст без результата. " * 180 + full) if late_evidence_calls == 1 else full
+        return {
+            "status": "ok",
+            "solution": solution,
+            "answer": "n=0.0021 моль" if late_evidence_calls == 1 else full,
+            "error": "",
+            "duration_ms": 1,
+            "tokens_total": 10,
+        }
+
+    monkeypatch.setattr(validation, "solver_check", late_evidence_solver)
+    monkeypatch.setattr(validation, "critic_check", passing_critic)
+    truncated = asyncio.run(
+        validation.run_validation(
+            **kwargs,
+            solver_provider=provider,
+            solver_model=_model("deepseek-v4-pro"),
+        )
+    )
+
+    assert truncated["verdict"] == "needs_review"
+    assert truncated["solver"]["solution_comparison"]["verdict"] != "match"
+    assert len(truncated["solver"]["solution"]) == validation.SOLVER_EVIDENCE_CHAR_LIMIT
+    assert critic_calls == [True]
