@@ -452,6 +452,21 @@ def test_unicode_formula_subscripts_do_not_create_missing_text_claims() -> None:
     assert result["missing_text_claims"] == []
 
 
+def test_ordered_list_markers_are_not_treated_as_answer_values() -> None:
+    result = compare_answers(
+        "c₂ = 0.0600 моль/л; n₁ = n₂ = 0.0120 моль; V = 15.0 мл.",
+        (
+            "1. c₂ = 0.0600 моль/л.\n"
+            "2) n₁ = 0.0120 моль, n₂ = 0.0120 моль.\n"
+            "3. V = 15.0 мл."
+        ),
+        tolerance_pct=0.5,
+    )
+
+    assert result["verdict"] == "match"
+    assert result["unexpected_solver_numbers"] == []
+
+
 def test_equivalent_litre_notation_is_normalized() -> None:
     result = compare_answers("V = 2 л", "V = 2 дм^3", tolerance_pct=2)
 

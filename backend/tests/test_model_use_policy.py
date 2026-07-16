@@ -464,6 +464,30 @@ def test_formula_representation_only_incomplete_can_reach_critic_after_chemistry
     )
 
 
+def test_two_reference_matching_answers_can_send_lexical_disagreement_to_critic() -> None:
+    matched = {
+        "status": "match",
+        "answer": "n1=n2=0.0120 моль; количество вещества сохраняется",
+        "solution": "Полное решение",
+        "comparison": {"verdict": "match"},
+    }
+    cross = {
+        "verdict": "incomplete",
+        "matched_count": 2,
+        "required_count": 2,
+        "missing_reference_groups": [],
+        "unexpected_solver_numbers": [],
+        "missing_text_claims": ["количество вещества сохраняется"],
+    }
+
+    assert validation._semantic_entailment_candidate(
+        "text", matched, matched, cross, chemistry_verified=True
+    )
+    assert not validation._semantic_entailment_candidate(
+        "text", matched, matched, cross, chemistry_verified=False
+    )
+
+
 def test_semantic_critic_never_receives_a_genuinely_missing_formula_result() -> None:
     report = {
         "status": "incomplete",

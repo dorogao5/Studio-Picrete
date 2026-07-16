@@ -62,7 +62,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v11-solution-backed-subject-critic"
+VALIDATION_POLICY_VERSION = "evidence-gate-v12-structured-answer-semantics"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {
@@ -332,6 +332,10 @@ def normalize_numeric_text(text: str) -> str:
         text or "",
     )
     text = text.replace("−", "-")
+    # Ordered-list markers describe answer structure, not measured values.
+    # Strip ``1.`` / ``2)`` only when followed by whitespace, preserving
+    # decimals, coefficients and oxidation states.
+    text = re.sub(r"(^|\s)\d{1,2}[.)](?=\s+\S)", r"\1", text, flags=re.MULTILINE)
     # LaTeX: -28{,}7\\,\\text{кДж}, 2\\cdot10^{-5}, H_2O — чистим макросы и индексы до извлечения чисел.
     text = text.replace("\\cdot", "·").replace("\\times", "×")
     text = text.replace("{,}", ",")
@@ -1300,6 +1304,15 @@ def _semantic_entailment_candidate(
         {"match", "uncertain", "incomplete"}
     ):
         return False
+    if (
+        solver.get("status") == "match"
+        and verifier.get("status") == "match"
+        and cross_comparison.get("verdict") in {"incomplete", "uncertain"}
+    ):
+        # Each independent answer already entails the reference.  Differences
+        # between their wording still require the full subject critic; lexical
+        # claim matching alone must not discard an otherwise proven task.
+        return True
     return all(_representation_only_incomplete(comparison) for comparison in comparisons)
 
 
