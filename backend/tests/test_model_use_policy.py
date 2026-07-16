@@ -488,6 +488,49 @@ def test_two_reference_matching_answers_can_send_lexical_disagreement_to_critic(
     )
 
 
+def test_representation_safe_answer_and_lexical_only_cross_difference_reach_critic() -> None:
+    solver = {
+        "status": "incomplete",
+        "answer": "Полный ОВР-ответ в plain-text записи",
+        "solution": "Полное решение",
+        "comparison": {
+            "verdict": "incomplete",
+            "matched_count": 6,
+            "required_count": 8,
+            "missing_reference_groups": [[4], [3]],
+            "unexpected_solver_numbers": [4, 3],
+            "missing_reference_units": [],
+            "missing_text_claims": [],
+        },
+    }
+    verifier = {
+        "status": "match",
+        "answer": "Тот же полный ОВР-ответ в Unicode-записи",
+        "solution": "Полное независимое решение",
+        "comparison": {"verdict": "match"},
+    }
+    cross = {
+        "verdict": "incomplete",
+        "matched_count": 8,
+        "required_count": 8,
+        "missing_reference_groups": [],
+        "unexpected_solver_numbers": [],
+        "missing_reference_units": [],
+        "missing_text_claims": ["Окислитель и восстановитель записаны иначе"],
+    }
+
+    assert validation._semantic_entailment_candidate(
+        "text", solver, verifier, cross, chemistry_verified=True
+    )
+    assert not validation._semantic_entailment_candidate(
+        "text",
+        solver,
+        verifier,
+        {**cross, "matched_count": 7, "missing_reference_groups": [[0.0021]]},
+        chemistry_verified=True,
+    )
+
+
 def test_semantic_critic_never_receives_a_genuinely_missing_formula_result() -> None:
     report = {
         "status": "incomplete",

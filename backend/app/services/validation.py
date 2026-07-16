@@ -62,7 +62,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v12-structured-answer-semantics"
+VALIDATION_POLICY_VERSION = "evidence-gate-v13-cross-answer-lexical-audit"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {
@@ -1313,7 +1313,14 @@ def _semantic_entailment_candidate(
         # between their wording still require the full subject critic; lexical
         # claim matching alone must not discard an otherwise proven task.
         return True
-    return all(_representation_only_incomplete(comparison) for comparison in comparisons)
+    reference_comparisons_safe = all(
+        _representation_only_incomplete(comparison)
+        for comparison in (solver.get("comparison") or {}, verifier.get("comparison") or {})
+    )
+    cross_comparison_safe = _representation_only_incomplete(
+        cross_comparison
+    ) or _lexical_only_cross_incomplete(cross_comparison)
+    return reference_comparisons_safe and cross_comparison_safe
 
 
 def _solution_backed_entailment_candidate(
@@ -1376,6 +1383,19 @@ def _representation_only_incomplete(comparison: dict) -> bool:
             return False
         unexpected.pop(match_index)
     return True
+
+
+def _lexical_only_cross_incomplete(comparison: dict) -> bool:
+    """Recognize wording-only disagreement after both reference gates passed."""
+
+    return bool(
+        comparison.get("verdict") == "incomplete"
+        and comparison.get("missing_text_claims")
+        and comparison.get("matched_count") == comparison.get("required_count")
+        and not (comparison.get("missing_reference_groups") or [])
+        and not (comparison.get("unexpected_solver_numbers") or [])
+        and not (comparison.get("missing_reference_units") or [])
+    )
 
 
 def _critic_confirms_semantic_entailment(critic: dict) -> bool:
