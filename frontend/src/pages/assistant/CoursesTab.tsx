@@ -233,15 +233,15 @@ function PublishReviewModal({
   }, [assistant.id, course.id]);
 
   return (
-    <Modal title="Review перед публикацией" open onClose={onClose} wide>
+    <Modal title="Проверка перед публикацией" open onClose={onClose} wide>
       <div className="space-y-4">
         <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3.5">
           <Eye className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
           <div>
-            <p className="text-sm font-semibold">Ничего ещё не опубликовано</p>
+            <p className="text-sm font-semibold">Эти изменения ещё не опубликованы</p>
             <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-              Сначала Studio собирает неизменяемый снимок, показывает blockers/warnings и student preview.
-              Кнопка публикации разблокируется только для просмотренной версии.
+              Проверьте ошибки, предупреждения и то, что увидят студенты.
+              Опубликовать можно только просмотренную версию.
             </p>
           </div>
         </div>
@@ -254,14 +254,14 @@ function PublishReviewModal({
               <div className={`rounded-lg border p-3.5 ${preflight.blockers.length ? "border-destructive/35 bg-destructive/5" : "border-success/35 bg-success/5"}`}>
                 <div className="flex items-center gap-2">
                   {preflight.blockers.length ? <XCircle className="h-4 w-4 text-destructive" /> : <CheckCircle2 className="h-4 w-4 text-success" />}
-                  <p className="text-sm font-semibold">Blockers: {preflight.blockers.length}</p>
+                  <p className="text-sm font-semibold">Ошибки: {preflight.blockers.length}</p>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">Блокируют отправку снимка на курс.</p>
               </div>
               <div className={`rounded-lg border p-3.5 ${preflight.warnings.length ? "border-warning/35 bg-warning/5" : "border-border bg-card"}`}>
                 <div className="flex items-center gap-2">
                   <AlertTriangle className={`h-4 w-4 ${preflight.warnings.length ? "text-warning" : "text-muted-foreground"}`} />
-                  <p className="text-sm font-semibold">Warnings: {preflight.warnings.length}</p>
+                  <p className="text-sm font-semibold">Предупреждения: {preflight.warnings.length}</p>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">Требуют осознанного подтверждения.</p>
               </div>
@@ -281,7 +281,7 @@ function PublishReviewModal({
             {preflight.ok && (
               <article className="overflow-hidden rounded-xl border border-border bg-background shadow-soft">
                 <header className="border-b border-border bg-card px-4 py-3 sm:px-5">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Student preview · {courseLabel}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Предпросмотр для студента · {courseLabel}</p>
                   <h3 className="mt-1 text-lg font-semibold">{preflight.preview.assistant_name}</h3>
                   <p className="text-sm text-muted-foreground">{preflight.preview.discipline} · для {preflight.preview.audience}</p>
                 </header>
