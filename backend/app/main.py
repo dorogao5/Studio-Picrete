@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -97,6 +98,7 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
     "generated_tasks": {
         "batch_id": "VARCHAR(32)",
         "answer": "TEXT DEFAULT ''",
+        "images": "JSON NOT NULL DEFAULT '[]'",
         "status": "VARCHAR(16) DEFAULT 'draft'",
         "validation": "JSON DEFAULT '{}'",
         "grounding": "JSON DEFAULT '{}'",
@@ -191,6 +193,9 @@ async def ensure_postgres_columns(conn) -> None:
     )
     await conn.exec_driver_sql(
         "ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE"
+    )
+    await conn.exec_driver_sql(
+        "ALTER TABLE generated_tasks ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb"
     )
     await conn.exec_driver_sql(
         "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS authority VARCHAR(32) DEFAULT 'reference'"
@@ -292,3 +297,8 @@ for router in (
     integration.router,
 ):
     app.include_router(router, prefix="/api")
+
+
+@app.get("/version")
+async def version() -> dict:
+    return {"service": "picrete-studio", "revision": os.environ.get("BUILD_REVISION", "development"), "studio_snapshot_schema": 1}

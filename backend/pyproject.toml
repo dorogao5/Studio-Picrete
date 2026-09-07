@@ -14,7 +14,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "PyJWT>=2.9",
     "bcrypt>=4.2",
-    "cryptography>=43.0",
+    "cryptography>=50.0.0",
     "python-multipart>=0.0.9",
     "snowballstemmer>=2.2",
     "pymupdf>=1.26",
@@ -25,5 +25,14 @@ dependencies = [
 line-length = 120
 target-version = "py312"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "ruff==0.15.21",
+]
+
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -105,6 +105,35 @@ export interface CoursePublishResult {
   course_id: string;
 }
 
+export interface PreflightIssue {
+  severity: "blocker" | "warning";
+  code: string;
+  title: string;
+  message: string;
+  field?: string;
+  task_id?: string;
+  task_label?: string;
+}
+
+export interface CoursePublishPreflight {
+  ok: boolean;
+  blockers: PreflightIssue[];
+  warnings: PreflightIssue[];
+  review_token: string;
+  digest: string;
+  preview: {
+    assistant_name: string;
+    discipline: string;
+    description: string;
+    audience: string;
+    topics: string[];
+    reference_sheets: string[];
+    tutor_prompt_version: number;
+    model_id: string;
+    target_course_id: string;
+  };
+}
+
 export type PromptRole = "grader" | "generator" | "tutor";
 
 export interface PromptVersion {
@@ -241,6 +270,7 @@ export interface GeneratedTask {
   statement: string;
   reference_solution: string;
   answer: string;
+  images: string[];
   rubric: RubricCriterion[];
   max_score: number;
   difficulty: string;
@@ -261,6 +291,15 @@ export interface GeneratedTask {
   validation_ready: boolean;
   export_ready: boolean;
   created_at: string;
+}
+
+export interface TaskExportPreflight {
+  ok: boolean;
+  summary: { tasks: number; images: number; blockers: number; warnings: number };
+  blockers: PreflightIssue[];
+  warnings: PreflightIssue[];
+  review_token: string;
+  digest: string;
 }
 
 export interface GenerationBatch {

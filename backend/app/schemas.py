@@ -321,6 +321,7 @@ class GeneratedTaskOut(ORMModel):
     statement: str
     reference_solution: str
     answer: str
+    images: list[str] = []
     rubric: list
     max_score: float
     difficulty: str
@@ -352,6 +353,7 @@ class GeneratedTaskUpdate(BaseModel):
     statement: str | None = None
     reference_solution: str | None = None
     answer: str | None = None
+    images: list[str] | None = Field(default=None, max_length=12)
     rubric: list | None = None
     max_score: float | None = None
     status: str | None = Field(default=None, pattern="^(draft|validated|needs_review|approved|rejected)$")
@@ -414,6 +416,18 @@ class TaskExportRequest(BaseModel):
     source_code: str = "studio"
     source_title: str = ""
     version: str = "1.0"
+    review_token: str = ""
+    acknowledge_warnings: bool = False
+
+    @field_validator("task_ids")
+    @classmethod
+    def unique_task_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
+class PublishReviewRequest(BaseModel):
+    review_token: str = Field(min_length=1)
+    acknowledge_warnings: bool = False
 
 
 class KnowledgeDocumentOut(ORMModel):

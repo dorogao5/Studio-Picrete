@@ -51,7 +51,7 @@ def generated_task(*, status="needs_review", validation=None, approved=False):
         approved=approved,
         validation=validation or {"verdict": status},
         statement="Условие",
-        reference_solution="Решение",
+        reference_solution="Полное эталонное решение с проверкой результата",
         answer="Ответ",
         rubric=[{"criterion_name": "Решение", "max_score": 5}],
         max_score=5,
@@ -357,10 +357,17 @@ def test_export_accepts_complete_current_approval(monkeypatch) -> None:
         return SimpleNamespace(discipline="Химия")
 
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    preflight = asyncio.run(
+        tasks_api.preflight_task_export(
+            "assistant",
+            TaskExportRequest(task_ids=[], mode="bank"),
+            FakeDb([task]),
+        )
+    )
     result = asyncio.run(
         tasks_api.export_tasks(
             "assistant",
-            TaskExportRequest(task_ids=[], mode="bank"),
+            TaskExportRequest(task_ids=[], mode="bank", review_token=preflight["review_token"]),
             FakeDb([task]),
         )
     )
@@ -376,15 +383,42 @@ def test_export_accepts_complete_automatic_evidence_without_human_approval(monke
         return SimpleNamespace(discipline="Химия")
 
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
-    result = asyncio.run(
-        tasks_api.export_tasks(
+    preflight = asyncio.run(
+        tasks_api.preflight_task_export(
             "assistant",
             TaskExportRequest(task_ids=[task.id], mode="bank"),
             FakeDb([task]),
         )
     )
+    result = asyncio.run(
+        tasks_api.export_tasks(
+            "assistant",
+            TaskExportRequest(task_ids=[task.id], mode="bank", review_token=preflight["review_token"]),
+            FakeDb([task]),
+        )
+    )
 
     assert result["paragraphs"][0]["tasks"][0]["text"] == "Условие"
+
+
+def test_export_requires_a_fresh_review_even_for_ready_task(monkeypatch) -> None:
+    task = generated_task(status="validated", approved=False)
+    task.validation = current_validation(task)
+
+    async def fake_assistant(*_args):
+        return SimpleNamespace(discipline="Химия")
+
+    monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
+    with pytest.raises(HTTPException, match="review") as error:
+        asyncio.run(
+            tasks_api.export_tasks(
+                "assistant",
+                TaskExportRequest(task_ids=[task.id], mode="bank"),
+                FakeDb([task]),
+            )
+        )
+
+    assert error.value.status_code == 409
 
 
 @pytest.mark.parametrize(

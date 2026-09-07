@@ -1,4 +1,5 @@
 from app.models import GeneratedTask
+from app.services.content_preflight import normalize_task_images
 from app.services.validation import extract_numbers
 
 
@@ -21,7 +22,12 @@ def build_bank_export(
                 "topic": topic,
                 "theory_text": "",
                 "tasks": [
-                    {"number": f"{index}.{position}", "text": task.statement, "images": [], "answer": task.answer}
+                    {
+                        "number": f"{index}.{position}",
+                        "text": task.statement,
+                        "images": normalize_task_images(getattr(task, "images", [])),
+                        "answer": task.answer,
+                    }
                     for position, task in enumerate(groups[topic], start=1)
                 ],
             }
@@ -49,6 +55,7 @@ def build_variants_export(tasks: list[GeneratedTask], tolerance_by_template: dic
             {
                 "title": task.topic or "Задача",
                 "content": task.statement,
+                "images": normalize_task_images(getattr(task, "images", [])),
                 "reference_solution": task.reference_solution,
                 "reference_answer": task.answer,
                 "answer_tolerance": round(answer_tolerance, 10),

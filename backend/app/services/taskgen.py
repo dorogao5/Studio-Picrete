@@ -522,6 +522,9 @@ def task_from_item(
         statement=str(item.get("statement", "")),
         reference_solution=str(item.get("reference_solution", "")),
         answer=str(item.get("answer") or ""),
+        images=[str(path).strip() for path in item.get("images", []) if str(path).strip()]
+        if isinstance(item.get("images"), list)
+        else [],
         rubric=rubric if isinstance(rubric, list) else [],
         max_score=max_score,
         difficulty=str(item.get("difficulty") or difficulty),
@@ -707,6 +710,7 @@ async def _validate_batch(
             reference_answer=task.answer,
             rubric=task.rubric,
             max_score=task.max_score,
+            task_images=getattr(task, "images", []),
             answer_format=contract["answer_format"],
             tolerance_pct=contract["tolerance_pct"],
             grounding=grounding_text,

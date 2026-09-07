@@ -1,22 +1,15 @@
 services:
   studio-api:
+    image: picrete-studio:${RELEASE_SHA:-local}
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        BUILD_REVISION: ${RELEASE_SHA:-unknown}
     network_mode: host
+    env_file: .env
     volumes:
-      - ./backend/data:/app/data
-    environment:
-      - STUDIO_DATABASE_URL=${STUDIO_DATABASE_URL:-postgresql+asyncpg://picretesuperuser:${POSTGRES_PASSWORD}@localhost:5432/picrete_studio}
-      - STUDIO_SECRET_KEY=${STUDIO_SECRET_KEY}
-      - STUDIO_FIRST_ADMIN_USERNAME=${STUDIO_FIRST_ADMIN_USERNAME:-admin}
-      - STUDIO_FIRST_ADMIN_PASSWORD=${STUDIO_FIRST_ADMIN_PASSWORD}
-      - STUDIO_CORS_ORIGINS=${STUDIO_CORS_ORIGINS:-https://dev.picrete.com}
-      - STUDIO_DATALAB_API_KEY=${STUDIO_DATALAB_API_KEY}
-      - STUDIO_DATALAB_BASE_URL=${STUDIO_DATALAB_BASE_URL:-https://www.datalab.to/api/v1}
-      - STUDIO_DATALAB_MODE=${STUDIO_DATALAB_MODE:-accurate}
-      - STUDIO_PICRETE_API_URL=${STUDIO_PICRETE_API_URL}
-      - STUDIO_PICRETE_INTEGRATION_TOKEN=${STUDIO_PICRETE_INTEGRATION_TOKEN}
+      - ./data:/app/data
     restart: always
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8100/healthz')"]
@@ -26,8 +19,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "1.0"
+          memory: 768M
     logging:
       driver: "json-file"
       options:

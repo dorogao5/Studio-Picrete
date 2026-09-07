@@ -1,4 +1,4 @@
-import { GraduationCap, Link2, Pencil, Plus, Send, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, GraduationCap, Link2, Pencil, Plus, Send, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Badge,
@@ -13,7 +13,7 @@ import {
   Spinner,
 } from "../../components/ui";
 import { apiErrorMessage, coursesApi } from "../../lib/api";
-import type { Assistant, Course, PicreteCourseOption } from "../../lib/types";
+import type { Assistant, Course, CoursePublishPreflight, PicreteCourseOption } from "../../lib/types";
 
 export default function CoursesTab({ assistant }: { assistant: Assistant }) {
   const [courses, setCourses] = useState<Course[] | null>(null);
@@ -22,6 +22,7 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
   const [editing, setEditing] = useState<Course | null | undefined>(undefined);
   const [publishingId, setPublishingId] = useState("");
   const [publishedId, setPublishedId] = useState("");
+  const [reviewCourse, setReviewCourse] = useState<Course | null>(null);
 
   const reload = async () => {
     try {
@@ -37,16 +38,20 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistant.id]);
 
-  const publish = async (course: Course) => {
+  const publish = async (course: Course, reviewToken: string, acknowledgeWarnings: boolean) => {
     setPublishingId(course.id);
     setPublishedId("");
     setError("");
     try {
-      await coursesApi.publish(assistant.id, course.id);
+      await coursesApi.publish(assistant.id, course.id, {
+        review_token: reviewToken,
+        acknowledge_warnings: acknowledgeWarnings,
+      });
       setPublishedId(course.id);
       await reload();
     } catch (err) {
       setError(apiErrorMessage(err));
+      throw err;
     } finally {
       setPublishingId("");
     }
@@ -123,7 +128,7 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
                   variant={publishedId === course.id ? "secondary" : "primary"}
                   disabled={!course.external_course_id}
                   loading={publishingId === course.id}
-                  onClick={() => void publish(course)}
+                  onClick={() => setReviewCourse(course)}
                 >
                   <Send className="h-3.5 w-3.5" />
                   {publishedId === course.id
@@ -161,6 +166,176 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
           onSaved={reload}
         />
       )}
+      {reviewCourse && (
+        <PublishReviewModal
+          assistant={assistant}
+          course={reviewCourse}
+          courseLabel={picreteCourses.find((item) => item.id === reviewCourse.external_course_id)?.title ?? reviewCourse.external_course_id}
+          publishing={publishingId === reviewCourse.id}
+          onClose={() => setReviewCourse(null)}
+          onPublish={async (token, acknowledgeWarnings) => {
+            await publish(reviewCourse, token, acknowledgeWarnings);
+            setReviewCourse(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PublishReviewModal({
+  assistant,
+  course,
+  courseLabel,
+  publishing,
+  onClose,
+  onPublish,
+}: {
+  assistant: Assistant;
+  course: Course;
+  courseLabel: string;
+  publishing: boolean;
+  onClose: () => void;
+  onPublish: (token: string, acknowledgeWarnings: boolean) => Promise<void>;
+}) {
+  const [preflight, setPreflight] = useState<CoursePublishPreflight | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [acknowledgeWarnings, setAcknowledgeWarnings] = useState(false);
+  const [error, setError] = useState("");
+
+  const runPreflight = async () => {
+    setLoading(true);
+    setError("");
+    setAcknowledgeWarnings(false);
+    try {
+      setPreflight(await coursesApi.preflight(assistant.id, course.id));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setPreflight(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitPublish = async () => {
+    if (!preflight) return;
+    setError("");
+    try {
+      await onPublish(preflight.review_token, acknowledgeWarnings);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  };
+
+  useEffect(() => {
+    void runPreflight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistant.id, course.id]);
+
+  return (
+    <Modal title="Review перед публикацией" open onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-3.5">
+          <Eye className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+          <div>
+            <p className="text-sm font-semibold">Ничего ещё не опубликовано</p>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              Сначала Studio собирает неизменяемый снимок, показывает blockers/warnings и student preview.
+              Кнопка публикации разблокируется только для просмотренной версии.
+            </p>
+          </div>
+        </div>
+
+        {loading ? <Spinner label="Проверяем снимок курса…" /> : null}
+        <ErrorNote message={error} />
+        {preflight && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className={`rounded-lg border p-3.5 ${preflight.blockers.length ? "border-destructive/35 bg-destructive/5" : "border-success/35 bg-success/5"}`}>
+                <div className="flex items-center gap-2">
+                  {preflight.blockers.length ? <XCircle className="h-4 w-4 text-destructive" /> : <CheckCircle2 className="h-4 w-4 text-success" />}
+                  <p className="text-sm font-semibold">Blockers: {preflight.blockers.length}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Блокируют отправку снимка на курс.</p>
+              </div>
+              <div className={`rounded-lg border p-3.5 ${preflight.warnings.length ? "border-warning/35 bg-warning/5" : "border-border bg-card"}`}>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className={`h-4 w-4 ${preflight.warnings.length ? "text-warning" : "text-muted-foreground"}`} />
+                  <p className="text-sm font-semibold">Warnings: {preflight.warnings.length}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Требуют осознанного подтверждения.</p>
+              </div>
+            </div>
+
+            {[...preflight.blockers, ...preflight.warnings].length > 0 && (
+              <ul className="space-y-2">
+                {[...preflight.blockers, ...preflight.warnings].map((issue, index) => (
+                  <li key={`${issue.code}-${index}`} className={`rounded-lg border p-3 text-xs ${issue.severity === "blocker" ? "border-destructive/30 bg-destructive/5" : "border-warning/30 bg-warning/5"}`}>
+                    <p className="font-semibold text-foreground">{issue.title}</p>
+                    <p className="mt-0.5 text-muted-foreground">{issue.message}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {preflight.ok && (
+              <article className="overflow-hidden rounded-xl border border-border bg-background shadow-soft">
+                <header className="border-b border-border bg-card px-4 py-3 sm:px-5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Student preview · {courseLabel}</p>
+                  <h3 className="mt-1 text-lg font-semibold">{preflight.preview.assistant_name}</h3>
+                  <p className="text-sm text-muted-foreground">{preflight.preview.discipline} · для {preflight.preview.audience}</p>
+                </header>
+                <div className="space-y-4 p-4 sm:p-5">
+                  <p className="text-sm leading-6">{preflight.preview.description || "Описание не заполнено"}</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <PreviewFact label="Промпт разбора" value={`v${preflight.preview.tutor_prompt_version}`} />
+                    <PreviewFact label="Модель" value={preflight.preview.model_id} />
+                    <PreviewFact label="Справочники" value={String(preflight.preview.reference_sheets.length)} />
+                  </div>
+                  {preflight.preview.topics.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {preflight.preview.topics.slice(0, 8).map((topic) => <Badge key={topic}>{topic}</Badge>)}
+                    </div>
+                  )}
+                </div>
+              </article>
+            )}
+
+            {preflight.warnings.length > 0 && preflight.ok && (
+              <label className="flex min-h-11 items-start gap-2 rounded-lg border border-warning/35 bg-warning/5 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-accent"
+                  checked={acknowledgeWarnings}
+                  onChange={(event) => setAcknowledgeWarnings(event.target.checked)}
+                />
+                <span>Я просмотрел(а) предупреждения и student preview этой версии.</span>
+              </label>
+            )}
+          </>
+        )}
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="ghost" onClick={onClose}>Отмена</Button>
+          <Button variant="secondary" onClick={() => void runPreflight()} loading={loading}>Проверить заново</Button>
+          <Button
+            onClick={() => void submitPublish()}
+            loading={publishing}
+            disabled={!preflight?.ok || !preflight.review_token || (preflight.warnings.length > 0 && !acknowledgeWarnings)}
+          >
+            <Send className="h-4 w-4" /> Опубликовать просмотренную версию
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PreviewFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words text-sm font-medium">{value}</p>
     </div>
   );
 }

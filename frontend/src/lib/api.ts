@@ -3,6 +3,7 @@ import type {
   Assistant,
   Course,
   CoursePublishResult,
+  CoursePublishPreflight,
   DocumentAnalysis,
   GeneratedTask,
   GenerationBatch,
@@ -22,6 +23,7 @@ import type {
   PromptVersion,
   ReferenceSheet,
   TaskTemplate,
+  TaskExportPreflight,
   TutorMessage,
   TutorRun,
   UserOut,
@@ -84,8 +86,10 @@ export const coursesApi = {
     api.patch<Course>(`/assistants/${assistantId}/courses/${courseId}`, body).then((r) => r.data),
   remove: (assistantId: string, courseId: string) => api.delete(`/assistants/${assistantId}/courses/${courseId}`),
   picreteOptions: () => api.get<PicreteCourseOption[]>("/integration/picrete/courses").then((r) => r.data),
-  publish: (assistantId: string, courseId: string) =>
-    api.post<CoursePublishResult>(`/assistants/${assistantId}/courses/${courseId}/publish`).then((r) => r.data),
+  preflight: (assistantId: string, courseId: string) =>
+    api.post<CoursePublishPreflight>(`/assistants/${assistantId}/courses/${courseId}/publish/preflight`).then((r) => r.data),
+  publish: (assistantId: string, courseId: string, body: { review_token: string; acknowledge_warnings: boolean }) =>
+    api.post<CoursePublishResult>(`/assistants/${assistantId}/courses/${courseId}/publish`, body).then((r) => r.data),
 };
 
 export const providersApi = {
@@ -180,8 +184,20 @@ export const tasksApi = {
     api.post<GenerationBatch>(`/assistants/${assistantId}/tasks/revalidation-batches`, body).then((r) => r.data),
   exportTasks: (
     assistantId: string,
-    body: { task_ids?: string[]; mode: "bank" | "variants"; source_code?: string; source_title?: string; version?: string },
+    body: {
+      task_ids?: string[];
+      mode: "bank" | "variants";
+      source_code?: string;
+      source_title?: string;
+      version?: string;
+      review_token?: string;
+      acknowledge_warnings?: boolean;
+    },
   ) => api.post<Record<string, unknown>>(`/assistants/${assistantId}/tasks/export`, body).then((r) => r.data),
+  preflightExport: (
+    assistantId: string,
+    body: { task_ids?: string[]; mode: "bank" | "variants"; source_code?: string; source_title?: string; version?: string },
+  ) => api.post<TaskExportPreflight>(`/assistants/${assistantId}/tasks/export/preflight`, body).then((r) => r.data),
 };
 
 export const kbApi = {

@@ -95,6 +95,7 @@ async def _revalidate_task(
         reference_answer=task.answer,
         rubric=task.rubric,
         max_score=task.max_score,
+        task_images=getattr(task, "images", []),
         answer_format=contract["answer_format"],
         tolerance_pct=contract["tolerance_pct"],
         grounding=grounding_text,

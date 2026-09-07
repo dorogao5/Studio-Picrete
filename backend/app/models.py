@@ -145,6 +145,10 @@ class GeneratedTask(Base):
     statement: Mapped[str] = mapped_column(Text)
     reference_solution: Mapped[str] = mapped_column(Text, default="")
     answer: Mapped[str] = mapped_column(Text, default="")
+    # Relative media paths are part of the published task-bank contract.  Keep
+    # them separate from Markdown so the Picrete importer cannot silently lose
+    # a mandatory diagram during conversion.
+    images: Mapped[list] = mapped_column(JSON, default=list)
     rubric: Mapped[list] = mapped_column(JSON, default=list)
     max_score: Mapped[float] = mapped_column(Float, default=10.0)
     difficulty: Mapped[str] = mapped_column(String(16), default="medium")

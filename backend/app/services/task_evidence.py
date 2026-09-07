@@ -3,7 +3,7 @@ import json
 from typing import Any
 
 
-CONTENT_FINGERPRINT_VERSION = "task-content-v1"
+CONTENT_FINGERPRINT_VERSION = "task-content-v2"
 APPROVAL_SCHEMA_VERSION = "teacher-override-v1"
 
 
@@ -51,6 +51,8 @@ def build_task_content_fingerprint(
     rubric: object,
     max_score: object,
     validation_config: object,
+    images: object = None,
+    legacy_without_images: bool = False,
 ) -> str:
     try:
         normalized_max_score: float | str = float(max_score)
@@ -61,15 +63,19 @@ def build_task_content_fingerprint(
         "statement": str(statement or ""),
         "reference_solution": str(reference_solution or ""),
         "answer": str(answer or ""),
+        "images": [str(value).strip() for value in images if str(value).strip()] if isinstance(images, list) else [],
         "rubric": rubric if isinstance(rubric, list) else [],
         "max_score": normalized_max_score,
         "validation_config": normalize_validation_config(validation_config),
     }
+    if legacy_without_images:
+        payload["schema"] = "task-content-v1"
+        payload.pop("images")
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def task_content_fingerprint(task: object, validation_config: object) -> str:
+def task_content_fingerprint(task: object, validation_config: object, *, legacy_without_images: bool = False) -> str:
     config = normalize_validation_config(validation_config)
     # Validation binds model-supplied deterministic facts and provenance to the
     # exact task snapshot. Recalculate the task-owned part on every approval or
@@ -88,6 +94,8 @@ def task_content_fingerprint(task: object, validation_config: object) -> str:
         rubric=getattr(task, "rubric", []),
         max_score=getattr(task, "max_score", 0),
         validation_config=config,
+        images=getattr(task, "images", []),
+        legacy_without_images=legacy_without_images,
     )
 
 
@@ -96,4 +104,12 @@ def evidence_matches_task(value: object, task: object) -> bool:
         return False
     config = value.get("validation_config")
     fingerprint = str(value.get("content_fingerprint") or "").strip()
-    return bool(fingerprint and fingerprint == task_content_fingerprint(task, config))
+    if not fingerprint:
+        return False
+    if fingerprint == task_content_fingerprint(task, config):
+        return True
+    # Existing reviews without images remain valid. Adding any media requires
+    # a v2 review, so the old digest can never authorize an unreviewed diagram.
+    return not getattr(task, "images", []) and fingerprint == task_content_fingerprint(
+        task, config, legacy_without_images=True
+    )

@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db import get_db
 from app.models import Assistant, Course, ModelEntry, PromptVersion, ReferenceSheet, User
+from app.schemas import PublishReviewRequest
 from app.security import get_current_user
+from app.services.content_preflight import create_review_token, verify_review_token
 from app.services.model_policy import current_model_use_policy
 
 router = APIRouter(tags=["integration"])
@@ -115,6 +117,13 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             )
         ).scalars()
     )
+    active_roles = [prompt.role for prompt in prompts]
+    duplicate_roles = sorted({role for role in active_roles if active_roles.count(role) > 1})
+    if duplicate_roles:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Найдено несколько активных промптов одной роли: " + ", ".join(duplicate_roles),
+        )
     active_prompts = {
         prompt.role: {
             "id": prompt.id,
@@ -143,6 +152,12 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             )
         ).scalars()
     )
+    empty_sheets = [sheet.title for sheet in sheets if not sheet.content_markdown.strip()]
+    if empty_sheets:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Пустые студенческие справочники нельзя публиковать: " + ", ".join(empty_sheets[:5]),
+        )
     snapshot = {
         "schema_version": 1,
         "assistant": {
@@ -172,24 +187,161 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
     return _seal_snapshot(snapshot)
 
 
+def _publication_scope(assistant_id: str, course_id: str) -> str:
+    return f"course-publish:{assistant_id}:{course_id}"
+
+
+async def _build_publication_preflight(db: AsyncSession, assistant: Assistant, course: Course) -> dict:
+    blockers: list[dict] = []
+    warnings: list[dict] = []
+    external_course_id = course.external_course_id.strip()
+    if not external_course_id:
+        blockers.append(
+            {
+                "severity": "blocker",
+                "code": "course_unbound",
+                "title": "Курс не привязан к Picrete",
+                "message": "Выберите целевой курс до review.",
+                "field": "external_course_id",
+            }
+        )
+    settings = get_settings()
+    if not settings.picrete_api_url or not settings.picrete_integration_token:
+        blockers.append(
+            {
+                "severity": "blocker",
+                "code": "integration_unconfigured",
+                "title": "Связь с Picrete не настроена",
+                "message": "Администратор должен задать URL API и integration token.",
+                "field": "integration",
+            }
+        )
+
+    snapshot = None
+    try:
+        snapshot = await _build_snapshot(db, assistant)
+    except HTTPException as exc:
+        blockers.append(
+            {
+                "severity": "blocker",
+                "code": "snapshot_incomplete",
+                "title": "Снимок ассистента не готов",
+                "message": str(exc.detail),
+                "field": "assistant",
+            }
+        )
+
+    if not assistant.description.strip():
+        warnings.append(
+            {
+                "severity": "warning",
+                "code": "description_empty",
+                "title": "Нет описания для студента",
+                "message": "В карточке курса будет непонятно, с чем помогает ассистент.",
+                "field": "description",
+            }
+        )
+    if not (assistant.topics or []):
+        warnings.append(
+            {
+                "severity": "warning",
+                "code": "topics_empty",
+                "title": "Не перечислены темы",
+                "message": "Проверьте границы предметной области ассистента.",
+                "field": "topics",
+            }
+        )
+    if not (assistant.criteria or []):
+        warnings.append(
+            {
+                "severity": "warning",
+                "code": "criteria_empty",
+                "title": "Нет критериев оценивания",
+                "message": "Режим разбора доступен, но проверка работ не имеет явной шкалы.",
+                "field": "criteria",
+            }
+        )
+
+    digest = ""
+    token = ""
+    preview: dict = {}
+    if snapshot is not None:
+        digest = hashlib.sha256(f"{external_course_id}:{snapshot['version']}".encode()).hexdigest()
+        token = create_review_token(
+            scope=_publication_scope(assistant.id, course.id),
+            digest=digest,
+            secret_key=get_settings().secret_key,
+        )
+        preview = {
+            "assistant_name": assistant.name,
+            "discipline": assistant.discipline,
+            "description": assistant.description,
+            "audience": assistant.audience,
+            "topics": list(assistant.topics or []),
+            "reference_sheets": [sheet["title"] for sheet in snapshot["reference_sheets"]],
+            "tutor_prompt_version": snapshot["prompts"]["tutor"]["version"],
+            "model_id": snapshot["assistant"]["runtime_policy"]["tutor_model_id"],
+            "target_course_id": external_course_id,
+        }
+    return {
+        "ok": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+        "review_token": token,
+        "digest": digest,
+        "preview": preview,
+        "snapshot": snapshot,
+    }
+
+
+@router.post("/assistants/{assistant_id}/courses/{course_id}/publish/preflight")
+async def preflight_course_assistant(
+    assistant_id: str,
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    assistant, course = await _course_or_404(db, assistant_id, course_id)
+    result = await _build_publication_preflight(db, assistant, course)
+    result.pop("snapshot", None)
+    return result
+
+
 @router.post("/assistants/{assistant_id}/courses/{course_id}/publish")
 async def publish_course_assistant(
     assistant_id: str,
     course_id: str,
+    body: PublishReviewRequest,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
     settings = get_settings()
     _ensure_configured()
     assistant, course = await _course_or_404(db, assistant_id, course_id)
-    external_course_id = course.external_course_id.strip()
-    if not external_course_id:
+    preflight = await _build_publication_preflight(db, assistant, course)
+    if preflight["blockers"]:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Укажите ID курса в Picrete перед публикацией.",
+            "Публикация остановлена: " + preflight["blockers"][0]["message"],
+        )
+    if preflight["warnings"] and not body.acknowledge_warnings:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Перед публикацией подтвердите предупреждения preflight.",
+        )
+    if not verify_review_token(
+        body.review_token,
+        scope=_publication_scope(assistant.id, course.id),
+        digest=preflight["digest"],
+        secret_key=get_settings().secret_key,
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Снимок изменился или review устарел. Просмотрите student preview ещё раз.",
         )
 
-    snapshot = await _build_snapshot(db, assistant)
+    external_course_id = course.external_course_id.strip()
+    snapshot = preflight["snapshot"]
     url = (
         f"{settings.picrete_api_url.rstrip('/')}/api/v1/internal/studio/"
         f"course-assistants/{external_course_id}"

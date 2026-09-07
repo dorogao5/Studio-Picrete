@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Eye,
   Loader2,
   Pencil,
   Plus,
@@ -39,9 +40,11 @@ import type {
   TaskKind,
   TaskTemplate,
   TaskValidation,
+  TaskExportPreflight,
 } from "../../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
 import MathText from "../../components/MathText";
+import TaskPreview from "../../components/TaskPreview";
 import { RubricEditor, rubricValidationError } from "../../components/RubricEditor";
 import { deepSeekV4Options } from "./PromptsTab";
 
@@ -765,6 +768,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           attentionCount={attentionCount}
           autoReadyCount={autoReadyCount}
           manualReadyCount={manualReadyCount}
+          tasks={taskList}
           onClose={() => setExportOpen(false)}
         />
       )}
@@ -997,6 +1001,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
   const approvalId = useId();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [revalidating, setRevalidating] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
@@ -1159,6 +1164,15 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           </Button>
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Предпросмотр для студента"
+            aria-label="Открыть предпросмотр задачи"
+            onClick={() => setPreviewOpen(true)}
+          >
+            <Eye className="h-4 w-4" />
+          </button>
           {task.status !== "rejected" && (
             <button
               type="button"
@@ -1262,6 +1276,11 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           }}
         />
       )}
+      {previewOpen && (
+        <Modal title="Предпросмотр задачи" open onClose={() => setPreviewOpen(false)} wide>
+          <TaskPreview task={task} mode="student" />
+        </Modal>
+      )}
     </Card>
   );
 }
@@ -1280,9 +1299,13 @@ function TaskEditModal({
   const [statement, setStatement] = useState(task.statement);
   const [solution, setSolution] = useState(task.reference_solution);
   const [answer, setAnswer] = useState(task.answer);
+  const [imagesText, setImagesText] = useState(task.images.join("\n"));
   const [maxScore, setMaxScore] = useState(task.max_score);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"student" | "exam">("student");
+  const images = imagesText.split("\n").map((value) => value.trim()).filter(Boolean);
+  const draft = { ...task, statement, reference_solution: solution, answer, images, max_score: maxScore };
 
   const submit = async () => {
     setLoading(true);
@@ -1292,6 +1315,7 @@ function TaskEditModal({
         statement,
         reference_solution: solution,
         answer,
+        images,
         max_score: maxScore,
       });
       onSaved();
@@ -1304,21 +1328,51 @@ function TaskEditModal({
 
   return (
     <Modal title="Редактирование задачи" open onClose={onClose} wide>
-      <div className="space-y-4">
-        <Field label="Условие">
-          <Textarea rows={5} value={statement} onChange={(e) => setStatement(e.target.value)} />
-        </Field>
-        <Field label="Эталонное решение">
-          <Textarea rows={6} value={solution} onChange={(e) => setSolution(e.target.value)} />
-        </Field>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Ответ">
-            <Input value={answer} onChange={(e) => setAnswer(e.target.value)} />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-4">
+          <Field label="Условие">
+            <Textarea rows={5} value={statement} onChange={(e) => setStatement(e.target.value)} />
           </Field>
-          <Field label="Макс. балл">
-            <Input type="number" min={0} value={maxScore} onChange={(e) => setMaxScore(Number(e.target.value))} />
+          <Field label="Эталонное решение">
+            <Textarea rows={6} value={solution} onChange={(e) => setSolution(e.target.value)} />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Ответ">
+              <Input value={answer} onChange={(e) => setAnswer(e.target.value)} />
+            </Field>
+            <Field label="Макс. балл">
+              <Input type="number" min={0} value={maxScore} onChange={(e) => setMaxScore(Number(e.target.value))} />
+            </Field>
+          </div>
+          <Field
+            label="Изображения"
+            hint="Один относительный путь в строке. Если условие ссылается на рисунок, список не может быть пустым."
+          >
+            <Textarea
+              rows={3}
+              value={imagesText}
+              onChange={(event) => setImagesText(event.target.value)}
+              placeholder="images/task-01.png"
+            />
           </Field>
         </div>
+        <div className="min-w-0">
+          <div className="mb-2 grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/30 p-1" role="group" aria-label="Режим предпросмотра">
+            {(["student", "exam"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={previewMode === mode}
+                className={`min-h-10 rounded-md px-3 py-2 text-sm font-medium ${previewMode === mode ? "bg-card shadow-soft" : "text-muted-foreground hover:bg-card/60"}`}
+                onClick={() => setPreviewMode(mode)}
+              >
+                {mode === "student" ? "Студент" : "Экзамен"}
+              </button>
+            ))}
+          </div>
+          <TaskPreview task={draft} mode={previewMode} />
+        </div>
+        <div className="space-y-3 lg:col-span-2">
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
@@ -1327,6 +1381,7 @@ function TaskEditModal({
           <Button onClick={submit} loading={loading} disabled={!statement.trim()}>
             Сохранить
           </Button>
+        </div>
         </div>
       </div>
     </Modal>
@@ -1768,6 +1823,7 @@ function ExportModal({
   attentionCount,
   autoReadyCount,
   manualReadyCount,
+  tasks,
   onClose,
 }: {
   assistant: Assistant;
@@ -1776,6 +1832,7 @@ function ExportModal({
   attentionCount: number;
   autoReadyCount: number;
   manualReadyCount: number;
+  tasks: GeneratedTask[];
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"bank" | "variants">("bank");
@@ -1784,6 +1841,35 @@ function ExportModal({
   const [version, setVersion] = useState("1.0");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [preflight, setPreflight] = useState<TaskExportPreflight | null>(null);
+  const [acknowledgeWarnings, setAcknowledgeWarnings] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const selectedTasks = tasks.filter((task) => taskIds.includes(task.id));
+
+  useEffect(() => {
+    setPreflight(null);
+    setAcknowledgeWarnings(false);
+    setPreviewIndex(0);
+  }, [mode, sourceCode, sourceTitle, version, taskIds.join("|")]);
+
+  const runPreflight = async () => {
+    setReviewing(true);
+    setError("");
+    try {
+      setPreflight(await tasksApi.preflightExport(assistant.id, {
+        task_ids: taskIds,
+        mode,
+        source_code: sourceCode,
+        source_title: sourceTitle,
+        version,
+      }));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   const submit = async () => {
     setLoading(true);
@@ -1795,6 +1881,8 @@ function ExportModal({
         source_code: sourceCode,
         source_title: sourceTitle,
         version,
+        review_token: preflight?.review_token,
+        acknowledge_warnings: acknowledgeWarnings,
       });
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -1852,6 +1940,79 @@ function ExportModal({
           В файл войдут готовые задачи: {taskIds.length} шт. Автоматически допущены: {autoReadyCount};
           приняты преподавателем как исключение: {manualReadyCount}.
         </p>
+        <div className="rounded-lg border border-border bg-muted/15 p-3.5">
+          <p className="text-sm font-semibold">1 · Preflight содержимого</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Проверим потерянные рисунки, обрывы формул и дробей, ссылки на отсутствующий контекст, знак ответа,
+            составные подпункты и сумму баллов. После любого изменения review нужно пройти снова.
+          </p>
+          <Button className="mt-3 w-full sm:w-auto" variant="secondary" onClick={() => void runPreflight()} loading={reviewing} disabled={taskIds.length === 0}>
+            <Search className="h-4 w-4" /> Запустить preflight
+          </Button>
+        </div>
+
+        {preflight && (
+          <div className="space-y-3">
+            <div
+              role="status"
+              className={`rounded-lg border p-3.5 ${preflight.ok ? "border-success/35 bg-success/5" : "border-destructive/35 bg-destructive/5"}`}
+            >
+              <p className="text-sm font-semibold">
+                {preflight.ok ? "Блокирующих ошибок нет" : `Экспорт заблокирован: ${preflight.blockers.length}`}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Задач: {preflight.summary.tasks} · изображений: {preflight.summary.images} · предупреждений: {preflight.warnings.length}
+              </p>
+            </div>
+            {[...preflight.blockers, ...preflight.warnings].length > 0 && (
+              <ul className="max-h-52 space-y-2 overflow-y-auto" aria-label="Замечания preflight">
+                {[...preflight.blockers, ...preflight.warnings].map((issue, index) => (
+                  <li key={`${issue.code}-${issue.task_id}-${index}`} className={`rounded-lg border p-3 text-xs ${issue.severity === "blocker" ? "border-destructive/30 bg-destructive/5" : "border-warning/35 bg-warning/5"}`}>
+                    <div className="flex items-start gap-2">
+                      <XCircle className={`mt-0.5 h-4 w-4 shrink-0 ${issue.severity === "blocker" ? "text-destructive" : "text-warning"}`} />
+                      <div>
+                        <p className="font-semibold text-foreground">{issue.title}</p>
+                        <p className="mt-0.5 text-muted-foreground">{issue.task_label ? `${issue.task_label}: ` : ""}{issue.message}</p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {preflight?.ok && selectedTasks.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold">2 · Визуальный review</p>
+                <p className="text-xs text-muted-foreground">Просмотрите карточки именно в том виде, в котором их получит пользователь.</p>
+              </div>
+              <span className="text-xs tabular-nums text-muted-foreground">{previewIndex + 1} / {selectedTasks.length}</span>
+            </div>
+            <TaskPreview task={selectedTasks[previewIndex]} mode={mode === "bank" ? "student" : "exam"} />
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="secondary" disabled={previewIndex === 0} onClick={() => setPreviewIndex((value) => Math.max(0, value - 1))}>
+                <ChevronLeft className="h-4 w-4" /> Назад
+              </Button>
+              <Button variant="secondary" disabled={previewIndex === selectedTasks.length - 1} onClick={() => setPreviewIndex((value) => Math.min(selectedTasks.length - 1, value + 1))}>
+                Далее <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            {preflight.warnings.length > 0 && (
+              <label className="flex min-h-11 items-start gap-2 rounded-lg border border-warning/35 bg-warning/5 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-accent"
+                  checked={acknowledgeWarnings}
+                  onChange={(event) => setAcknowledgeWarnings(event.target.checked)}
+                />
+                <span>Я просмотрел(а) все {preflight.warnings.length} предупреждения и подтверждаю экспорт.</span>
+              </label>
+            )}
+          </div>
+        )}
         {excludedCount > 0 && (
           <p className="rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-foreground">
             Не войдут в файл: {excludedCount} шт. Из них требуют решения: {attentionCount}. Черновики,
@@ -1868,7 +2029,11 @@ function ExportModal({
           <Button variant="ghost" onClick={onClose}>
             Отмена
           </Button>
-          <Button onClick={submit} loading={loading} disabled={taskIds.length === 0}>
+          <Button
+            onClick={submit}
+            loading={loading}
+            disabled={!preflight?.ok || !preflight.review_token || (preflight.warnings.length > 0 && !acknowledgeWarnings)}
+          >
             <Download className="h-4 w-4" /> Скачать JSON
           </Button>
         </div>

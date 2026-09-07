@@ -1622,6 +1622,7 @@ async def run_validation(
     chemistry_facts_source: str = "",
     extract_chemistry_facts_if_missing: bool = False,
     grounding_sheets: list | None = None,
+    task_images: list[str] | None = None,
 ) -> dict:
     reasons: list[str] = []
 
@@ -1753,6 +1754,7 @@ async def run_validation(
         rubric=rubric,
         max_score=max_score,
         validation_config=config,
+        images=task_images,
     )
 
     chemistry_enabled = bool(discipline_context.strip() or normalized_facts is not None or chemistry_check != "auto")

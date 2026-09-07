@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.assistants import get_assistant_or_404, resolve_model
+from app.config import get_settings
 from app.db import get_db
 from app.llm import client as llm
 from app.models import GeneratedTask, GenerationBatch, TaskTemplate, User, utcnow
@@ -21,6 +22,7 @@ from app.schemas import (
 )
 from app.security import get_current_user
 from app.services.assistant_profile import build_assistant_profile
+from app.services.content_preflight import build_task_preflight, task_release_digest, verify_review_token
 from app.services.export import build_bank_export, build_variants_export
 from app.services.evidence_invalidation import invalidate_task_evidence
 from app.services.model_policy import ModelUsePolicyError, require_decision_model
@@ -484,6 +486,7 @@ async def revalidate_task(
         reference_answer=task.answer,
         rubric=task.rubric,
         max_score=task.max_score,
+        task_images=getattr(task, "images", []),
         answer_format=contract["answer_format"],
         tolerance_pct=contract["tolerance_pct"],
         grounding=grounding_text,
@@ -521,6 +524,44 @@ async def revalidate_task(
 @router.post("/assistants/{assistant_id}/tasks/export")
 async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSession = Depends(get_db)) -> dict:
     assistant = await get_assistant_or_404(assistant_id, db)
+    tasks = await _load_export_tasks(assistant_id, body, db)
+    preflight = build_task_preflight(tasks, mode=body.mode, secret_key=get_settings().secret_key)
+    if preflight["blockers"]:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Экспорт остановлен: исправьте блокирующие замечания ({len(preflight['blockers'])})",
+        )
+    if not verify_review_token(
+        body.review_token,
+        scope=f"task-export:{body.mode}",
+        digest=task_release_digest(tasks, body.mode),
+        secret_key=get_settings().secret_key,
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Состав банка изменился или review устарел. Запустите preflight и просмотрите превью ещё раз",
+        )
+    if preflight["warnings"] and not body.acknowledge_warnings:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Перед экспортом подтвердите, что просмотрели предупреждения preflight",
+        )
+    source_title = body.source_title or assistant.discipline
+    if body.mode == "bank":
+        return build_bank_export(tasks, source_code=body.source_code, source_title=source_title, version=body.version)
+    template_ids = {task.template_id for task in tasks if task.template_id}
+    tolerance_by_template: dict[str, float] = {}
+    if template_ids:
+        templates = (await db.execute(select(TaskTemplate).where(TaskTemplate.id.in_(template_ids)))).scalars()
+        tolerance_by_template = {template.id: template.numeric_tolerance_pct for template in templates}
+    return build_variants_export(tasks, tolerance_by_template)
+
+
+async def _load_export_tasks(
+    assistant_id: str,
+    body: TaskExportRequest,
+    db: AsyncSession,
+) -> list[GeneratedTask]:
     query = select(GeneratedTask).where(GeneratedTask.assistant_id == assistant_id)
     if body.task_ids:
         query = query.where(GeneratedTask.id.in_(body.task_ids))
@@ -542,15 +583,18 @@ async def export_tasks(assistant_id: str, body: TaskExportRequest, db: AsyncSess
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"Экспорт остановлен: {len(not_ready)} задач требуют автоматической перепроверки или решения преподавателя",
         )
-    source_title = body.source_title or assistant.discipline
-    if body.mode == "bank":
-        return build_bank_export(tasks, source_code=body.source_code, source_title=source_title, version=body.version)
-    template_ids = {task.template_id for task in tasks if task.template_id}
-    tolerance_by_template: dict[str, float] = {}
-    if template_ids:
-        templates = (await db.execute(select(TaskTemplate).where(TaskTemplate.id.in_(template_ids)))).scalars()
-        tolerance_by_template = {template.id: template.numeric_tolerance_pct for template in templates}
-    return build_variants_export(tasks, tolerance_by_template)
+    return tasks
+
+
+@router.post("/assistants/{assistant_id}/tasks/export/preflight")
+async def preflight_task_export(
+    assistant_id: str,
+    body: TaskExportRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await get_assistant_or_404(assistant_id, db)
+    tasks = await _load_export_tasks(assistant_id, body, db)
+    return build_task_preflight(tasks, mode=body.mode, secret_key=get_settings().secret_key)
 
 
 @router.patch("/assistants/{assistant_id}/tasks/{task_id}", response_model=GeneratedTaskOut)
@@ -564,7 +608,7 @@ async def update_task(
     task = await _get_task_or_404(db, assistant_id, task_id)
     data = {field: value for field, value in body.model_dump(exclude_unset=True).items() if value is not None}
     approval_reason = str(data.pop("approval_reason", "")).strip()
-    content_fields = {"statement", "reference_solution", "answer", "rubric", "max_score"}
+    content_fields = {"statement", "reference_solution", "answer", "images", "rubric", "max_score"}
     changes_content = bool(content_fields.intersection(data))
     requested_status = data.get("status")
     if requested_status is None and "approved" in data:

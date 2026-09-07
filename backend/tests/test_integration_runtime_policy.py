@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import integration
+from app.schemas import PublishReviewRequest
 from app.services.model_policy import ModelUsePolicy
 
 
@@ -128,3 +129,44 @@ def test_built_snapshot_contains_nested_runtime_contract(monkeypatch) -> None:
     assert snapshot["assistant"]["runtime_policy"]["policy_version"] == "model-use-v1:test"
     assert snapshot["assistant"]["runtime_policy"]["tutor_model_id"] == "deepseek-v4-pro"
     assert len(snapshot["version"]) == 64
+
+
+def test_publication_without_review_token_is_rejected_before_network(monkeypatch) -> None:
+    assistant = SimpleNamespace(id="assistant-1")
+    course = SimpleNamespace(id="course-1")
+
+    async def fake_course(*_args):
+        return assistant, course
+
+    async def fake_preflight(*_args):
+        return {
+            "blockers": [],
+            "warnings": [],
+            "digest": "snapshot-digest",
+            "snapshot": {"version": "version"},
+        }
+
+    monkeypatch.setattr(integration, "_course_or_404", fake_course)
+    monkeypatch.setattr(integration, "_build_publication_preflight", fake_preflight)
+    monkeypatch.setattr(
+        integration,
+        "get_settings",
+        lambda: SimpleNamespace(
+            picrete_api_url="https://picrete.invalid",
+            picrete_integration_token="token",
+            secret_key="secret",
+        ),
+    )
+
+    with pytest.raises(HTTPException, match="review") as error:
+        asyncio.run(
+            integration.publish_course_assistant(
+                "assistant-1",
+                "course-1",
+                PublishReviewRequest(review_token="not-a-real-token"),
+                FakeDb(None),
+                SimpleNamespace(id="teacher-1"),
+            )
+        )
+
+    assert error.value.status_code == 409
