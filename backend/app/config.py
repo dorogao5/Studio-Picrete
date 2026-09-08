@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # by default: they remain available only for an explicit preview.
     model_use_policy_version: str = "model-use-v1"
     decision_model_ids: str = "deepseek-v4-pro"
-    advisory_model_ids: str = "deepseek-v4-flash"
+    advisory_model_ids: str = "deepseek-v4-flash,deepseek-v4.1-flash-expires-on-0910"
 
     # Server-to-server publication into the stable Picrete runtime.
     picrete_api_url: str = ""

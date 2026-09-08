@@ -24,6 +24,7 @@ PROVIDER_PRESETS: list[dict] = [
         "docs_url": "https://api-docs.deepseek.com",
         "models": [
             {"model_id": "deepseek-v4-pro", "display_name": "DeepSeek V4 Pro", "family": "deepseek", "supports_vision": False, "supports_json": True},
+            {"model_id": "deepseek-v4.1-flash-expires-on-0910", "display_name": "DeepSeek V4.1 Flash Preview (до 10 сентября)", "family": "deepseek", "supports_vision": False, "supports_json": True},
             {"model_id": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash", "family": "deepseek", "supports_vision": False, "supports_json": True},
         ],
     },

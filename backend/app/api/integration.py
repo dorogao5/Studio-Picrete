@@ -4,12 +4,15 @@ from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from fastapi.responses import Response
+from sqlalchemy.orm import selectinload
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Assistant, Course, ModelEntry, PromptVersion, ReferenceSheet, User
+from app.models import Assistant, Course, ModelEntry, PromptVersion, ReferenceSheet, User, PlaygroundRun, PlaygroundResult
 from app.schemas import PublishReviewRequest
 from app.security import get_current_user
 from app.services.content_preflight import create_review_token, verify_review_token
@@ -171,6 +174,7 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             "criteria": assistant.criteria or [],
             "nuances": assistant.nuances or [],
             "runtime_policy": runtime_policy,
+            "grading_enabled": "grader" in active_prompts,
         },
         "prompts": active_prompts,
         "reference_sheets": [
@@ -261,6 +265,25 @@ async def _build_publication_preflight(db: AsyncSession, assistant: Assistant, c
                 "field": "criteria",
             }
         )
+
+    if snapshot is not None and snapshot["assistant"].get("grading_enabled"):
+        reviewed = list((await db.execute(
+            select(PlaygroundResult).join(PlaygroundRun).where(
+                PlaygroundRun.assistant_id == assistant.id,
+                PlaygroundResult.status == "completed",
+                PlaygroundResult.rating >= 4,
+            ).order_by(PlaygroundRun.created_at.desc()).limit(100)
+        )).scalars())
+        tested = any(
+            (r.output or {}).get("_studio", {}).get("snapshot_version") == snapshot["version"]
+            and (r.output or {}).get("_studio", {}).get("course_id") == external_course_id
+            for r in reviewed
+        )
+        if not tested:
+            blockers.append({"severity": "blocker", "code": "grading_not_reviewed",
+                             "title": "Проверьте текущую версию на задаче из банка",
+                             "message": "Playground → Банк Picrete · Свиридов → Черновик: проверьте ответ и отметьте «Проверка корректна». После изменения настроек повторите прогон.",
+                             "field": "grading"})
 
     digest = ""
     token = ""
@@ -379,3 +402,88 @@ async def publish_course_assistant(
         "assistant_name": assistant.name,
         "course_id": external_course_id,
     }
+
+
+class BankPreviewRequest(BaseModel):
+    task_id: str = Field(min_length=1, max_length=128)
+    student_text: str = Field(min_length=1, max_length=30000)
+    mode: str = "draft"
+
+
+async def _picrete_request(method: str, course: Course, path: str, **kwargs) -> dict:
+    _ensure_configured()
+    if not course.external_course_id.strip():
+        raise HTTPException(422, "Сначала привяжите курс к Picrete во вкладке «Курсы»")
+    url = f"{get_settings().picrete_api_url.rstrip('/')}/api/v1/internal/studio/courses/{course.external_course_id}/{path}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0)) as client:
+            response = await client.request(method, url, headers=_picrete_headers(), **kwargs)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Picrete не завершил запрос. Повторите попытку.") from exc
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise HTTPException(502, detail or f"Picrete вернул HTTP {response.status_code}")
+    return response.json()
+
+
+@router.get("/assistants/{assistant_id}/courses/{course_id}/task-bank")
+async def course_task_bank(assistant_id: str, course_id: str, q: str = "", skip: int = 0,
+                          db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
+    _, course = await _course_or_404(db, assistant_id, course_id)
+    return await _picrete_request("GET", course, "task-bank", params={"q": q[:200], "skip": max(0, skip)})
+
+
+@router.post("/assistants/{assistant_id}/courses/{course_id}/grading-preview")
+async def course_grading_preview(assistant_id: str, course_id: str, body: BankPreviewRequest,
+                                 db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    assistant, course = await _course_or_404(db, assistant_id, course_id)
+    if body.mode not in ("draft", "published"):
+        raise HTTPException(422, "Выберите черновик или опубликованную версию")
+    snapshot = await _build_snapshot(db, assistant) if body.mode == "draft" else None
+    if snapshot and not snapshot["assistant"]["grading_enabled"]:
+        raise HTTPException(422, "Создайте и активируйте промпт «Проверка решений»")
+    result = await _picrete_request("POST", course, "grading-preview", json={
+        "task_id": body.task_id, "student_text": body.student_text, "snapshot": snapshot,
+    })
+    output = result["output"]
+    metadata = output.get("_metadata", {})
+    # Store the exact runtime snapshot/provenance, independent of later profile edits.
+    output["_studio"] = {"course_id": course.external_course_id, "task_id": result["task_id"],
+                         "task_number": result["task_number"], "mode": body.mode,
+                         "snapshot_version": result["snapshot_version"], "snapshot": snapshot}
+    run = PlaygroundRun(assistant_id=assistant.id, prompt_version_id=snapshot["prompts"]["grader"]["id"] if snapshot else None,
+                        task_text=result["task_text"], reference_solution=result["reference_solution"],
+                        rubric=result["rubric"], max_score=result["max_score"], ocr_text=body.student_text,
+                        images=[], created_by=user.id)
+    db.add(run)
+    await db.flush()
+    row = PlaygroundResult(run_id=run.id, provider_name="Picrete · production engine",
+                           model_id=metadata.get("model", ""), status="completed", output=output,
+                           duration_ms=int(metadata.get("duration_seconds", 0)*1000),
+                           tokens_total=metadata.get("tokens_used"))
+    db.add(row)
+    await db.commit()
+    result["run_id"] = run.id
+    result["result_id"] = row.id
+    return result
+
+
+@router.get("/assistants/{assistant_id}/courses/{course_id}/task-bank/{item_id}/images/{image_id}")
+async def course_bank_image(assistant_id: str, course_id: str, item_id: str, image_id: str,
+                            db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    _, course = await _course_or_404(db, assistant_id, course_id)
+    _ensure_configured()
+    if not course.external_course_id:
+        raise HTTPException(422, "Курс не привязан")
+    url = f"{get_settings().picrete_api_url.rstrip('/')}/api/v1/internal/studio/courses/{course.external_course_id}/task-bank/{item_id}/images/{image_id}"
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.get(url, headers=_picrete_headers())
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Изображение недоступно") from exc
+    if not r.is_success:
+        raise HTTPException(404, "Изображение не найдено")
+    return Response(r.content, media_type=r.headers.get("content-type", "image/png"), headers={"Cache-Control":"private, no-store"})

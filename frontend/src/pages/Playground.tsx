@@ -45,6 +45,8 @@ import { taskIsAutoReady, taskIsManualReady } from "../lib/taskExport";
 import { isKnownAdvisoryModel } from "../lib/modelPolicy";
 import { deepSeekV4Options, modelOptions } from "./assistant/PromptsTab";
 
+import BankPlayground from "./BankPlayground";
+
 type RubricCriterion = GeneratedTask["rubric"][number];
 
 const SCORE_TOLERANCE = 1e-6;
@@ -107,7 +109,7 @@ export default function Playground() {
   const { selectedId, setSelectedId } = useApp();
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [mode, setMode] = useState("compare");
+  const [mode, setMode] = useState("bank");
 
   const assistantId = params.get("assistant") ?? "";
   const assistant = assistants.find((a) => a.id === assistantId) ?? null;
@@ -136,7 +138,7 @@ export default function Playground() {
         <div>
           <h1 className="text-xl font-semibold">Playground</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            E2E-тестирование: задача → фото решения → OCR → проверка моделями → ваша экспертная оценка
+            Задача из банка → текст или фото решения → AI-проверка → настройка → публикация
           </p>
         </div>
         <Select
@@ -158,6 +160,7 @@ export default function Playground() {
 
       <Tabs
         tabs={[
+          { key: "bank", label: "Банк Picrete · Свиридов" },
           { key: "compare", label: "Сравнение моделей" },
           { key: "pipeline", label: "Проверка работы" },
           { key: "tutor", label: "Разбор со студентом" },
@@ -169,6 +172,8 @@ export default function Playground() {
 
       {assistant === null ? (
         <EmptyState title="Выберите ассистента" />
+      ) : mode === "bank" ? (
+        <BankPlayground key={assistant.id} assistant={assistant} />
       ) : mode === "compare" ? (
         <CompareMode assistant={assistant} providers={providers} />
       ) : mode === "pipeline" ? (

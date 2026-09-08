@@ -24,7 +24,7 @@ export function deepSeekV4Options(providers: Provider[], productionOnly = true) 
   return modelOptions(providers, productionOnly).filter(
     (model) =>
       model.family.toLocaleLowerCase() === "deepseek" &&
-      /deepseek-v4-(?:pro|flash)/i.test(model.modelId),
+      /deepseek-v4(?:\.1)?-(?:pro|flash)/i.test(model.modelId),
   );
 }
 
