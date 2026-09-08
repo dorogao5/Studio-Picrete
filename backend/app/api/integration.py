@@ -142,6 +142,9 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             "Перед публикацией активируйте промпт режима «Разбор со студентом».",
         )
 
+    if getattr(assistant, "grading_enabled", False) and "grader" not in active_prompts:
+        raise HTTPException(422, "Проверка работ включена, но нет активного промпта «Проверка решений». Активируйте его перед публикацией.")
+
     sheets = list(
         (
             await db.execute(

@@ -30,3 +30,14 @@ def test_preview_rejects_missing_active_grader(monkeypatch):
     monkeypatch.setattr(integration, "_build_snapshot", snapshot)
     with pytest.raises(HTTPException, match="активируйте"):
         asyncio.run(integration.course_grading_preview("a", "c", integration.BankPreviewRequest(task_id="1", student_text="answer"), None, None))
+
+
+def test_enabled_grading_without_prompt_cannot_silently_fall_back(monkeypatch):
+    async def runtime(*args): return {}
+    monkeypatch.setattr(integration, "_build_runtime_policy", runtime)
+    class Db:
+        async def execute(self, statement):
+            prompt = SimpleNamespace(id="tutor", role="tutor", version=1, system_prompt="tutor", target_family="deepseek")
+            return SimpleNamespace(scalars=lambda: [prompt])
+    with pytest.raises(HTTPException, match="нет активного промпта"):
+        asyncio.run(integration._build_snapshot(Db(), SimpleNamespace(id="a", grading_enabled=True)))
