@@ -1,3 +1,4 @@
+import { MathTaskSelect } from "../components/MathTaskSelect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -419,21 +420,10 @@ function TaskPicker({
   return (
     <div className="space-y-3">
       <Field label="Задача из банка">
-        <Select
-          value={taskId}
-          onChange={(event) => {
-            const nextId = event.target.value;
-            setTaskId(nextId);
-            onSelectedTaskChange(tasks.find((task) => task.id === nextId) ?? null);
-          }}
-        >
-          <option value="">{loadingTasks ? "— загружаем банк задач —" : "— ввести условие вручную —"}</option>
-          {tasks.map((t) => (
-            <option key={t.id} value={t.id}>
-              {(t.export_ready ? "✓ " : "") + t.statement.slice(0, 90)}
-            </option>
-          ))}
-        </Select>
+        <MathTaskSelect value={taskId} onChange={nextId => {
+          setTaskId(nextId); onSelectedTaskChange(tasks.find(task => task.id === nextId) ?? null);
+        }} options={tasks.map(task => ({ id: task.id, text: (task.export_ready ? "✓ " : "") + task.statement }))}
+          placeholder={loadingTasks ? "Загружаем банк задач…" : "Ввести условие вручную"} />
       </Field>
       <ErrorNote message={tasksError} />
       {!taskId && (
@@ -482,7 +472,7 @@ function TaskPicker({
                 <ul className="mt-2 space-y-1 text-muted-foreground">
                   {selectedTask.rubric.map((criterion, index) => (
                     <li key={`${criterion.criterion_name}-${index}`}>
-                      <span className="font-medium text-foreground">{criterion.criterion_name}</span>
+                      <span className="font-medium text-foreground"><MathText inline>{criterion.criterion_name}</MathText></span>
                       {` — ${criterion.max_score} балл.`}
                     </li>
                   ))}
@@ -725,12 +715,12 @@ function ResultCard({
               {output.criteria_scores.map((c, i) => (
                 <div key={i} className="text-xs">
                   <div className="flex justify-between gap-2">
-                    <span className="font-medium">{c.criterion_name}</span>
+                    <span className="font-medium"><MathText inline>{c.criterion_name}</MathText></span>
                     <span className="shrink-0">
                       {c.score}/{c.max_score}
                     </span>
                   </div>
-                  {c.comment && <p className="text-muted-foreground">{c.comment}</p>}
+                  {c.comment && <p className="text-muted-foreground"><MathText inline>{c.comment}</MathText></p>}
                 </div>
               ))}
             </div>
@@ -1247,14 +1237,9 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
         <Card className="p-5 space-y-4">
           <h2 className="text-sm font-semibold">Сценарий разбора</h2>
           <Field label="Задача из банка">
-            <Select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-              <option value="">— ввести условие вручную —</option>
-              {tasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {(t.topic ? `${t.topic} — ` : "") + t.statement.slice(0, 60)}
-                </option>
-              ))}
-            </Select>
+            <MathTaskSelect value={taskId} onChange={setTaskId}
+              options={tasks.map(task => ({ id: task.id, text: (task.topic ? task.topic + " — " : "") + task.statement }))}
+              placeholder="Ввести условие вручную" />
           </Field>
           {!taskId && (
             <Field label="Условие задачи (вручную)">
@@ -1395,9 +1380,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
                 <Card key={run.id} className="p-3 cursor-pointer hover:bg-muted/40" onClick={() => loadRun(run)}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm truncate">
-                        {run.messages.find((m) => m.role === "user")?.content.slice(0, 120) || "—"}
-                      </p>
+                      <MathText className="text-sm line-clamp-2">{run.messages.find((m) => m.role === "user")?.content || "—"}</MathText>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {new Date(run.created_at).toLocaleString("ru-RU")} · {run.model_id} · сообщений:{" "}
                         {run.messages.length}
@@ -1460,7 +1443,7 @@ function HistoryMode({ assistant }: { assistant: Assistant }) {
               <ChevronRight className="mt-0.5 h-4 w-4 shrink-0" />
             )}
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm">{run.task_text.slice(0, 120)}</p>
+              <MathText className="line-clamp-2 text-sm">{run.task_text}</MathText>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {new Date(run.created_at).toLocaleString("ru-RU")} · {run.results.length} моделей · {run.prompt_version_id ? promptLabels[run.prompt_version_id] || "версия промпта недоступна" : "без выбранной версии"}
               </p>
@@ -1502,16 +1485,16 @@ function HistoryMode({ assistant }: { assistant: Assistant }) {
                       <ul className="mt-3 space-y-1.5 text-xs">
                         {result.output.criteria_scores.map((criterion, index) => (
                           <li key={`${criterion.criterion_name}-${index}`}>
-                            <span className="font-medium">{criterion.criterion_name}: {criterion.score}/{criterion.max_score}</span>
-                            {criterion.comment && <span className="text-muted-foreground"> — {criterion.comment}</span>}
+                            <span className="font-medium"><MathText inline>{criterion.criterion_name}</MathText>: {criterion.score}/{criterion.max_score}</span>
+                            {criterion.comment && <span className="text-muted-foreground"> — <MathText inline>{criterion.comment}</MathText></span>}
                           </li>
                         ))}
                       </ul>
                     )}
-                    {result.output?.feedback && <p className="mt-3 text-xs text-muted-foreground">{result.output.feedback}</p>}
+                    {result.output?.feedback && <MathText className="mt-3 text-xs text-muted-foreground">{result.output.feedback}</MathText>}
                     {result.feedback_comment && (
                       <p className="mt-3 border-t border-border pt-2 text-xs">
-                        <span className="font-medium">Комментарий преподавателя:</span> {result.feedback_comment}
+                        <span className="font-medium">Комментарий преподавателя:</span> <MathText inline>{result.feedback_comment}</MathText>
                       </p>
                     )}
                   </div>

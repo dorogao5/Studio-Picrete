@@ -1,3 +1,6 @@
+import "@fontsource/stix-two-text/400.css";
+import "@fontsource/stix-two-text/400-italic.css";
+import "@fontsource/stix-two-text/600.css";
 import "@fontsource/golos-text/400.css";
 import "@fontsource/golos-text/500.css";
 import "@fontsource/golos-text/600.css";

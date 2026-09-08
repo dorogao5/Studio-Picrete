@@ -856,7 +856,7 @@ function AnalyzeModal({
                           disabled={inProfile}
                           onChange={() => toggleTopic(topic)}
                         />
-                        <span className={inProfile ? "text-muted-foreground" : ""}>{topic}</span>
+                        <span className={inProfile ? "text-muted-foreground" : ""}><MathText inline>{topic}</MathText></span>
                         {inProfile && <Badge className="shrink-0">уже есть</Badge>}
                       </label>
                     );
@@ -887,11 +887,11 @@ function AnalyzeModal({
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium">{sheet.title}</span>
+                            <span className="text-sm font-medium"><MathText inline>{sheet.title}</MathText></span>
                             <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind] ?? sheet.kind}</Badge>
                           </div>
                           {sheet.description && (
-                            <p className="text-xs text-muted-foreground mt-0.5">{sheet.description}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5"><MathText inline>{sheet.description}</MathText></p>
                           )}
                           <button
                             className="mt-1 text-xs text-accent hover:underline"
@@ -1077,7 +1077,7 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium truncate">{sheet.title}</p>
+                      <p className="text-sm font-medium truncate"><MathText inline>{sheet.title}</MathText></p>
                       <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind]}</Badge>
                       {sheet.is_canonical && <Badge tone="accent">канон</Badge>}
                       {sheet.visibility !== "student" && (
@@ -1086,7 +1086,7 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
                         </Badge>
                       )}
                     </div>
-                    {sheet.description && <p className="text-xs text-muted-foreground mt-1">{sheet.description}</p>}
+                    {sheet.description && <p className="text-xs text-muted-foreground mt-1"><MathText inline>{sheet.description}</MathText></p>}
                     <p className="text-xs text-muted-foreground mt-1">
                       обновлено {new Date(sheet.updated_at).toLocaleDateString("ru-RU")}
                     </p>
@@ -1328,10 +1328,10 @@ function FromChunksModal({
     >
       <input type="checkbox" className="mt-0.5" checked={selected.has(chunk.id)} onChange={() => toggle(chunk.id)} />
       <span className="min-w-0">
-        {chunk.heading && <span className="block font-medium mb-0.5">{chunk.heading}</span>}
+        {chunk.heading && <span className="block font-medium mb-0.5"><MathText inline>{chunk.heading}</MathText></span>}
         <span className="block text-muted-foreground whitespace-pre-wrap break-words">
-          {chunk.content.slice(0, 200)}
-          {chunk.content.length > 200 ? "…" : ""}
+          <MathText className="line-clamp-3">{chunk.content}</MathText>
+
         </span>
       </span>
     </label>

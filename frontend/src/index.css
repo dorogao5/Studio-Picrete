@@ -40,28 +40,84 @@
   margin-bottom: 0.5rem;
 }
 
-/* Рендер формул и текста ассистента */
-.math-text {
-  overflow-wrap: anywhere;
-}
-.math-text > :first-child {
-  margin-top: 0;
-}
-.math-text > :last-child {
-  margin-bottom: 0;
-}
-.math-text .katex {
-  font-size: 1.02em;
-}
-.math-text .katex-display {
-  margin: 0.5rem 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0.15rem 0;
-}
-.math-text table {
-  display: table;
-}
+  .math-text.academic-content {
+    --reading-font: "STIX Two Text", "Times New Roman", serif;
+    font-family: var(--reading-font);
+    font-size: max(1.0625rem, 1em);
+    line-height: 1.65;
+    overflow-wrap: break-word;
+    white-space: normal;
+  }
+
+  .math-text .katex {
+    font-size: 1em;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+    text-indent: 0;
+  }
+
+  .academic-content .katex .text,
+  .academic-content .katex .textrm {
+    font-family: var(--reading-font);
+  }
+
+  .math-viewport {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: baseline;
+    white-space: normal;
+    text-indent: 0;
+  }
+
+  .math-scroll {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: baseline;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+  }
+
+  .is-overflowing > .math-scroll {
+    display: block;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25em 0;
+  }
+
+  .math-scroll > .katex {
+    display: inline-block;
+    white-space: nowrap;
+  }
+
+  .math-scroll .katex-html { white-space: nowrap; }
+
+  .math-viewport.is-overflowing {
+    display: block;
+    margin: 0.65em 0;
+    padding: 0.25em 0;
+    border-bottom: 1px solid hsl(var(--border) / 0.65);
+  }
+
+  .math-scroll-hint {
+    display: block;
+    margin-top: 0.25rem;
+    font-family: "Golos Text", sans-serif;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .math-text .katex-display {
+    display: block;
+    max-width: 100%;
+    margin: 0.75em 0;
+    text-align: left;
+  }
+
+  .math-text .katex-display > .math-viewport { display: block; }
+  .math-text .katex-display > .math-viewport > .math-scroll > .katex { text-align: left; }
+
 
 /* Горизонтальные вкладки остаются компактными, но на узком экране явно показывают,
    что список можно прокрутить. */
@@ -76,3 +132,9 @@
   border-radius: 999px;
   background: hsl(var(--border));
 }
+
+.academic-content.inline { font-size: inherit; }
+
+.math-inline-numbers > .math-inline-item { counter-increment: math-item; }
+.math-inline-numbers > .math-inline-item::before { content: counter(math-item) ". "; }
+.math-inline-bullets > .math-inline-item::before { content: "• "; }

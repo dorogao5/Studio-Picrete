@@ -1,3 +1,4 @@
+import { MathTaskSelect } from "../components/MathTaskSelect";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, apiErrorMessage, coursesApi, playgroundApi } from "../lib/api";
@@ -99,7 +100,7 @@ export default function BankPlayground({ assistant }: { assistant: Assistant }) 
         <p className="text-xs text-muted-foreground">Только с полным эталоном · найдено {total}</p>
         <div className="max-h-80 overflow-y-auto space-y-2" aria-busy={loading}>
           {loading ? <p>Загрузка банка…</p> : items.length === 0 ? <p>Задачи не найдены. Измените запрос.</p> : items.map((item) => <button type="button" key={item.id} disabled={busy} aria-pressed={task?.id === item.id} className={`w-full rounded-lg border p-3 text-left ${task?.id === item.id ? "border-accent bg-accent/10" : "border-border"}`} onClick={() => { setTask(item); setResult(null); setText(""); setSaved(false); }}>
-            <span className="font-semibold">№ {item.number}</span><span className="ml-2 text-xs text-muted-foreground">{item.topic} · {item.difficulty}</span>
+            <span className="font-semibold">№ {item.number}</span><span className="ml-2 text-xs text-muted-foreground"><MathText inline>{item.topic}</MathText> · {item.difficulty}</span>
             <MathText className="mt-1 text-sm line-clamp-2">{item.text}</MathText>
           </button>)}
         </div>
@@ -115,19 +116,19 @@ export default function BankPlayground({ assistant }: { assistant: Assistant }) 
         <Field label="Версия настроек"><Select value={mode} disabled={busy} onChange={(e) => { setMode(e.target.value); setResult(null); }}><option value="draft">Черновик — текущие настройки студии</option><option value="published">Опубликованная — основной Picrete</option></Select></Field>
         <Field label="Ответ студента текстом" hint="Проверьте полный верный ответ, частичный ответ и типичную ошибку. Формулы можно писать обычным текстом или LaTeX."><Textarea rows={10} value={text} disabled={busy} onChange={(e) => setText(e.target.value)} placeholder="Напишите ход решения…" /></Field>
         <Button onClick={grade} loading={busy} disabled={!task || !text.trim()}>Проверить ответ</Button>
-        {cases.length > 0 && <Field label="Повторить сохранённый ответ"><Select value="" disabled={busy} onChange={(e) => {
-          const previous = cases.find((c) => c.id === e.target.value); if (!previous) return;
+        {cases.length > 0 && <Field label="Повторить сохранённый ответ"><MathTaskSelect value="" disabled={busy} onChange={id => {
+          const previous = cases.find((c) => c.id === id); if (!previous) return;
           setTask(null); setQ(previous.number); setQuery(previous.number); setSkip(0); setText(previous.answer); setResult(null);
           api.get<{items: BankTask[]}>(`${base}/task-bank`, { params: { q: previous.number } }).then(({data}) => {
             setTask(data.items.find((t) => t.id === previous.taskId) ?? null);
           }).catch((err) => setError(apiErrorMessage(err)));
-        }}><option value="">Выберите предыдущий прогон</option>{cases.map((c) => <option key={c.id} value={c.id}>№ {c.number} · {c.answer.slice(0, 60)}</option>)}</Select></Field>}
+        }} placeholder="Выберите предыдущий прогон" options={cases.map(c => ({ id: c.id, text: `№ ${c.number} · ${c.answer}` }))} /></Field>}
         {result && <section className="space-y-3 border-t border-border pt-4">
           <div className="flex flex-wrap gap-2"><Badge>{result.draft ? "Черновик" : "Опубликовано"}</Badge><Badge>{result.output.total_score} / {result.output.max_score}</Badge></div>
           {result.output.needs_teacher_review && <p className="text-sm text-warning">Требуется проверка преподавателя</p>}
           <MathText>{result.output.feedback}</MathText>
           {!!result.output.detailed_analysis?.errors_found?.length && <div className="rounded-lg bg-muted p-3 text-sm"><strong>Замечания проверки</strong>{result.output.detailed_analysis.errors_found.map((issue, i) => <MathText key={i}>{issue}</MathText>)}</div>}
-          {result.output.criteria_scores?.map((c, i) => <div key={i} className="text-sm"><strong>{c.criterion_name}: {c.score}/{c.max_score}</strong><MathText>{c.comment}</MathText></div>)}
+          {result.output.criteria_scores?.map((c, i) => <div key={i} className="text-sm"><strong><MathText inline>{c.criterion_name}</MathText>: {c.score}/{c.max_score}</strong><MathText>{c.comment}</MathText></div>)}
           <p className="text-xs text-muted-foreground break-all">{result.output._metadata.model} · промпт v{result.output._metadata.grader_prompt_version} · версия {result.snapshot_version.slice(0, 12)} · № {result.task_number}</p>
           <Field label="Комментарий преподавателя"><Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Что проверено верно, какую ошибку нужно исправить?" /></Field>
           <div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => review(5)}>Проверка корректна</Button><Button variant="secondary" onClick={() => review(1)}>Нужна доработка</Button></div>

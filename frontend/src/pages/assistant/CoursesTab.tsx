@@ -1,3 +1,4 @@
+import MathText from "../../components/MathText";
 import { AlertTriangle, CheckCircle2, Eye, GraduationCap, Link2, Pencil, Plus, Send, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -86,7 +87,7 @@ export default function CoursesTab({ assistant }: { assistant: Assistant }) {
                     <p className="truncate font-medium">{course.name}</p>
                   </div>
                   {course.term && <p className="mt-0.5 text-xs text-muted-foreground">{course.term}</p>}
-                  {course.description && <p className="mt-1 text-xs text-muted-foreground">{course.description}</p>}
+                  {course.description && <p className="mt-1 text-xs text-muted-foreground"><MathText inline>{course.description}</MathText></p>}
                   {course.external_course_id ? (
                     <Badge tone="info" className="mt-2 max-w-full">
                       <Link2 className="mr-1 h-3 w-3 shrink-0" />
@@ -294,7 +295,7 @@ function PublishReviewModal({
                   </div>
                   {preflight.preview.topics.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
-                      {preflight.preview.topics.slice(0, 8).map((topic) => <Badge key={topic}>{topic}</Badge>)}
+                      {preflight.preview.topics.slice(0, 8).map((topic) => <Badge key={topic}><MathText inline>{topic}</MathText></Badge>)}
                     </div>
                   )}
                 </div>

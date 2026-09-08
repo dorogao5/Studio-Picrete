@@ -1,3 +1,4 @@
+import { MathCombobox } from "../../components/MathCombobox";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
@@ -1045,7 +1046,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
       <div className="flex items-center gap-1.5 flex-wrap mb-2">
         <Badge tone={status.tone}>{status.label}</Badge>
         <Badge tone="info">{DIFF_LABELS[task.difficulty] ?? task.difficulty}</Badge>
-        {task.topic && <span className="text-xs text-muted-foreground">{task.topic}</span>}
+        {task.topic && <span className="text-xs text-muted-foreground"><MathText inline>{task.topic}</MathText></span>}
       </div>
       <button
         type="button"
@@ -1060,7 +1061,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           <ChevronRight className="h-4 w-4 shrink-0 mt-0.5" />
         )}
         <span className={`text-sm ${expanded ? "" : "line-clamp-3"}`}>
-          <MathText inline>{task.statement}</MathText>
+          <MathText>{task.statement}</MathText>
         </span>
       </button>
       {task.validation?.chemistry && (
@@ -1463,12 +1464,7 @@ function TemplateModal({
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="напр. Расчёт pH буфера" />
           </Field>
           <Field label="Тема">
-            <Input value={topic} onChange={(e) => setTopic(e.target.value)} list="tpl-topics" placeholder="Буферные растворы" />
-            <datalist id="tpl-topics">
-              {assistant.topics.map((t) => (
-                <option key={t} value={t} />
-              ))}
-            </datalist>
+            <MathCombobox value={topic} onChange={setTopic} options={assistant.topics} placeholder="Буферные растворы" />
           </Field>
         </div>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -1769,17 +1765,7 @@ function BatchLaunchModal({
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Тема">
-            <Input
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              list="batch-topics"
-              placeholder={templateId ? "из блюпринта" : ""}
-            />
-            <datalist id="batch-topics">
-              {assistant.topics.map((t) => (
-                <option key={t} value={t} />
-              ))}
-            </datalist>
+            <MathCombobox value={topic} onChange={setTopic} options={assistant.topics} placeholder={templateId ? "из блюпринта" : ""} />
           </Field>
           <Field label="Сложность">
             <Select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
