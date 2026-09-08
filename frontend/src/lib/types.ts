@@ -61,6 +61,7 @@ export interface Criterion {
 }
 
 export interface Assistant {
+  grading_enabled?: boolean;
   id: string;
   name: string;
   discipline: string;

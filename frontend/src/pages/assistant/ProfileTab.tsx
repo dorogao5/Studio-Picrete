@@ -5,6 +5,7 @@ import type { Assistant, Criterion } from "../../lib/types";
 import { Button, Card, ErrorNote, Field, Input, Textarea } from "../../components/ui";
 
 export default function ProfileTab({ assistant, onSaved }: { assistant: Assistant; onSaved: () => void }) {
+  const [gradingEnabled, setGradingEnabled] = useState(assistant.grading_enabled ?? false);
   const [name, setName] = useState(assistant.name);
   const [description, setDescription] = useState(assistant.description);
   const [audience, setAudience] = useState(assistant.audience);
@@ -22,7 +23,7 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
     try {
       await assistantsApi.update(assistant.id, {
         name,
-        description,
+        grading_enabled: gradingEnabled,        description,
         audience,
         topics: topics.split("\n").map((t) => t.trim().replace(/^[•\-–]\s*/, "")).filter(Boolean),
         criteria: criteria.filter((c) => c.name.trim()),
@@ -41,6 +42,7 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
     <div className="space-y-5">
       <Card className="p-5 space-y-4">
         <h2 className="font-semibold text-sm">Профиль дисциплины</h2>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={gradingEnabled} onChange={(e) => setGradingEnabled(e.target.checked)} /><span>Публиковать проверку работ в Picrete (запуск на эталонах Свиридова). Перед публикацией потребуется проверенный прогон в Playground.</span></label>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Название">
             <Input value={name} onChange={(e) => setName(e.target.value)} />

@@ -80,6 +80,7 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
         "published_at": "DATETIME",
     },
     "assistants": {
+        "grading_enabled": "BOOLEAN NOT NULL DEFAULT 0",
         "updated_by": "VARCHAR(32) DEFAULT ''",
         "updated_at": "DATETIME",
     },
@@ -141,6 +142,7 @@ async def ensure_sqlite_columns(conn) -> None:
 
 
 async def ensure_postgres_columns(conn) -> None:
+    await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS grading_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     await conn.exec_driver_sql(
         "ALTER TABLE task_templates ADD COLUMN IF NOT EXISTS rubric JSONB NOT NULL DEFAULT '[]'::jsonb"
     )

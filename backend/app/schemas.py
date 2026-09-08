@@ -111,6 +111,7 @@ class Criterion(BaseModel):
 
 
 class AssistantOut(ORMModel):
+    grading_enabled: bool = False
     id: str
     name: str
     discipline: str
@@ -171,6 +172,7 @@ class AssistantCreate(BaseModel):
 
 
 class AssistantUpdate(BaseModel):
+    grading_enabled: bool | None = None
     name: str | None = None
     discipline: str | None = None
     description: str | None = None

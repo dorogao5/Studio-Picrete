@@ -62,6 +62,7 @@ class ModelEntry(Base):
 
 
 class Assistant(Base):
+    grading_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     __tablename__ = "assistants"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)

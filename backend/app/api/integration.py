@@ -174,7 +174,7 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             "criteria": assistant.criteria or [],
             "nuances": assistant.nuances or [],
             "runtime_policy": runtime_policy,
-            "grading_enabled": "grader" in active_prompts,
+            "grading_enabled": bool(getattr(assistant, "grading_enabled", False)) and "grader" in active_prompts,
         },
         "prompts": active_prompts,
         "reference_sheets": [
