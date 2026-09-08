@@ -8,6 +8,7 @@ import MathText from "../components/MathText";
 type BankTask = { images: string[]; id: string; number: string; topic: string; text: string; solution: string; difficulty: string | null };
 type Preview = { result_id: string; snapshot_version: string; draft: boolean; task_number: string; output: {
   total_score: number; max_score: number; feedback: string; needs_teacher_review?: boolean; unreadable?: boolean;
+  detailed_analysis?: { errors_found?: string[] };
   criteria_scores: { criterion_name: string; score: number; max_score: number; comment: string }[];
   _metadata: { model: string; grader_prompt_version: number; duration_seconds: number };
 } };
@@ -99,7 +100,7 @@ export default function BankPlayground({ assistant }: { assistant: Assistant }) 
         <div className="max-h-80 overflow-y-auto space-y-2" aria-busy={loading}>
           {loading ? <p>Загрузка банка…</p> : items.length === 0 ? <p>Задачи не найдены. Измените запрос.</p> : items.map((item) => <button type="button" key={item.id} disabled={busy} aria-pressed={task?.id === item.id} className={`w-full rounded-lg border p-3 text-left ${task?.id === item.id ? "border-accent bg-accent/10" : "border-border"}`} onClick={() => { setTask(item); setResult(null); setText(""); setSaved(false); }}>
             <span className="font-semibold">№ {item.number}</span><span className="ml-2 text-xs text-muted-foreground">{item.topic} · {item.difficulty}</span>
-            <p className="mt-1 text-sm line-clamp-2">{item.text}</p>
+            <MathText className="mt-1 text-sm line-clamp-2">{item.text}</MathText>
           </button>)}
         </div>
         <div className="flex justify-between"><Button variant="secondary" disabled={skip === 0 || loading} onClick={() => setSkip(Math.max(0, skip - 25))}>Назад</Button><Button variant="secondary" disabled={skip + 25 >= total || loading} onClick={() => setSkip(skip + 25)}>Далее</Button></div>
@@ -125,6 +126,7 @@ export default function BankPlayground({ assistant }: { assistant: Assistant }) 
           <div className="flex flex-wrap gap-2"><Badge>{result.draft ? "Черновик" : "Опубликовано"}</Badge><Badge>{result.output.total_score} / {result.output.max_score}</Badge></div>
           {result.output.needs_teacher_review && <p className="text-sm text-warning">Требуется проверка преподавателя</p>}
           <MathText>{result.output.feedback}</MathText>
+          {!!result.output.detailed_analysis?.errors_found?.length && <div className="rounded-lg bg-muted p-3 text-sm"><strong>Замечания проверки</strong>{result.output.detailed_analysis.errors_found.map((issue, i) => <MathText key={i}>{issue}</MathText>)}</div>}
           {result.output.criteria_scores?.map((c, i) => <div key={i} className="text-sm"><strong>{c.criterion_name}: {c.score}/{c.max_score}</strong><MathText>{c.comment}</MathText></div>)}
           <p className="text-xs text-muted-foreground break-all">{result.output._metadata.model} · промпт v{result.output._metadata.grader_prompt_version} · версия {result.snapshot_version.slice(0, 12)} · № {result.task_number}</p>
           <Field label="Комментарий преподавателя"><Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Что проверено верно, какую ошибку нужно исправить?" /></Field>
