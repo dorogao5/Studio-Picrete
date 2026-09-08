@@ -2,6 +2,7 @@ import { Eye, FileText, Loader2, Pencil, Plus, RefreshCw, ScanLine, Sparkles, Tr
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
 import MathText from "../../components/MathText";
+import { MathTaskSelect } from "../../components/MathTaskSelect";
 import { apiErrorMessage, assistantsApi, kbApi, sheetsApi } from "../../lib/api";
 import type {
   Assistant,
@@ -371,7 +372,7 @@ function DocumentsSection({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-medium truncate">{doc.title}</p>
+                    <MathText className="font-medium">{doc.title}</MathText>
                     <Badge tone="info">{DOC_TYPE_LABELS[doc.doc_type]}</Badge>
                     <Badge>{AUTHORITY_LABELS[doc.authority]}</Badge>
                     {doc.visibility !== "student" && (
@@ -1077,7 +1078,7 @@ function SheetsSection({ assistant, refreshKey }: { assistant: Assistant; refres
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium truncate"><MathText inline>{sheet.title}</MathText></p>
+                      <MathText className="font-medium">{sheet.title}</MathText>
                       <Badge tone="info">{SHEET_KIND_LABELS[sheet.kind]}</Badge>
                       {sheet.is_canonical && <Badge tone="accent">канон</Badge>}
                       {sheet.visibility !== "student" && (
@@ -1352,13 +1353,9 @@ function FromChunksModal({
           docs !== null && (
             <>
               <Field label="Документ">
-                <Select value={docId} onChange={(e) => setDocId(e.target.value)}>
-                  {docs.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.title}
-                    </option>
-                  ))}
-                </Select>
+                <MathTaskSelect value={docId} onChange={setDocId}
+                  options={docs.map((doc) => ({ id: doc.id, text: doc.title }))}
+                  placeholder="Выберите документ" searchLabel="Поиск документа" allowClear={false} />
               </Field>
               {chunksLoading ? (
                 <Spinner />

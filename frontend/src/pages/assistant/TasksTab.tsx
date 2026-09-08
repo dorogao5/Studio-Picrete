@@ -45,6 +45,7 @@ import type {
 } from "../../lib/types";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, Input, Modal, Select, Spinner, Textarea } from "../../components/ui";
 import MathText from "../../components/MathText";
+import { MathTaskSelect } from "../../components/MathTaskSelect";
 import TaskPreview from "../../components/TaskPreview";
 import { RubricEditor, rubricValidationError } from "../../components/RubricEditor";
 import { deepSeekV4Options } from "./PromptsTab";
@@ -441,9 +442,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
               <Card key={template.id} className="min-w-0 overflow-hidden p-3.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{template.name}</p>
+                    <MathText className="font-medium">{template.name}</MathText>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {template.topic || "без темы"} · {DIFF_LABELS[template.difficulty] ?? template.difficulty}
+                      <MathText inline>{template.topic || "без темы"}</MathText> · {DIFF_LABELS[template.difficulty] ?? template.difficulty}
                     </p>
                     <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                       <Badge tone="info">{KIND_LABELS[template.task_kind] ?? template.task_kind}</Badge>
@@ -879,7 +880,7 @@ function ChemistryEvidence({ chemistry }: { chemistry: NonNullable<TaskValidatio
             <EvidenceMark state={state} />
             <div className="min-w-0">
               <p className="font-medium text-foreground">{CHEMISTRY_EVIDENCE_LABELS[result.check_id] ?? result.check_id}</p>
-              <p className="mt-0.5 leading-4">{result.message}</p>
+              <MathText className="mt-0.5">{result.message}</MathText>
             </div>
           </div>
         );
@@ -1555,7 +1556,7 @@ function TemplateModal({
                     className="h-4 w-4 accent-accent"
                   />
                   <Badge>{SHEET_KIND_LABELS[sheet.kind] ?? sheet.kind}</Badge>
-                  <span className="truncate">{sheet.title}</span>
+                  <MathText className="min-w-0 flex-1">{sheet.title}</MathText>
                 </label>
               ))}
             </div>
@@ -1708,21 +1709,13 @@ function BatchLaunchModal({
     <Modal title="Партия генерации" open onClose={onClose}>
       <div className="space-y-4">
         <Field label="Блюпринт (необязательно)">
-          <Select
-            value={templateId}
-            onChange={(e) => {
-              const next = e.target.value;
+          <MathTaskSelect value={templateId}
+            onChange={(next) => {
               setTemplateId(next);
               setDifficulty(next ? "" : "medium");
             }}
-          >
-            <option value="">— без блюпринта, по теме —</option>
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
+            options={templates.map((template) => ({ id: template.id, text: template.name }))}
+            placeholder="— без блюпринта, по теме —" searchLabel="Поиск блюпринта" />
         </Field>
         <Field label="Производственная модель">
           <Select value={modelId} onChange={(e) => setModelId(e.target.value)}>
@@ -1958,7 +1951,7 @@ function ExportModal({
                       <XCircle className={`mt-0.5 h-4 w-4 shrink-0 ${issue.severity === "blocker" ? "text-destructive" : "text-warning"}`} />
                       <div>
                         <p className="font-semibold text-foreground">{issue.title}</p>
-                        <p className="mt-0.5 text-muted-foreground">{issue.task_label ? `${issue.task_label}: ` : ""}{issue.message}</p>
+                        <MathText className="mt-0.5 text-muted-foreground">{`${issue.task_label ? `${issue.task_label}: ` : ""}${issue.message}`}</MathText>
                       </div>
                     </div>
                   </li>

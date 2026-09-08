@@ -23,7 +23,7 @@ export default function TaskPreview({ task, mode }: { task: PreviewTask; mode: "
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {mode === "student" ? "Карточка студента" : "Экзаменационный лист"}
             </p>
-            <p className="truncate text-sm font-medium">{task.topic || "Задача"}</p>
+            <MathText className="font-medium">{task.topic || "Задача"}</MathText>
           </div>
         </div>
         <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs tabular-nums text-muted-foreground">
@@ -122,7 +122,7 @@ function RubricSummary({ rubric }: { rubric: RubricCriterion[] }) {
       <ul className="space-y-2 border-t border-border py-3 text-xs">
         {rubric.map((criterion, index) => (
           <li key={`${criterion.criterion_name}-${index}`} className="flex items-start justify-between gap-3">
-            <span className="min-w-0">{criterion.criterion_name}</span>
+            <MathText inline className="min-w-0">{criterion.criterion_name}</MathText>
             <span className="shrink-0 tabular-nums text-muted-foreground">{criterion.max_score} б.</span>
           </li>
         ))}

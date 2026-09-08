@@ -1,3 +1,4 @@
+import MathText from "../components/MathText";
 import { Plus, Trash2, User as UserIcon } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -77,7 +78,7 @@ export default function Disciplines() {
               <Badge tone="accent" className="mt-2">
                 {d.discipline}
               </Badge>
-              <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{d.description || "Без описания"}</p>
+              <MathText className="text-muted-foreground mt-2 line-clamp-2">{d.description || "Без описания"}</MathText>
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                 <span>{d.criteria.length} критериев</span>
                 <span>{d.nuances.length} нюансов</span>

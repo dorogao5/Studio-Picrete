@@ -456,7 +456,7 @@ function TaskPicker({
                     : "Требует внимания"}
             </Badge>
             <span className="text-xs text-muted-foreground">
-              {selectedTask.topic || "Без темы"} · максимум {selectedTask.max_score} баллов
+              <MathText inline>{selectedTask.topic || "Без темы"}</MathText> · максимум {selectedTask.max_score} баллов
             </span>
           </div>
           <MathText className="text-sm">{selectedTask.statement}</MathText>

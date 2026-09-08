@@ -287,7 +287,7 @@ function PublishReviewModal({
                   <p className="text-sm text-muted-foreground">{preflight.preview.discipline} · для {preflight.preview.audience}</p>
                 </header>
                 <div className="space-y-4 p-4 sm:p-5">
-                  <p className="text-sm leading-6">{preflight.preview.description || "Описание не заполнено"}</p>
+                  <MathText>{preflight.preview.description || "Описание не заполнено"}</MathText>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <PreviewFact label="Промпт разбора" value={`v${preflight.preview.tutor_prompt_version}`} />
                     <PreviewFact label="Модель" value={preflight.preview.model_id} />
