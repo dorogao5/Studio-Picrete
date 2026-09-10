@@ -50,8 +50,8 @@ GENERATION_CHUNK = 2
 # Дополнительные запросы сверх минимально необходимого числа порций. Они восполняют
 # недостающие/невалидные элементы, но не дают фоновой задаче зациклиться на плохом ответе модели.
 MAX_REFILL_ATTEMPTS = 3
-STANDARD_GENERATION_MAX_TOKENS = 8000
-HARD_GENERATION_MAX_TOKENS = 16000
+STANDARD_GENERATION_MAX_TOKENS = 16000
+HARD_GENERATION_MAX_TOKENS = 24000
 
 
 @dataclass(slots=True)
@@ -107,7 +107,10 @@ def _render_example_tasks(example_tasks: list[dict]) -> str:
     for index, example in enumerate(example_tasks, start=1):
         if not isinstance(example, dict) or not example.get("statement"):
             continue
-        lines = [f"Пример {index}.", f"Условие: {example['statement']}"]
+        source = f" (Свиридов № {example['source_number']})" if example.get("source_number") else ""
+        lines = [f"Пример {index}{source}.", f"Условие: {example['statement']}"]
+        if example.get("source_image_ids"):
+            lines.append("У исходного примера есть рисунок, не переданный в текстовый контекст. Не восстанавливайте его данные по догадке; для аналога задайте все уровни/зависимости явно текстом или таблицей.")
         if example.get("solution"):
             lines.append(f"Решение: {example['solution']}")
         if example.get("answer"):

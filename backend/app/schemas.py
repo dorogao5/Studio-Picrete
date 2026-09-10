@@ -213,6 +213,11 @@ class PromptGenerateRequest(BaseModel):
 
 
 class ExampleTask(BaseModel):
+    source_number: str | None = None
+    source_task_id: str | None = None
+    source_document: str | None = None
+    source_course_id: str | None = None
+    source_image_ids: list[str] = []
     statement: str
     solution: str = ""
     answer: str = ""

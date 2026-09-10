@@ -1,3 +1,4 @@
+import BankImage from "../components/BankImage";
 import { MathTaskSelect } from "../components/MathTaskSelect";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -138,17 +139,4 @@ export default function BankPlayground({ assistant }: { assistant: Assistant }) 
     </div>}
     <Card className="p-5 space-y-2 text-sm"><p>После ошибки уточните «Нюансы» профиля или создайте и активируйте новую версию промпта «Проверка решений». Повторите сохранённые ответы и отметьте корректную проверку.</p><p>Затем откройте «Курсы» → «Опубликовать обновление». Публикация переносит профиль, активные промпты и справочники. Новые задачи из банка получают ту же шкалу; уже созданные работы сохраняют свои критерии.</p><Link className="text-accent underline" to={`/disciplines/${assistant.id}?tab=assistant`}>Открыть настройки и публикацию ассистента →</Link></Card>
   </div>;
-}
-
-function BankImage({ url }: { url: string }) {
-  const [src, setSrc] = useState("");
-  useEffect(() => {
-    let active = true;
-    let objectUrl = "";
-    api.get<Blob>(url, { responseType: "blob" }).then(({ data }) => {
-      if (active) { objectUrl = URL.createObjectURL(data); setSrc(objectUrl); }
-    }).catch(() => {});
-    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [url]);
-  return src ? <img src={src} alt="Рисунок к условию задачи" className="max-h-80 max-w-full object-contain" /> : <p className="text-xs">Изображение загружается…</p>;
 }

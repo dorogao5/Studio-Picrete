@@ -1,3 +1,4 @@
+import BankImage from "../../components/BankImage";
 import { MathCombobox } from "../../components/MathCombobox";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
@@ -119,7 +120,7 @@ const chemistryChecksForDiscipline = (discipline: string): ChemistryCheckId[] =>
   if (normalized.includes("коллоид") || normalized.includes("поверхност")) {
     return ["auto", "colloid.bet", "colloid.smoluchowski", "colloid.dlvo"];
   }
-  return common;
+  return [...common, "analytical.faraday"];
 };
 
 const SHEET_KIND_LABELS: Record<string, string> = {
@@ -178,6 +179,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<TaskFilter>("ready");
   const [searchQuery, setSearchQuery] = useState("");
+  const [blueprintQuery, setBlueprintQuery] = useState("");
   const [page, setPage] = useState(1);
   const [section, setSection] = useState<TasksSection | null>(null);
   const [templateModal, setTemplateModal] = useState<{ open: boolean; template: TaskTemplate | null }>({
@@ -369,11 +371,15 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * TASKS_PER_PAGE;
   const visibleTasks = filtered.slice(pageStart, pageStart + TASKS_PER_PAGE);
-  const activeSection = section ?? (taskList.length > 0 ? "bank" : "templates");
+  const visibleTemplates = templates.filter((template) =>
+    [template.name, template.topic, ...template.example_tasks.map((example) => example.source_number ?? "")]
+      .some((value) => value.toLocaleLowerCase("ru-RU").includes(blueprintQuery.trim().toLocaleLowerCase("ru-RU"))),
+  );
+  const activeSection = section ?? "templates";
   const sections: Array<{ key: TasksSection; label: string; count: number }> = [
     { key: "templates", label: "Блюпринты", count: templates.length },
     { key: "batches", label: "Партии", count: batches.length },
-    { key: "bank", label: "Банк задач", count: taskList.length },
+    { key: "bank", label: "Сгенерированные задачи", count: taskList.length },
   ];
 
   useEffect(() => {
@@ -395,7 +401,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
     }
   };
 
-  if (initialLoading) return <Spinner label="Загружаем блюпринты, партии и банк задач…" />;
+  if (initialLoading) return <Spinner label="Загружаем блюпринты, партии и сгенерированные задачи…" />;
 
   return (
     <div className="space-y-6">
@@ -431,6 +437,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
             <Plus className="h-4 w-4" /> Новый блюпринт
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground">Выберите тип задачи и создайте партию аналогов. В блюпринте сохранены исходные условия и полные эталонные решения.</p>
+        <Input aria-label="Поиск блюпринта по теме или номеру Свиридова" placeholder="Найти тип задачи или номер Свиридова, например 8.146" value={blueprintQuery} onChange={(event) => setBlueprintQuery(event.target.value)} />
+        {templates.length > 0 && visibleTemplates.length === 0 && <p className="text-sm text-muted-foreground">По этому запросу блюпринтов нет.</p>}
         {templates.length === 0 ? (
           <EmptyState
             title="Блюпринтов пока нет"
@@ -438,7 +447,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
           />
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
-            {templates.map((template) => (
+            {visibleTemplates.map((template) => (
               <Card key={template.id} className="min-w-0 overflow-hidden p-3.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -452,6 +461,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
                         примеров: {template.example_tasks.length} · справочников: {template.reference_sheet_ids.length}
                       </span>
                     </div>
+                    {template.example_tasks.some((example) => example.source_number) && (
+                      <p className="mt-1.5 text-xs text-muted-foreground">Свиридов № {template.example_tasks.map((example) => example.source_number).filter(Boolean).join(", ")}</p>
+                    )}
                     <p className="mt-1.5 text-xs text-muted-foreground">
                       Предметный контроль: {CHEMISTRY_CHECK_LABELS[template.chemistry_check ?? "auto"]}
                     </p>
@@ -527,7 +539,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
       {activeSection === "bank" && (
         <section className="space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="text-sm font-semibold">Банк задач</h2>
+          <h2 className="text-sm font-semibold">Сгенерированные задачи</h2>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {attentionCount > 0 && (
               <div className="min-w-0">
@@ -643,7 +655,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
               normalizedQuery
                 ? "Попробуйте изменить запрос или выбрать другой статус"
                 : filter === "ready"
-                  ? "Запустите перепроверку банка или сгенерируйте партию по сертифицированному блюпринту"
+                  ? "Выберите блюпринт и создайте партию аналогов. Здесь появятся задачи, прошедшие проверку."
                   : filter === "all"
                   ? "Создайте блюпринт и сгенерируйте партию — задачи попадут сюда после автопроверки"
                   : undefined
@@ -657,7 +669,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
               ))}
             </div>
             <nav
-              aria-label="Страницы банка задач"
+              aria-label="Страницы сгенерированных задач"
               className="flex min-w-0 flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between"
             >
               <p className="text-xs tabular-nums text-muted-foreground" aria-live="polite">
@@ -1567,7 +1579,7 @@ function TemplateModal({
             {examples.map((ex, i) => (
               <div key={i} className="rounded-md border border-border p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-muted-foreground">Пример {i + 1}</span>
+                  <span className="text-xs font-medium text-muted-foreground">Пример {i + 1}{ex.source_number ? ` · Свиридов № ${ex.source_number}` : ""}</span>
                   <button
                     type="button"
                     className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -1577,6 +1589,9 @@ function TemplateModal({
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
+                {ex.source_course_id && ex.source_task_id && ex.source_image_ids?.map((imageId) => (
+                  <BankImage key={imageId} url={`/assistants/${encodeURIComponent(assistant.id)}/courses/${encodeURIComponent(ex.source_course_id!)}/task-bank/${encodeURIComponent(ex.source_task_id!)}/images/${encodeURIComponent(imageId)}`} />
+                ))}
                 <Textarea
                   rows={3}
                   value={ex.statement}

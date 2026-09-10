@@ -155,6 +155,11 @@ export type TaskKind = "calculation" | "conceptual" | "test_tf" | "test_mc" | "d
 export type AnswerFormat = "numeric" | "formula" | "text" | "choice";
 
 export interface ExampleTask {
+  source_number?: string;
+  source_task_id?: string;
+  source_document?: string;
+  source_course_id?: string;
+  source_image_ids?: string[];
   statement: string;
   solution: string;
   answer: string;
