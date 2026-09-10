@@ -98,6 +98,7 @@ def _clean_formula(raw: str) -> str:
     )
     value = value.translate(_SUBSCRIPTS).translate(_SUPERSCRIPTS)
     value = value.replace("−", "-").replace("∙", "·").replace("⋅", "·")
+    value = re.sub(r"\\(?:uparrow|downarrow)\b|[↑↓]", "", value)
     value = re.sub(r"\\(?:mathrm|text)\s*\{([^{}]+)\}", r"\1", value)
     value = re.sub(r"_\{?(\d+)\}?", r"\1", value)
     value = re.sub(r"\\[,;! ]", "", value)
@@ -204,15 +205,15 @@ def parse_species(raw: str) -> SpeciesComposition:
 
 
 def _coefficient_and_formula(raw: str) -> tuple[Fraction, str]:
-    value = raw.strip()
-    coefficient = re.match(r"^(?P<value>\d+(?:\.\d+)?|\d+/\d+)\s*(?=[A-Z\[e])", value)
+    value = _clean_formula(raw)
+    coefficient = re.match(r"^(?P<value>-?\d+(?:\.\d+)?|\d+/\d+)\s*(?=[A-Z\[e])", value)
     if coefficient is None:
         return Fraction(1), value
     try:
         parsed = Fraction(coefficient.group("value"))
     except (ValueError, ZeroDivisionError) as exc:
         raise ChemistryParseError(f"invalid stoichiometric coefficient in {raw!r}") from exc
-    if parsed <= 0:
+    if parsed == 0 or (parsed < 0 and value[coefficient.end():] not in {"e-", "e^-"}):
         raise ChemistryParseError(f"non-positive stoichiometric coefficient in {raw!r}")
     return parsed, value[coefficient.end() :]
 
@@ -220,6 +221,7 @@ def _coefficient_and_formula(raw: str) -> tuple[Fraction, str]:
 def _split_reaction_side(side: str) -> tuple[ReactionTerm, ...]:
     # Whitespace-delimited plus signs safely preserve H+ and Fe3+.  The second
     # branch also accepts conventional neutral equations written without spaces.
+    side = re.sub(r"\s+[-−]\s*(\d*)e\^?-", lambda m: " + -" + (m[1] or "1") + "e^-", side)
     pieces = re.split(r"\s+\+\s+|(?<=[A-Za-z0-9)\]])\+(?=(?:\d+(?:\.\d+)?\s*)?[A-Z\[])", side.strip())
     terms: list[ReactionTerm] = []
     for piece in pieces:
@@ -310,8 +312,10 @@ def _parseable_reaction_spans(
     for arrow in separator_re.finditer(fragment):
         if _is_oxidation_state_transition(fragment, arrow):
             continue
-        starts = sorted({0, *(match.end() for match in whitespace if match.end() <= arrow.start())})
-        ends = sorted({len(fragment), *(match.start() for match in whitespace if match.start() >= arrow.end())})
+        starts = sorted({0, *(match.end() for match in whitespace if match.end() <= arrow.start()),
+                         *(match.end() for match in re.finditer(r"\(", fragment[:arrow.start()]))})
+        ends = sorted({len(fragment), *(match.start() for match in whitespace if match.start() >= arrow.end()),
+                       *(match.start() for match in re.finditer(r"\)", fragment) if match.start() >= arrow.end())})
         starts = starts[-_REACTION_SPAN_BOUNDARY_LIMIT:]
         ends = ends[:_REACTION_SPAN_BOUNDARY_LIMIT]
 
@@ -324,7 +328,7 @@ def _parseable_reaction_spans(
                 terms = _split_reaction_side(side)
             except ChemistryParseError:
                 continue
-            score = (len(terms), sum(term.coefficient != 1 for term in terms), -len(side))
+            score = (len(terms), sum(term.coefficient != 1 for term in terms), len(side))
             if best_left is None or score > best_left[0]:
                 best_left = (score, side)
 
@@ -337,7 +341,7 @@ def _parseable_reaction_spans(
                 terms = _split_reaction_side(side)
             except ChemistryParseError:
                 continue
-            score = (len(terms), sum(term.coefficient != 1 for term in terms), -len(side))
+            score = (len(terms), sum(term.coefficient != 1 for term in terms), len(side))
             if best_right is None or score > best_right[0]:
                 best_right = (score, side)
 

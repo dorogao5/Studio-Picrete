@@ -141,3 +141,25 @@ def test_latex_display_delimiters_do_not_drop_reaction_reagents():
     assert balance.balanced
     bad = reaction_candidates(text.replace('CH_3COONa', 'CH_3COOK'))
     assert not check_reaction_balance(bad[0]).balanced
+
+
+def test_latex_electrolysis_counts_ionic_coefficients_and_electron_loss():
+    text = r'''Катод $(-)$: $2\mathrm{H_2O} + 2e^- \rightarrow \mathrm{H_2}\uparrow + 2\mathrm{OH^-}$.
+Анод $(+)$: $2\mathrm{H_2O} - 4e^- \rightarrow \mathrm{O_2}\uparrow + 4\mathrm{H^+}$.
+Суммарно: $2\mathrm{H_2O} \rightarrow 2\mathrm{H_2}\uparrow + \mathrm{O_2}\uparrow$.'''
+    candidates = reaction_candidates(text)
+    assert len(candidates) == 3
+    assert all(check_reaction_balance(c).balanced for c in candidates)
+    # Wrong electron count must still fail charge conservation.
+    bad = reaction_candidates(text.replace('+ 2e^-', '+ 3e^-'))
+    assert not check_reaction_balance(bad[0]).balanced
+
+
+def test_enthalpy_function_argument_keeps_the_entire_reaction():
+    text = r'$\Delta_r H^{\circ}_{298}(\mathrm{N_2H_4(г)} + \mathrm{O_2(г)} \rightarrow \mathrm{N_2(г)} + 2\,\mathrm{H_2O(г)}) = -577$ кДж'
+    candidates = reaction_candidates(text)
+    assert len(candidates) == 1
+    balance = check_reaction_balance(candidates[0])
+    assert len(balance.reactants) == len(balance.products) == 2
+    assert balance.balanced
+    assert not check_reaction_balance(reaction_candidates(text.replace('2\\,', '3\\,'))[0]).balanced
