@@ -62,7 +62,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v14-reference-anchored-consensus"
+VALIDATION_POLICY_VERSION = "evidence-gate-v15-formula-typography"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {
@@ -469,6 +469,13 @@ def _explicit_labels_before(normalized: str, number_start: int) -> tuple[str, ..
     labels: list[str] = []
     for raw_label in raw_labels:
         candidate = _canonical_quantity_label(raw_label)
+        # Preserve the residual qualifier when it is expressed in prose:
+        # "Осталось n(N2) = ..." and "n_ост(N2) = ..." name the same amount.
+        # Never collapse initial/consumed amounts into residual amounts.
+        if re.fullmatch(r"n\s*\(\s*[A-Z][a-zA-Z0-9_{}]*\s*\)", raw_label) and re.search(
+            r"(?i)(?<!не )\b(?:остаток|осталось|оставшийся|оставшегося)\b", segment
+        ):
+            candidate = "nост" + candidate[1:]
         # In ``... / 100 mL = 0.010 mol/L`` the token before ``=`` is a
         # denominator unit, not the label of the result. A chained equality is
         # expanded only when every term is a real quantity label.
@@ -722,6 +729,17 @@ def _occurrences_match(reference: _NumberOccurrence, solver: _NumberOccurrence, 
     return reference.unit == solver.unit or _same_physical_value(reference, solver, rel)
 
 
+def _claim_words(text: str) -> list[str]:
+    # Match formula typography locally; numeric parsing still needs its indices.
+    text = text.translate(_SUBSCRIPTS)
+    text = re.sub(r"(?<=[A-Za-z])_\{?(\d+)\}?", r"\1", text)
+    # A verified Russian name in apposition adds no separate chemical claim.
+    # Unknown or contradictory names must remain visible to the comparison.
+    for formula, name in (("H2", "водород"), ("N2", "азот"), ("O2", "кислород")):
+        text = re.sub(rf"(?<!\w){formula}\s*\({name}\)", formula, text)
+    return [word.casefold() for word in _WORD_RE.findall(text)]
+
+
 def _required_text_claims(text: str) -> list[tuple[str, frozenset[str]]]:
     claims: list[tuple[str, frozenset[str]]] = []
     normalized = normalize_numeric_text(text)
@@ -733,7 +751,7 @@ def _required_text_claims(text: str) -> list[tuple[str, frozenset[str]]]:
         # ``SO3`` must contribute the same claim token.  Keep this conversion
         # local to claim matching so chemical subscripts never become numeric
         # answer occurrences.
-        words = [word.casefold().translate(_SUBSCRIPTS) for word in _WORD_RE.findall(clause)]
+        words = _claim_words(clause)
         words = [word for word in words if len(word) > 1 and word not in _CLAIM_STOPWORDS]
         stems = frozenset(_ru_stemmer.stemWords(words))
         if stems:
@@ -859,7 +877,7 @@ def compare_answers(
         )
         solver_stems = set(
             _ru_stemmer.stemWords(
-                [word.casefold().translate(_SUBSCRIPTS) for word in _WORD_RE.findall(solver_text)]
+                _claim_words(solver_text)
             )
         )
         missing_text_claims = [

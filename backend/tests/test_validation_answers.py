@@ -677,3 +677,27 @@ def test_same_numeral_with_different_si_scale_is_not_equal(reference: str, solve
 )
 def test_equivalent_si_scaled_values_match(reference: str, solver: str) -> None:
     assert compare_answers(reference, solver, tolerance_pct=2)["verdict"] == "match"
+
+
+def test_flash_stoichiometry_latex_and_plain_answers_agree() -> None:
+    reference = r"Лимитирующий реагент — $\mathrm{H_2}$; $n(\mathrm{NH_3}) = 2{,}0$ моль; остаток $\mathrm{N_2}$ — $1{,}0$ моль."
+    first = "1) Лимитирующий реагент — H2. 2) n(NH3) = 2,0 моль. 3) Остаток N2: n_ост(N2) = 1,0 моль."
+    second = "1) Лимитирующий реагент — H2 (водород). 2) Образовалось n(NH3) = 2,0 моль. 3) Осталось n(N2) = 1,0 моль."
+    for left, right in [(reference, first), (reference, second), (first, second), (second, first)]:
+        assert compare_answers(left, right, tolerance_pct=2)["verdict"] == "match"
+
+
+def test_formula_typography_does_not_accept_wrong_limiting_reagent() -> None:
+    result = compare_answers(r"Лимитирующий реагент — $\mathrm{H_2}$; n=2 моль", "Лимитирующий реагент — N2; n=2 моль", tolerance_pct=2)
+    assert result["verdict"] != "match"
+    assert result["missing_text_claims"]
+
+
+def test_residual_amount_does_not_match_consumed_amount() -> None:
+    result = compare_answers("n_ост(N2)=1 моль", "Израсходовано n(N2)=1 моль", tolerance_pct=2)
+    assert result["verdict"] != "match"
+
+
+def test_wrong_parenthetical_species_name_is_not_erased() -> None:
+    result = compare_answers("Лимитирующий реагент — H2 (кислород); n=2 моль", "Лимитирующий реагент — H2 (водород); n=2 моль", tolerance_pct=2)
+    assert result["verdict"] != "match"
