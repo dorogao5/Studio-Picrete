@@ -466,6 +466,11 @@ _BARE_CHEMICAL_FORMULA_RE = re.compile(r"(?:[A-Z][a-z]?\d*)+")
 def _ambiguous_assignment(text: str, match: re.Match[str]) -> bool:
     label = match.group("label")
 
+    # A first factor is not the dimension of the complete right-hand side:
+    # n = 0.20 mol/L * 0.10 L must not be recorded as n = 0.20 mol/L.
+    if re.match(r"\s*(?:[·×*/+−-]|\\(?:cdot|times)\b)", text[match.end():]):
+        return True
+
     # A unit at the end of the left-hand expression is not a quantity label.
     if label not in _AMBIGUOUS_QUANTITY_SYMBOLS and unit_definition(label) is not None:
         return True

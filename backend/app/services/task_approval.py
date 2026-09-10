@@ -58,7 +58,18 @@ def validation_is_current_decision(value: object, task: object | None = None) ->
         and critic.get("issues") == []
         and isinstance(chemistry, dict)
         and chemistry.get("validation_version") == CHEMISTRY_VALIDATION_VERSION
-        and chemistry.get("admission_effect") in ({"pass"} if calculation_requires_chemistry else {"pass", "limited"})
+        and (
+            chemistry.get("admission_effect") in ({"pass"} if calculation_requires_chemistry else {"pass", "limited"})
+            or (
+                chemistry.get("admission_effect") == "reviewed"
+                and chemistry.get("verification_route") == "independent_subject_review"
+                and validation_config.get("chemistry_check", "auto") == "auto"
+                and critic.get("basis") == "independent_subject_review"
+                and not solver.get("solution_truncated")
+                and not verifier.get("solution_truncated")
+                and all(str(report.get("solution") or "").strip() and str(report.get("answer") or "").strip() for report in (solver, verifier))
+            )
+        )
         and chemistry.get("blocking_codes") == []
         and chemistry.get("indeterminate_codes") == []
         and chemistry.get("warning_codes") == []

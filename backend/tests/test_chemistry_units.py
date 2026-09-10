@@ -153,3 +153,13 @@ def test_resistance_prefix_case_is_not_silently_conflated() -> None:
 
     assert milliohm is not None and milliohm.si_value == pytest.approx(1e-3)
     assert megaohm is not None and megaohm.si_value == pytest.approx(1e6)
+
+
+def test_product_first_factor_is_not_assigned_as_final_dimension():
+    from app.services.chemistry_units import extract_assigned_measurements, Dimension
+    values = extract_assigned_measurements('n(NaOH) = 0,20 моль/л·0,100 л = 0,020 моль; n(NaOH) = 0,020 моль')
+    assert values
+    assert all(v.measurement.dimension == Dimension.AMOUNT for v in values)
+    # A genuine standalone assignment must remain visible to the checker.
+    bad = extract_assigned_measurements('n(NaOH) = 0,20 моль/л; n(NaOH) = 0,020 моль')
+    assert {v.measurement.dimension for v in bad} == {Dimension.AMOUNT, Dimension.AMOUNT_CONCENTRATION}

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -755,9 +756,9 @@ async def _validate_batch(
                 task.status = "rejected"
         else:
             validation = dict(validation)
-            validation["candidate_disposition"] = "discarded"
+            validation["candidate_disposition"] = "needs_review"
             task.validation = validation
-            task.status = "rejected"
+            task.status = "needs_review"
         task.approved = False
         await db.commit()
 
@@ -816,7 +817,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     # Лимит рассчитывается один раз на всю партию. Иначе каждая новая волна добора
     # заново получает MAX_REFILL_ATTEMPTS и число оплачиваемых запросов растёт без
     # связи с общим бюджетом кандидатов.
-    candidate_budget = min(count * 3, count + 20)
+    candidate_budget = min(count * 2, count + 5)
     call_budget = _GenerationCallBudget(limit=_generation_call_limit(candidate_budget))
     items, gen_errors = await _generate_batch_items(
         provider,
@@ -889,7 +890,17 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     # Пользователь заказывает готовые задачи, а не число сырых ответов модели.
     # Непрошедший кандидат сохраняется для аудита как rejected и автоматически
     # заменяется новым в пределах ограниченного бюджета.
-    while validation_enabled and batch.validated_count < count and batch.generated_count < candidate_budget:
+    def retryable_content_failure(task: GeneratedTask) -> bool:
+        v = task.validation or {}
+        return bool(
+            (v.get("dedup") or {}).get("duplicate")
+            or (v.get("sanity") or {}).get("issues")
+            or (v.get("critic") or {}).get("status") == "fail"
+            or any(result.get("state") == "fail" for result in (v.get("chemistry") or {}).get("results", []))
+        )
+    while (validation_enabled and batch.validated_count < count and batch.generated_count < candidate_budget
+           and any(retryable_content_failure(task) for task in created)
+           and not any((task.validation or {}).get("solver", {}).get("status") == "error" for task in created)):
         missing = count - batch.validated_count
         remaining_budget = candidate_budget - batch.generated_count
         refill_count = min(missing, remaining_budget)
@@ -931,7 +942,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             build_assistant_profile(assistant),
         )
 
-    rejected = [task for task in created if task.status == "rejected"]
+    rejected = [task for task in created if task.status in {"rejected", "needs_review"}]
     failure_counts: dict[str, int] = {}
     for task in rejected:
         validation = task.validation or {}
@@ -958,6 +969,8 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             "generation_call_limit": call_budget.limit,
         },
     }
+    if batch.validated_count < count:
+        gen_errors.extend(dict.fromkeys(reason for task in rejected for reason in (task.validation or {}).get("reasons", [])))
     _mark_batch_finished(
         batch,
         requested_count=count,
@@ -973,10 +986,11 @@ async def run_batch(batch_id: str) -> None:
         if batch is None:
             return
         try:
-            await _execute_batch(db, batch)
+            async with asyncio.timeout(1200):
+                await _execute_batch(db, batch)
         except Exception as err:  # партия не должна падать молча — фиксируем любую ошибку в статусе
             await db.rollback()
             batch.status = "failed"
-            batch.error = str(err)
+            batch.error = ("Достигнут лимит 20 минут. Уже сохранённые задачи доступны; повторите проверку оставшихся задач." if isinstance(err, TimeoutError) else str(err))
             batch.finished_at = utcnow()
             await db.commit()

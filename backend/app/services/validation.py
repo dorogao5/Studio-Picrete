@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import math
@@ -38,7 +39,10 @@ SOLVER_VERIFIER_SYSTEM_PROMPT = """Вы — второй независимый 
 Ответ — строго JSON: {"solution": "независимая проверка по шагам", "answer": "полный финальный ответ"}."""
 
 SOLVER_CRITIC_SYSTEM_PROMPT = """Вы — строгий предметный редактор университетских задач по химии.
-Вы не решаете задачу в третий раз и не голосуете за большинство. Проверьте доказательства ниже на внутреннюю
+Не голосуйте за большинство. Самостоятельно перепроверьте выбранные физико-химические законы,
+подстановку данных и арифметику каждого итогового расчёта. Даже одинаковая ошибка в трёх решениях
+требует verdict="fail". reference_consistent=true означает в том числе верность модели расчёта
+и численных результатов, а не просто одинаковые ответы. Проверьте доказательства ниже на внутреннюю
 согласованность: самодостаточность условия, соответствие эталонного решения финальному ответу, независимость и
 полноту двух контрольных решений, размерности, знаки, атомный/зарядовый баланс и явно указанные ограничения модели.
 Отдельно установите семантическое следование: действительно ли полный вывод основного решателя следует из эталона
@@ -62,7 +66,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v16-general-electrolysis"
+VALIDATION_POLICY_VERSION = "evidence-gate-v17-independent-subject-review"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {
@@ -79,7 +83,7 @@ SEMANTIC_ENTAILMENT_ANSWER_FORMATS = frozenset({"formula", "text"})
 SEMANTIC_ENTAILMENT_BASIS = "subject_critic_semantic_entailment"
 SOLUTION_BACKED_ENTAILMENT_BASIS = "solution_backed_subject_critic"
 REFERENCE_ANCHORED_ENTAILMENT_BASIS = "reference_anchored_subject_critic"
-SOLVER_EVIDENCE_CHAR_LIMIT = 4000
+SOLVER_EVIDENCE_CHAR_LIMIT = 16000
 DETERMINISTIC_NUMERIC_BASIS = "deterministic_numeric_tolerance"
 NUMERIC_RELATION_CHECKS = frozenset(
     {
@@ -1252,6 +1256,7 @@ def _solver_report(
         "status": solved["status"] if comparison is None else comparison["verdict"],
         "answer": solved["answer"],
         "solution": solved["solution"][:SOLVER_EVIDENCE_CHAR_LIMIT],
+        "solution_truncated": len(solved["solution"]) > SOLVER_EVIDENCE_CHAR_LIMIT,
         "reference_answer": reference_answer,
         "model": model_name,
         "error": solved["error"],
@@ -1806,12 +1811,17 @@ async def run_validation(
     if chemistry_facts is not None and facts_source == "invalid":
         chemistry["admission_effect"] = "block"
         chemistry.setdefault("blocking_codes", []).append("chemistry.facts_schema")
-    requires_deterministic_core = config.get("task_kind") == "calculation" or answer_format == "numeric"
-    if requires_deterministic_core and chemistry.get("admission_effect") == "limited":
+    # Missing specialist coverage is not evidence of an incorrect answer. Auto
+    # contracts still require two blind solutions and a full subject review.
+    # Explicit typed checks and actual deterministic failures remain blocking.
+    independent_core_review = (
+        (config.get("task_kind") == "calculation" or answer_format == "numeric")
+        and chemistry_check == "auto"
+        and chemistry.get("admission_effect") == "limited"
+    )
+    if independent_core_review:
         chemistry["coverage_before_admission"] = "limited"
-        chemistry["admission_effect"] = "block"
-        chemistry["admission_reason"] = "Для расчётной задачи не подтверждён основной предметный инвариант"
-        chemistry.setdefault("blocking_codes", []).append("chemistry.core_calculation_uncovered")
+        chemistry["verification_route"] = "independent_subject_review"
     chemistry_blocked = chemistry.get("admission_effect") == "block"
     if chemistry_blocked:
         unsafe_results = [
@@ -1847,14 +1857,19 @@ async def run_validation(
             model_name = f"{solver_provider.name}/{solver_model.model_id}"
             # Проверяем ровно то условие, которое увидит студент. Скрытый grounding
             # используется для аудита источников, но не должен делать неполную задачу решаемой.
-            solved = await solver_check(
-                solver_provider,
-                solver_model,
-                statement,
-                "",
-                answer_format,
+            primary_call = solver_check(
+                solver_provider, solver_model, statement, "", answer_format,
                 discipline_context=discipline_context,
             )
+            if advisory_only:
+                solved = await primary_call
+            else:
+                solved, verified = await asyncio.gather(
+                    primary_call,
+                    solver_check(solver_provider, solver_model, statement, "", answer_format,
+                                 system_prompt=SOLVER_VERIFIER_SYSTEM_PROMPT,
+                                 discipline_context=discipline_context),
+                )
             compared = (
                 compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)
                 if solved["status"] != "error"
@@ -1895,15 +1910,6 @@ async def run_validation(
             if advisory_only:
                 reasons.append(f"{model_use.reason}: {solver_model.model_id}. Задача не подтверждена автоматически")
             else:
-                verified = await solver_check(
-                    solver_provider,
-                    solver_model,
-                    statement,
-                    "",
-                    answer_format,
-                    system_prompt=SOLVER_VERIFIER_SYSTEM_PROMPT,
-                    discipline_context=discipline_context,
-                )
                 verified_comparison = (
                     compare_answers(reference_answer, verified["answer"], tolerance_pct, context=statement)
                     if verified["status"] != "error"
@@ -1970,13 +1976,23 @@ async def run_validation(
         chemistry_verified=chemistry.get("admission_effect") == "pass",
     )
 
+    independent_review_candidate = bool(
+        independent_core_review
+        and not solver.get("solution_truncated")
+        and not verifier.get("solution_truncated")
+        and not hard_fail
+        and _solver_outcome_complete(solver)
+        and _solver_outcome_complete(verifier)
+    )
+
     critic: dict = {"status": "skipped", "checks": {}, "issues": []}
     if (
         solver_provider is not None
         and solver_model is not None
         and model_use.decision_capable
         and (
-            strict_comparison_candidate
+            independent_review_candidate
+            or strict_comparison_candidate
             or semantic_entailment_candidate
             or solution_backed_entailment_candidate
             or reference_anchored_entailment_candidate
@@ -2005,6 +2021,7 @@ async def run_validation(
     solution_backed_entailment_applied = bool(solution_backed_entailment_candidate and critic_confirmed)
     semantic_entailment_applied = bool(semantic_entailment_candidate and critic_confirmed)
     reference_anchored_entailment_applied = bool(reference_anchored_entailment_candidate and critic_confirmed)
+    independent_review_applied = bool(independent_review_candidate and critic_confirmed)
     entailment_basis = (
         SOLUTION_BACKED_ENTAILMENT_BASIS
         if solution_backed_entailment_applied
@@ -2014,8 +2031,11 @@ async def run_validation(
             else SEMANTIC_ENTAILMENT_BASIS
         )
     )
+    if independent_review_applied:
+        entailment_basis = "independent_subject_review"
     entailment_applied = bool(
-        solution_backed_entailment_applied
+        independent_review_applied
+        or solution_backed_entailment_applied
         or semantic_entailment_applied
         or reference_anchored_entailment_applied
     )
@@ -2027,8 +2047,8 @@ async def run_validation(
 
     _append_solver_reason(reasons, "Основной решатель", solver)
     _append_solver_reason(reasons, "Независимый аудитор", verifier)
-    if cross_comparison["verdict"] != "match":
-        reasons.append("Контрольные решения не совпали друг с другом полностью")
+    if cross_comparison["verdict"] not in {"match", "skipped"}:
+        reasons.append("Контрольные решения требуют сверки: ответы или полнота выводов различаются")
 
     if critic["status"] != "pass":
         if critic["status"] == "error":
@@ -2043,10 +2063,12 @@ async def run_validation(
         context=statement,
         allow_extra_numbers=True,
     )
-    if entailment_applied and reference_solution_check["verdict"] == "uncertain":
+    if independent_review_applied or (entailment_applied and reference_solution_check["verdict"] == "uncertain"):
         reference_solution_check = _promote_comparison(reference_solution_check, basis=entailment_basis)
-    if reference_solution_check["verdict"] != "match":
-        reasons.append("Эталонное решение не содержит полный финальный ответ")
+    if hard_fail:
+        reference_solution_check = {"verdict": "skipped", "reason": "Проверка остановлена на предыдущем этапе"}
+    if reference_solution_check["verdict"] not in {"match", "skipped"}:
+        reasons.append("Не удалось подтвердить, что эталонное решение содержит все пункты ответа")
 
     semantic_validation_complete = (
         run_solver
@@ -2057,6 +2079,11 @@ async def run_validation(
         and _critic_confirms_semantic_entailment(critic)
         and reference_solution_check["verdict"] == "match"
     )
+    if independent_core_review and semantic_validation_complete:
+        chemistry["admission_effect"] = "reviewed"
+        chemistry["admission_reason"] = "Расчёт подтверждён двумя независимыми решениями и предметным редактором"
+    elif independent_core_review and not reasons:
+        reasons.append("Независимая предметная проверка не завершена — откройте результаты решателей")
     needs_review = (
         not semantic_validation_complete
         or not run_data

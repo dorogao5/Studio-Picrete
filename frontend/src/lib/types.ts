@@ -229,7 +229,7 @@ export interface TaskValidation {
     discipline?: "general_inorganic" | "analytical" | "colloid" | "unknown";
     deterministic_pass?: boolean;
     applicable_count?: number;
-    admission_effect?: "pass" | "limited" | "block";
+    admission_effect?: "pass" | "reviewed" | "limited" | "block";
     admission_reason?: string;
     coverage_before_admission?: "limited";
     required_check_ids?: string[];
@@ -247,7 +247,7 @@ export interface TaskValidation {
       blocking?: boolean;
     }>;
   };
-  reference_solution_check?: { verdict?: "match" | "mismatch" | "incomplete" | "uncertain" };
+  reference_solution_check?: { verdict?: "match" | "mismatch" | "incomplete" | "uncertain" | "skipped" };
   data?: { status?: "ok" | "warn" | "skipped"; unknown_numbers?: string[]; unknown_sources?: string[] };
   source_lineage?: { status?: "ok" | "warn" | "skipped"; unbound_sources?: string[] };
   sanity?: { issues?: string[] };

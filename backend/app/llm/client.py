@@ -82,7 +82,16 @@ async def _stream_completion(client: httpx.AsyncClient, url: str, payload: dict,
     return "".join(text_parts), usage
 
 
-async def chat(
+async def chat(*args, **kwargs) -> LlmResult:
+    deadline = kwargs.get("timeout") or get_settings().llm_request_timeout
+    try:
+        async with asyncio.timeout(deadline):
+            return await _chat(*args, **kwargs)
+    except TimeoutError as err:
+        raise LlmError(f"Модель не завершила ответ за {deadline:g} с. Запрос остановлен; повторите попытку.") from err
+
+
+async def _chat(
     provider: Provider,
     model: ModelEntry,
     system_prompt: str,

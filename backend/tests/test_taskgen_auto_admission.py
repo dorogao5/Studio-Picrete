@@ -202,6 +202,6 @@ def test_failed_candidates_are_discarded_while_green_tasks_are_ready(monkeypatch
     assert batch.validated_count == 1
     assert ready.status == "validated"
     assert ready.approved is False
-    assert discarded.status == "rejected"
+    assert discarded.status == "needs_review"
     assert discarded.approved is False
-    assert discarded.validation["candidate_disposition"] == "discarded"
+    assert discarded.validation["candidate_disposition"] == "needs_review"

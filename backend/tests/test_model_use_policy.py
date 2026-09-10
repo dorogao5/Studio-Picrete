@@ -783,7 +783,7 @@ def test_full_solution_fallback_still_requires_passing_subject_critic(monkeypatc
             "Полуреакция содержит 8 электронов; коэффициент второго реагента 5; "
             "итоговое количество n=0.0021 моль."
         )
-        solution = ("Промежуточный текст без результата. " * 180 + full) if late_evidence_calls == 1 else full
+        solution = ("Промежуточный текст без результата. " * validation.SOLVER_EVIDENCE_CHAR_LIMIT + full) if late_evidence_calls == 1 else full
         return {
             "status": "ok",
             "solution": solution,

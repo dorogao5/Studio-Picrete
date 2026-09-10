@@ -824,6 +824,7 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
               {done}/{total}
             </span>
           </div>
+          <p className="text-xs text-muted-foreground">Сохранено задач: {batch.generated_count} · готовы: {batch.validated_count}/{batch.requested_count}. Генерация и проверка — отдельные этапы; общий лимит партии — 20 минут.</p>
           <div
             role="progressbar"
             aria-label={isRevalidation ? "Ход перепроверки банка" : "Ход генерации партии"}
@@ -841,7 +842,7 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
         <p className="mt-1.5 text-xs text-muted-foreground" role="status" aria-live="polite">
           {isRevalidation
             ? `проверено: ${batch.generated_count} · готовы: ${qualityCount("ready_count", batch.validated_count)} · исключены: ${qualityCount("discarded_count", 0)} · требуют внимания: ${qualityCount("attention_count", Math.max(0, batch.generated_count - batch.validated_count))}`
-            : `готовы: ${batch.validated_count} из ${batch.requested_count} · проверено кандидатов: ${batch.generated_count} · отброшено: ${Math.max(0, batch.generated_count - batch.validated_count)}`}
+            : `готовы: ${batch.validated_count} из ${batch.requested_count} · проверено кандидатов: ${batch.generated_count} · требуют внимания: ${Math.max(0, batch.generated_count - batch.validated_count)}`}
         </p>
       )}
       {batch.status === "failed" && batch.error && <p className="mt-1.5 text-xs text-destructive">{batch.error}</p>}
@@ -920,8 +921,10 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
   if (!hasReport) return <p className="text-xs text-muted-foreground">Проверка не выполнялась</p>;
   const solutionsPass = v.solver?.status === "match" && v.verifier?.status === "match"
     && v.cross_comparison?.verdict === "match" && v.critic?.status === "pass";
+  const resultLabel = (status?: string) => ({ match: "подтверждено", pass: "подтверждено", mismatch: "ответ отличается", incomplete: "не все пункты подтверждены", uncertain: "нужна сверка", fail: "найдены замечания", error: "ошибка запроса", skipped: "не запускался" }[status ?? "skipped"] ?? status);
+  const solutionsSkipped = (!v.solver?.status || v.solver.status === "skipped") && (!v.verifier?.status || v.verifier.status === "skipped");
   const chemistryEffect = v.chemistry?.admission_effect;
-  const chemistryState: EvidenceState = chemistryEffect === "pass" ? "success"
+  const chemistryState: EvidenceState = (chemistryEffect === "pass" || chemistryEffect === "reviewed") ? "success"
     : chemistryEffect === "block" ? "error" : chemistryEffect === "limited" ? "warning" : "neutral";
   const requiredChecks = v.chemistry?.required_check_ids ?? [];
   const passedRequired = requiredChecks.filter((checkId) =>
@@ -942,7 +945,7 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
           <EvidenceMark state={task.export_ready ? "success" : "error"} />
           <div>
             <p className="text-sm font-semibold">
-              {manualException ? "Принята как ручное исключение" : task.export_ready ? "Допущена автоматически" : "Не допущена"}
+              {manualException ? "Принята как ручное исключение" : task.export_ready ? "Допущена автоматически" : "Требует внимания"}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {manualException
@@ -957,10 +960,10 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
       <div className="rounded-lg border border-border px-3">
         <EvidenceGroup
           title="Независимое решение"
-          state={solutionsPass ? "success" : "error"}
-          summary={solutionsPass ? "Два решения и предметный критик согласованы" : "Контрольные решения не дали единого доказательства"}
+          state={solutionsPass ? "success" : solutionsSkipped ? "neutral" : "warning"}
+          summary={solutionsPass ? "Два решения и предметный критик согласованы" : solutionsSkipped ? "Не запускались: проверка остановлена на предыдущем этапе" : "Результаты независимой проверки требуют внимания"}
         >
-          <p>Основной решатель: {v.solver?.status ?? "не запускался"}; аудитор: {v.verifier?.status ?? "не запускался"}; критик: {v.critic?.status ?? "не запускался"}.</p>
+          <p>Основной решатель: {resultLabel(v.solver?.status)}; аудитор: {resultLabel(v.verifier?.status)}; критик: {resultLabel(v.critic?.status)}.</p>
         </EvidenceGroup>
         <EvidenceGroup
           title="Химическая корректность"
@@ -989,7 +992,7 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
         >
           {(v.sanity?.issues ?? []).map((issue, index) => <p key={index}>{issue}</p>)}
           {v.dedup?.duplicate && <p>Найдено сходство с существующим заданием.</p>}
-          {v.reference_solution_check?.verdict !== "match" && <p>Эталонное решение не содержит полный финальный ответ.</p>}
+          {v.reference_solution_check?.verdict === "skipped" ? <p>Проверка полноты эталона пока не выполнялась.</p> : v.reference_solution_check?.verdict !== "match" && <p>Не удалось подтвердить все пункты ответа в эталонном решении.</p>}
         </EvidenceGroup>
       </div>
       {(v.reasons?.length ?? 0) > 1 && (
