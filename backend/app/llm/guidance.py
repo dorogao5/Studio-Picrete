@@ -16,7 +16,7 @@ GENERAL_BEST_PRACTICES = """
 
 FAMILY_GUIDANCE: dict[str, str] = {
     "deepseek": """
-Целевая модель — DeepSeek V4 (deepseek-v4-pro / deepseek-v4-flash).
+Целевая модель — DeepSeek V4.1 Flash (deepseek-flash).
 - System-сообщение поддерживается полноценно: всю постоянную инструкцию помещайте туда.
 - По умолчанию включён thinking-режим: модель рассуждает сама, НЕ добавляйте «думай шаг за шагом» и
   цепочки рассуждений в промпт — это избыточно.

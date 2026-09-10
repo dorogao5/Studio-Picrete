@@ -1,10 +1,17 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { apiErrorMessage, assistantsApi } from "../../lib/api";
-import type { Assistant, Criterion } from "../../lib/types";
-import { Button, Card, ErrorNote, Field, Input, Textarea } from "../../components/ui";
+import type { Assistant, Criterion, Provider } from "../../lib/types";
+import { Button, Card, ErrorNote, Field, Input, Select, Textarea } from "../../components/ui";
 
-export default function ProfileTab({ assistant, onSaved }: { assistant: Assistant; onSaved: () => void }) {
+import { modelOptions } from "./PromptsTab";
+import { isKnownAdvisoryModel } from "../../lib/modelPolicy";
+
+export default function ProfileTab({ assistant, providers, onSaved }: { assistant: Assistant; providers: Provider[]; onSaved: () => void }) {
+  const models = modelOptions(providers, true);
+  const decisionModels = models.filter((model) => !isKnownAdvisoryModel(model));
+  const [graderModel, setGraderModel] = useState(assistant.default_grader_model_id ?? "");
+  const [generatorModel, setGeneratorModel] = useState(assistant.default_generator_model_id ?? "");
   const [gradingEnabled, setGradingEnabled] = useState(assistant.grading_enabled ?? false);
   const [name, setName] = useState(assistant.name);
   const [description, setDescription] = useState(assistant.description);
@@ -23,6 +30,8 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
     try {
       await assistantsApi.update(assistant.id, {
         name,
+        default_grader_model_id: graderModel || null,
+        default_generator_model_id: generatorModel || null,
         grading_enabled: gradingEnabled,        description,
         audience,
         topics: topics.split("\n").map((t) => t.trim().replace(/^[•\-–]\s*/, "")).filter(Boolean),
@@ -40,6 +49,23 @@ export default function ProfileTab({ assistant, onSaved }: { assistant: Assistan
 
   return (
     <div className="space-y-5">
+      <Card className="p-5 space-y-4">
+        <h2 className="font-semibold text-sm">Модели курса</h2>
+        <Field label="Ассистент курса и проверка" hint="Эта модель отвечает студентам и проверяет решения в Picrete после публикации обновления курса. Модели отдельных шагов Studio выбираются на вкладке «Проверка».">
+          <Select aria-label="Ассистент курса и проверка" value={graderModel} onChange={(e) => setGraderModel(e.target.value)}>
+            <option value="">— выберите модель —</option>
+            {graderModel && !decisionModels.some((m) => m.id === graderModel) && <option value={graderModel} disabled>Текущая модель недоступна — выберите другую</option>}
+            {decisionModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Генерация заданий" hint="Модель по умолчанию для новых партий заданий. Независимое решение и аудит настраиваются при запуске партии.">
+          <Select aria-label="Генерация заданий" value={generatorModel} onChange={(e) => setGeneratorModel(e.target.value)}>
+            <option value="">— выберите модель —</option>
+            {generatorModel && !models.some((m) => m.id === generatorModel) && <option value={generatorModel} disabled>Текущая модель недоступна — выберите другую</option>}
+            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </Select>
+        </Field>
+      </Card>
       <Card className="p-5 space-y-4">
         <h2 className="font-semibold text-sm">Профиль дисциплины</h2>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={gradingEnabled} onChange={(e) => setGradingEnabled(e.target.checked)} /><span>Публиковать проверку работ в Picrete (запуск на эталонах Свиридова). Перед публикацией потребуется проверенный прогон в Playground.</span></label>

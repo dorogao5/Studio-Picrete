@@ -126,6 +126,7 @@ export default function AssistantDetail() {
               <div className="space-y-8">
                 <ProfileTab
                   assistant={assistant}
+                  providers={providers}
                   onSaved={async () => {
                     await reload();
                     await reloadDisciplines();

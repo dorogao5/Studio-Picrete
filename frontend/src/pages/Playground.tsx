@@ -1136,11 +1136,11 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
   useEffect(() => {
     if (modelEntryId && production.some((model) => model.id === modelEntryId)) return;
     const preferred =
-      production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro") ??
-      production.find((model) => model.id === assistant.default_generator_model_id) ??
+      production.find((model) => model.id === assistant.default_grader_model_id) ??
+      production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-flash") ??
       production[0];
     setModelEntryId(preferred?.id ?? "");
-  }, [assistant.default_generator_model_id, modelEntryId, production]);
+  }, [assistant.default_grader_model_id, modelEntryId, production]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "nearest" });
@@ -1249,7 +1249,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
           <Field label="Решение / вопрос студента" hint="Контекст, который ассистент будет разбирать в диалоге">
             <Textarea rows={4} value={studentWork} onChange={(e) => setStudentWork(e.target.value)} />
           </Field>
-          <Field label="Модель" hint="DeepSeek V4 Pro — основной режим; Flash доступен только для явных быстрых прогонов">
+          <Field label="Модель" hint="DeepSeek V4.1 Flash — основная модель; экспериментальные модели доступны для предварительных прогонов">
             <Select value={modelEntryId} onChange={(e) => setModelEntryId(e.target.value)}>
               {production.length === 0 && <option value="">— подключите DeepSeek V4 —</option>}
               {production.map((m) => (

@@ -24,12 +24,12 @@ export function deepSeekV4Options(providers: Provider[], productionOnly = true) 
   return modelOptions(providers, productionOnly).filter(
     (model) =>
       model.family.toLocaleLowerCase() === "deepseek" &&
-      /deepseek-v4(?:\.1)?-(?:pro|flash)/i.test(model.modelId),
+      /^(?:deepseek-flash|deepseek-v4(?:\.1)?-(?:pro|flash)(?:-.*)?)$/i.test(model.modelId),
   );
 }
 
 function preferredDeepSeekV4(models: ReturnType<typeof deepSeekV4Options>) {
-  return models.find((model) => /deepseek-v4-pro(?:$|[^a-z])/i.test(model.modelId)) ?? models[0];
+  return models.find((model) => /^deepseek-flash$/i.test(model.modelId)) ?? models[0];
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -68,7 +68,7 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
   const bulkGenerate = async () => {
     const target = preferredDeepSeekV4(deepSeekV4Options(providers));
     if (!target) {
-      setError("Сначала подключите production-модель DeepSeek V4 Pro или Flash");
+      setError("Сначала подключите production-модель DeepSeek V4.1 Flash");
       return;
     }
     setError("");
@@ -344,7 +344,7 @@ function GenerateModal({
         </Field>
         <Field
           label="Целевая модель (кто будет работать по промпту)"
-          hint="Рабочие промпты ассистентов адаптируются под DeepSeek V4 Pro/Flash"
+          hint="Рабочие промпты ассистентов адаптируются под DeepSeek V4.1 Flash"
         >
           <Select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
             {production.length === 0 && <option value="">— подключите DeepSeek V4 —</option>}

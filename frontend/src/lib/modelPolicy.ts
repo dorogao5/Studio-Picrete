@@ -5,6 +5,7 @@ interface ModelMetadata {
 }
 
 export function isKnownAdvisoryModel(model: ModelMetadata): boolean {
+  if (model.modelId.trim().toLowerCase() === "deepseek-flash") return false;
   const identity = [model.modelId, model.displayName].join(" ").replace(/[-_/]+/g, " ");
   if (/(?:^|\s)(?:flash|advisory|preview)(?:\s|$)/i.test(identity)) return true;
 

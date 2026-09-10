@@ -28,3 +28,8 @@ test("keeps non-advisory models for the server-side decision-policy preflight", 
     false,
   );
 });
+
+test("released V4.1 Flash is a decision model; expired preview is not", () => {
+  assert.equal(isKnownAdvisoryModel({ modelId: "deepseek-flash", displayName: "DeepSeek V4.1 Flash", notes: "" }), false);
+  assert.equal(isKnownAdvisoryModel({ modelId: "deepseek-v4.1-flash-expires-on-0910", displayName: "DeepSeek V4.1 Flash Preview", notes: "" }), true);
+});

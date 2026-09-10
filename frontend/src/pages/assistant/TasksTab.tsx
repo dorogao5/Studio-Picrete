@@ -1656,13 +1656,12 @@ function BatchLaunchModal({
   const hiddenAdvisoryCount = production.length - controlModels.length;
   const generatorPrompts = useMemo(() => prompts.filter((p) => p.role === "generator"), [prompts]);
   const preferredGeneratorId =
-    production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro")?.id ??
     (production.some((model) => model.id === assistant.default_generator_model_id)
       ? assistant.default_generator_model_id!
-      : (production[0]?.id ?? ""));
+      : (production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-flash")?.id ?? production[0]?.id ?? ""));
   const preferredSolverId = controlModels.some((model) => model.id === assistant.default_grader_model_id)
     ? assistant.default_grader_model_id!
-    : (controlModels.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro")?.id ??
+    : (controlModels.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-flash")?.id ??
       controlModels.find((model) => model.id !== preferredGeneratorId)?.id ??
       controlModels[0]?.id ??
       "");
@@ -1679,7 +1678,7 @@ function BatchLaunchModal({
 
   const submit = async () => {
     if (!solverId) {
-      setError("Нужна контрольная модель итогового класса — например DeepSeek V4 Pro. Flash не может допускать задачи в банк.");
+      setError("Выберите модель, разрешённую для проверки задач, например DeepSeek V4.1 Flash.");
       return;
     }
     setLoading(true);

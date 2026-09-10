@@ -44,7 +44,7 @@ function preferredDecisionModelId(models: ModelOption[], configuredId: string | 
   );
   return (
     eligible.find((model) => model.id === configuredId)?.id ??
-    eligible.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-v4-pro")?.id ??
+    eligible.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-flash")?.id ??
     eligible[0]?.id ??
     ""
   );

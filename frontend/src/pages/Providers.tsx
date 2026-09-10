@@ -278,7 +278,7 @@ function ProviderCard({
           <Input
             value={newModelId}
             onChange={(e) => setNewModelId(e.target.value)}
-            placeholder="model id, напр. deepseek-v4-flash"
+            placeholder="model id, напр. deepseek-flash"
             className="font-mono"
           />
           <Select value={newFamily} onChange={(e) => setNewFamily(e.target.value)}>
