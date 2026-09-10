@@ -167,3 +167,29 @@ def test_hard_generation_reserves_room_for_reasoning_and_complete_json() -> None
     assert taskgen._generation_max_tokens("hard") == 24000
     assert taskgen._generation_max_tokens(" HARD ") == 24000
     assert taskgen._generation_max_tokens("medium") == 16000
+
+
+def test_successful_chunk_is_saved_before_later_generation_is_cancelled(monkeypatch):
+    saved = []
+    calls = 0
+    async def generate(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [valid_item('Сохранённая задача')]
+        assert saved
+        raise asyncio.CancelledError()
+    async def save(items):
+        saved.extend(items)
+    async def scenario():
+        try:
+            await taskgen._generate_batch_items(
+                SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), '',
+                merged=MERGED, params={}, count=2, grounding_text='', existing_statements=[],
+                on_items=save,
+            )
+        except asyncio.CancelledError:
+            pass
+    monkeypatch.setattr(taskgen, 'generate_tasks', generate)
+    asyncio.run(scenario())
+    assert len(saved) == 1
