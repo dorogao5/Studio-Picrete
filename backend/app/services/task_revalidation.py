@@ -61,9 +61,12 @@ async def sync_generation_batch(db: AsyncSession, task: GeneratedTask) -> None:
         params = dict(source.params or {})
         if source.error:
             params.setdefault("original_run_error", source.error)
+        params.setdefault("original_run_quality_summary", params.get("quality_summary", {}))
         params["quality_summary"] = {
             **params.get("quality_summary", {}), "ready_count": ready,
+            "discarded_count": sum(candidate.status == "rejected" for candidate in tasks),
             "attention_count": len(tasks) - ready,
+            "discarded_by_reason": {},
         }
         source.params = params
         source.status = "completed"

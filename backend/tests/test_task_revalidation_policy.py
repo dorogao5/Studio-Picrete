@@ -42,7 +42,7 @@ def test_repaired_batch_count_is_updated_without_approving_tasks(monkeypatch):
     from app.services import task_revalidation as service
     source = SimpleNamespace(id='batch', assistant_id='course', status='failed',
                              requested_count=3, validated_count=0, error='old failure', params={})
-    tasks = [SimpleNamespace(ready=True) for _ in range(3)]
+    tasks = [SimpleNamespace(ready=True, status="validated") for _ in range(3)]
     class Db:
         async def get(self, *_): return source
         async def execute(self, *_): return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: tasks))
