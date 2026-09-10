@@ -136,10 +136,10 @@ export default function Playground() {
   }, [assistantId, assistants, selectedId, setSelectedId]);
 
   return (
-    <div className="max-w-6xl space-y-5">
+    <div className="max-w-6xl space-y-5 sm:space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold">Playground</h1>
+          <h1 className="text-xl font-semibold">Проверка ассистента</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Выберите задачу, добавьте решение студента и проверьте оценку или проведите учебный разбор.
           </p>
