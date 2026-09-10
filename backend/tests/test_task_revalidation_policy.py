@@ -35,3 +35,25 @@ def test_skipped_or_unavailable_checks_do_not_reject_a_candidate():
         {"verdict": "needs_review", "critic": {"status": "skipped"},
          "chemistry": {"indeterminate_codes": ["chemistry.reaction_balance"]}},
     )
+
+
+def test_repaired_batch_count_is_updated_without_approving_tasks(monkeypatch):
+    import asyncio
+    from app.services import task_revalidation as service
+    source = SimpleNamespace(id='batch', assistant_id='course', status='failed',
+                             requested_count=3, validated_count=0, error='old failure', params={})
+    tasks = [SimpleNamespace(ready=True) for _ in range(3)]
+    class Db:
+        async def get(self, *_): return source
+        async def execute(self, *_): return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: tasks))
+        async def commit(self): pass
+    monkeypatch.setattr(service, 'task_is_export_ready', lambda task: task.ready)
+    asyncio.run(service.sync_generation_batch(Db(), SimpleNamespace(batch_id='batch')))
+    assert source.validated_count == 3
+    assert source.status == 'completed'
+    assert source.error == ''
+    assert source.params['original_run_error'] == 'old failure'
+    source.status = 'running'
+    source.validated_count = 0
+    asyncio.run(service.sync_generation_batch(Db(), SimpleNamespace(batch_id='batch')))
+    assert source.validated_count == 0

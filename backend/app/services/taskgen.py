@@ -587,6 +587,7 @@ async def _generate_batch_items(
     existing_statements: list[str],
     on_progress: Callable[[int], Awaitable[None]] | None = None,
     call_budget: _GenerationCallBudget | None = None,
+    on_attempt: Callable[[int, int, str], Awaitable[None]] | None = None,
 ) -> tuple[list[dict], list[str]]:
     items: list[dict] = []
     seen_statements = list(existing_statements)
@@ -606,6 +607,8 @@ async def _generate_batch_items(
             )
             break
         take = min(GENERATION_CHUNK, missing)
+        if on_attempt is not None:
+            await on_attempt(effective_call_budget.used, len(items), errors[-1] if errors else "")
         try:
             chunk = await generate_tasks(
                 provider,
@@ -824,6 +827,11 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     async def update_generation_progress(done: int) -> None:
         await _set_progress(db, batch, "Генерация условий", done, count)
 
+    async def update_attempt(attempt: int, done: int, last_error: str) -> None:
+        detail = f"; повтор после ошибки: {last_error[:180]}" if last_error else ""
+        await _set_progress(db, batch,
+            f"Генерация: запрос {attempt}, получено {done}/{count}{detail}", done, count)
+
     # Лимит рассчитывается один раз на всю партию. Иначе каждая новая волна добора
     # заново получает MAX_REFILL_ATTEMPTS и число оплачиваемых запросов растёт без
     # связи с общим бюджетом кандидатов.
@@ -840,6 +848,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         grounding_text=grounding_text,
         existing_statements=list(existing),
         on_progress=update_generation_progress,
+        on_attempt=update_attempt,
         call_budget=call_budget,
     )
     if not items and gen_errors:
@@ -898,7 +907,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         )
 
     # Пользователь заказывает готовые задачи, а не число сырых ответов модели.
-    # Непрошедший кандидат сохраняется для аудита как rejected и автоматически
+    # Непрошедший кандидат сохраняется для разбора и автоматически
     # заменяется новым в пределах ограниченного бюджета.
     def retryable_content_failure(task: GeneratedTask) -> bool:
         v = task.validation or {}
@@ -932,6 +941,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             grounding_text=grounding_text,
             existing_statements=list(existing) + [task.statement for task in created],
             call_budget=call_budget,
+            on_attempt=update_attempt,
         )
         gen_errors.extend(refill_errors)
         if not refill_items:

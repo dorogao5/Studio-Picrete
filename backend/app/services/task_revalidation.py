@@ -44,6 +44,40 @@ def _generated_candidate_should_be_discarded(task: GeneratedTask, validation: di
             and bool(str(task.model_used or "").strip() or task.batch_id))
 
 
+async def sync_generation_batch(db: AsyncSession, task: GeneratedTask) -> None:
+    """Reflect repaired candidates without rewriting a running generation job."""
+    if not task.batch_id:
+        return
+    source = await db.get(GenerationBatch, task.batch_id)
+    if source is None or source.status not in {"failed", "completed"}:
+        return
+    tasks = (await db.execute(select(GeneratedTask).where(
+        GeneratedTask.batch_id == source.id,
+        GeneratedTask.assistant_id == source.assistant_id,
+    ))).scalars().all()
+    ready = sum(task_is_export_ready(candidate) for candidate in tasks)
+    source.validated_count = ready
+    if ready >= source.requested_count:
+        params = dict(source.params or {})
+        if source.error:
+            params.setdefault("original_run_error", source.error)
+        params["quality_summary"] = {
+            **params.get("quality_summary", {}), "ready_count": ready,
+            "attention_count": len(tasks) - ready,
+        }
+        source.params = params
+        source.status = "completed"
+        source.error = ""
+        source.progress = {"stage": "Готово после перепроверки", "done": ready,
+                           "total": source.requested_count}
+    else:
+        source.status = "failed"
+        source.error = f"После перепроверки готовы {ready} из {source.requested_count}. Подробности — в задачах партии."
+        source.progress = {"stage": "Неполная партия", "done": ready,
+                           "total": source.requested_count}
+    await db.commit()
+
+
 async def _revalidate_task(
     db: AsyncSession,
     *,
@@ -145,6 +179,7 @@ async def _revalidate_task(
         task.status = "needs_review"
         disposition = "attention"
     await db.commit()
+    await sync_generation_batch(db, task)
     return disposition
 
 
