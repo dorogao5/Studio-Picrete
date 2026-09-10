@@ -1977,7 +1977,11 @@ async def run_validation(
     )
 
     independent_review_candidate = bool(
-        independent_core_review
+        (independent_core_review or (
+            chemistry.get("admission_effect") == "pass"
+            and not (strict_comparison_candidate or semantic_entailment_candidate
+                     or solution_backed_entailment_candidate or reference_anchored_entailment_candidate)
+        ))
         and not solver.get("solution_truncated")
         and not verifier.get("solution_truncated")
         and not hard_fail

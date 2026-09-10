@@ -56,6 +56,14 @@ def validation_is_current_decision(value: object, task: object | None = None) ->
         and isinstance(critic.get("checks"), dict)
         and all(critic["checks"].get(key) is True for key in CRITIC_REQUIRED_CHECKS)
         and critic.get("issues") == []
+        and (
+            critic.get("basis") != "independent_subject_review"
+            or (
+                not solver.get("solution_truncated") and not verifier.get("solution_truncated")
+                and all(str(report.get("solution") or "").strip() and str(report.get("answer") or "").strip()
+                        for report in (solver, verifier))
+            )
+        )
         and isinstance(chemistry, dict)
         and chemistry.get("validation_version") == CHEMISTRY_VALIDATION_VERSION
         and (
