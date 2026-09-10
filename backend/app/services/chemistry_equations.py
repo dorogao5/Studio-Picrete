@@ -285,8 +285,8 @@ _REACTION_EDGE_PUNCTUATION = " \t\r\n$`:,.…"
 def _is_oxidation_state_transition(fragment: str, arrow: re.Match[str]) -> bool:
     """Return true for prose such as ``Cr: +6 → +3``, not an equation."""
 
-    left = fragment[: arrow.start()]
-    right = fragment[arrow.end() :]
+    left = fragment[: arrow.start()].replace("$", "")
+    right = fragment[arrow.end() :].replace("$", "")
     left_state = re.search(r"(?:^|[\s:(])[-+−]?\d+\s*$", left)
     right_state = re.match(r"\s*[-+−]?\d+(?=\s*(?:[).,;:]|$))", right)
     return left_state is not None and right_state is not None
