@@ -54,7 +54,7 @@ class ReactionBalance:
 
 _ARROW_RE = re.compile(r"(?:<=>|<->|=>|->|⇌|↔|→|⟶)")
 _EQUALS_RE = re.compile(r"(?<![<>=])=(?!=)")
-_PHASE_RE = re.compile(r"\((?:aq|s|l|g|г|газ|ж|тв|бел|р-?р)\)\s*$", re.IGNORECASE)
+_PHASE_RE = re.compile(r"\((?:aq|s|l|g|г|газ|ж|тв|бел|графит|граф|алмаз|ромб|монокл|крист|р-?р)\)\s*$", re.IGNORECASE)
 _ELEMENT_RE = re.compile(r"[A-Z][a-z]?")
 _SUBSCRIPTS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
 _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-")
@@ -99,6 +99,8 @@ def _clean_formula(raw: str) -> str:
     value = value.translate(_SUBSCRIPTS).translate(_SUPERSCRIPTS)
     value = value.replace("−", "-").replace("∙", "·").replace("⋅", "·")
     value = re.sub(r"\\(?:uparrow|downarrow)\b|[↑↓]", "", value)
+    value = re.sub(r"\^\{(\d*[+-])\}", r"^\1", value)
+    value = re.sub(r"_\{(\d+)\}", r"\1", value)
     value = re.sub(r"\\(?:mathrm|text)\s*\{([^{}]+)\}", r"\1", value)
     value = re.sub(r"_\{?(\d+)\}?", r"\1", value)
     value = re.sub(r"\\[,;! ]", "", value)
@@ -357,6 +359,8 @@ def reaction_candidates(text: str) -> list[str]:
 
     # Normalize presentation commands before extracting chemical spans.
     text = re.sub(r"\\[\[\]()]", "", text or "")
+    text = text.replace("&", " ")
+    text = re.sub(r"\\\\(?=\s|$)", "\n", text)
     text = re.sub(r"\\(?:longrightarrow|rightarrow|to)\b", "→", text)
     text = re.sub(r"\\(?:rightleftharpoons|leftrightarrow)\b", "⇌", text)
     candidates: list[str] = []

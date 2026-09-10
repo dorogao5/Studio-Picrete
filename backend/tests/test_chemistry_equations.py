@@ -163,3 +163,14 @@ def test_enthalpy_function_argument_keeps_the_entire_reaction():
     assert len(balance.reactants) == len(balance.products) == 2
     assert balance.balanced
     assert not check_reaction_balance(reaction_candidates(text.replace('2\\,', '3\\,'))[0]).balanced
+
+
+def test_nested_charge_macros_and_aligned_graphite_reactions():
+    text = r'''$\mathrm{Na(г)} \rightarrow \mathrm{Na^{+}(г)} + e^{-}$
+$\mathrm{Br(г)} + e^{-} \rightarrow \mathrm{Br^{-}(г)}$
+&\mathrm{C(графит)} + \mathrm{O_2(г)} \rightarrow \mathrm{CO_2(г)} \\
++\ &2\,\mathrm{H_2(г)} + \mathrm{O_2(г)} \rightarrow 2\,\mathrm{H_2O(ж)} \\'''
+    candidates = reaction_candidates(text)
+    assert len(candidates) == 4
+    assert all(check_reaction_balance(c).balanced for c in candidates)
+    assert parse_species(r'\mathrm{SO_{4}^{2-}}').charge == -2
