@@ -155,7 +155,7 @@ export function Tabs({
     <div
       role="tablist"
       aria-label="Режимы работы"
-      className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/30 p-1 sm:grid-cols-4"
+      className={clsx("grid min-w-0 gap-1 rounded-lg border border-border bg-muted/30 p-1", tabs.length === 3 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}
     >
       {tabs.map((tab, index) => (
         <button

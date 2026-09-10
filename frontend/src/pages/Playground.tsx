@@ -566,7 +566,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
   return (
     <div className="space-y-5">
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card className="p-5 space-y-4">
+        <Card className="min-w-0 p-5 space-y-4">
           <h2 className="text-sm font-semibold">1. Задача</h2>
           <TaskPicker
             assistant={assistant}
@@ -595,7 +595,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
           </Field>
         </Card>
 
-        <Card className="p-5 space-y-4">
+        <Card className="min-w-0 p-5 space-y-4">
           <h2 className="text-sm font-semibold">2. Решение студента</h2>
           {solution.node}
         </Card>
@@ -941,8 +941,8 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
 
   return (
     <div className="space-y-5">
-      <fieldset disabled={running} className="grid min-w-0 gap-5 lg:grid-cols-2">
-        <Card className="p-5 space-y-4">
+      <fieldset disabled={running} className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-2">
+        <Card className="min-w-0 p-5 space-y-4">
           <h2 className="font-semibold">1. Выберите задачу</h2>
           <Tabs tabs={[{key:"sviridov",label:"Свиридов"},{key:"studio",label:"Из генератора"},{key:"manual",label:"Своё условие"}]} active={source} onChange={next => {setSource(next); setTaskId(""); setSelectedTask(null); setRun(null); setBankResult(null); setError("");}} />
           {source === "sviridov" ? <CourseBankPicker assistantId={assistant.id} value={bankTask} onChange={task => {setBankTask(task); setBankResult(null);}} disabled={running} /> : <>
@@ -975,7 +975,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
           />
           </>}
         </Card>
-        <Card className="p-5 space-y-4">
+        <Card className="min-w-0 p-5 space-y-4">
           <h2 className="font-semibold">2. Добавьте решение студента</h2>
           <p className="text-sm text-muted-foreground">Напишите ответ или загрузите работу. После распознавания можно исправить текст перед проверкой.</p>
           {solution.node}
@@ -986,7 +986,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
       </fieldset>
 
       <ErrorNote message={error} />
-      <Card className="p-5 space-y-4">
+      <Card className="min-w-0 p-5 space-y-4">
       <h2 className="font-semibold">3. Проверьте работу</h2>
       {source === "sviridov" && <Field label="Настройки проверки"><Select value={version} disabled={running} onChange={e => {setVersion(e.target.value); setBankResult(null);}}><option value="draft">Текущие настройки Studio</option><option value="published">Опубликованные настройки курса</option></Select></Field>}
       <Button
@@ -1260,8 +1260,8 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Card className="p-5 space-y-4">
+      <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-3">
+        <Card className="min-w-0 p-5 space-y-4">
           <h2 className="font-semibold">Задача для разбора</h2>
           <fieldset disabled={sending || messages.length > 0} className="min-w-0 space-y-3">
           <Field label="Источник задачи"><Select value={source} onChange={e => {setSource(e.target.value); setTaskId("");}}><option value="sviridov">Свиридов</option><option value="studio">Сгенерированные задачи</option><option value="manual">Своё условие</option></Select></Field>
@@ -1314,7 +1314,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
           </Button>
         </Card>
 
-        <Card className="p-5 space-y-3 lg:col-span-2 flex flex-col">
+        <Card className="min-w-0 p-5 space-y-3 lg:col-span-2 flex flex-col">
           <div>
             <h2 className="text-sm font-semibold">Диалог со студентом</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
