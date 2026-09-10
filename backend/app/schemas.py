@@ -559,7 +559,14 @@ class TutorMessage(BaseModel):
     content: str
 
 
+class TutorBankTask(BaseModel):
+    course_id: str = Field(min_length=1, max_length=64)
+    task_id: str = Field(min_length=1, max_length=64)
+    task_number: str = Field(min_length=1, max_length=32)
+
+
 class TutorChatRequest(BaseModel):
+    bank_task: TutorBankTask | None = None
     run_id: str | None = None
     task_id: str | None = None
     prompt_version_id: str | None = None
@@ -570,6 +577,7 @@ class TutorChatRequest(BaseModel):
 
 
 class TutorRunOut(ORMModel):
+    bank_task: dict | None = None
     id: str
     assistant_id: str
     task_id: str | None

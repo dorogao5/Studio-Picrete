@@ -18,6 +18,7 @@ import {
   Upload,
 } from "lucide-react";
 import {
+  api,
   apiErrorMessage,
   assistantsApi,
   pipelinesApi,
@@ -46,7 +47,8 @@ import { taskIsAutoReady, taskIsManualReady } from "../lib/taskExport";
 import { isKnownAdvisoryModel } from "../lib/modelPolicy";
 import { deepSeekV4Options, modelOptions } from "./assistant/PromptsTab";
 
-import BankPlayground from "./BankPlayground";
+import CourseBankPicker, { type BankSelection } from "../components/CourseBankPicker";
+import BankGradingResult, { type BankPreview } from "../components/BankGradingResult";
 
 type RubricCriterion = GeneratedTask["rubric"][number];
 
@@ -110,7 +112,7 @@ export default function Playground() {
   const { selectedId, setSelectedId } = useApp();
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [mode, setMode] = useState("bank");
+  const [mode, setMode] = useState("pipeline");
 
   const assistantId = params.get("assistant") ?? "";
   const assistant = assistants.find((a) => a.id === assistantId) ?? null;
@@ -139,7 +141,7 @@ export default function Playground() {
         <div>
           <h1 className="text-xl font-semibold">Playground</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Задача из банка → текст или фото решения → AI-проверка → настройка → публикация
+            Выберите задачу, добавьте решение студента и проверьте оценку или проведите учебный разбор.
           </p>
         </div>
         <Select
@@ -161,10 +163,10 @@ export default function Playground() {
 
       <Tabs
         tabs={[
-          { key: "bank", label: "Банк Picrete · Свиридов" },
-          { key: "compare", label: "Сравнение моделей" },
+
           { key: "pipeline", label: "Проверка работы" },
           { key: "tutor", label: "Разбор со студентом" },
+          { key: "compare", label: "Сравнение моделей" },
           { key: "history", label: "История" },
         ]}
         active={mode}
@@ -173,14 +175,12 @@ export default function Playground() {
 
       {assistant === null ? (
         <EmptyState title="Выберите ассистента" />
-      ) : mode === "bank" ? (
-        <BankPlayground key={assistant.id} assistant={assistant} />
       ) : mode === "compare" ? (
         <CompareMode assistant={assistant} providers={providers} />
       ) : mode === "pipeline" ? (
-        <PipelineMode assistant={assistant} />
+        <PipelineMode key={assistant.id} assistant={assistant} />
       ) : mode === "tutor" ? (
-        <TutorMode assistant={assistant} providers={providers} />
+        <TutorMode key={assistant.id} assistant={assistant} providers={providers} />
       ) : (
         <HistoryMode assistant={assistant} />
       )}
@@ -228,7 +228,7 @@ function useSolutionInput() {
 
   const node = (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           ref={fileRef}
           type="file"
@@ -237,8 +237,8 @@ function useSolutionInput() {
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
-        <Button variant="secondary" onClick={() => fileRef.current?.click()} loading={ocrLoading}>
-          <Upload className="h-4 w-4" /> Фото решения → OCR
+        <Button variant="secondary" className="shrink-0" onClick={() => fileRef.current?.click()} loading={ocrLoading}>
+          <Upload className="h-4 w-4" /> Загрузить фото или PDF
         </Button>
         {imageIds.length > 0 && <Badge tone="info">{imageIds.length} стр.</Badge>}
         <span className="text-xs text-muted-foreground">DataLab распознает рукопись; результат можно править ниже</span>
@@ -248,12 +248,12 @@ function useSolutionInput() {
         rows={8}
         value={ocrText}
         onChange={(e) => setOcrText(e.target.value)}
-        placeholder="OCR-текст решения студента появится здесь — или вставьте текст решения вручную"
+        placeholder="Введите решение студента или загрузите фото — распознанный текст появится здесь"
       />
     </div>
   );
 
-  return { ocrText, imageIds, node, reset };
+  return { ocrText, imageIds, node, reset, ocrLoading };
 }
 
 function ManualRubricEditor({
@@ -376,6 +376,7 @@ function TaskPicker({
   setMaxScore,
   rubricError,
   onSelectedTaskChange,
+  manualOnly,
 }: {
   assistant: Assistant;
   taskId: string;
@@ -390,6 +391,7 @@ function TaskPicker({
   setMaxScore: (score: number) => void;
   rubricError: string;
   onSelectedTaskChange: (task: GeneratedTask | null) => void;
+  manualOnly?: boolean;
 }) {
   const [tasks, setTasks] = useState<GeneratedTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -419,14 +421,15 @@ function TaskPicker({
 
   return (
     <div className="space-y-3">
-      <Field label="Задача из банка">
+      {!manualOnly && <Field label="Сгенерированная задача">
         <MathTaskSelect value={taskId} onChange={nextId => {
           setTaskId(nextId); onSelectedTaskChange(tasks.find(task => task.id === nextId) ?? null);
         }} options={tasks.map(task => ({ id: task.id, text: (task.export_ready ? "✓ " : "") + task.statement }))}
-          placeholder={loadingTasks ? "Загружаем банк задач…" : "Ввести условие вручную"} />
-      </Field>
+          placeholder={loadingTasks ? "Загружаем задачи…" : "Выберите сгенерированную задачу"} />
+      </Field>}
       <ErrorNote message={tasksError} />
-      {!taskId && (
+      {manualOnly === false && !taskId && <p className="text-sm text-muted-foreground">{loadingTasks ? "Загружаем задачи…" : tasks.length ? "Выберите задачу из списка выше." : "Сгенерированных задач пока нет. Выберите Свиридова или введите своё условие."}</p>}
+      {!taskId && manualOnly !== false && (
         <>
           <Field label="Условие задачи">
             <Textarea rows={4} value={taskText} onChange={(e) => setTaskText(e.target.value)} />
@@ -853,6 +856,10 @@ function NuanceModal({
 }
 
 function PipelineMode({ assistant }: { assistant: Assistant }) {
+  const [source, setSource] = useState("sviridov");
+  const [bankTask, setBankTask] = useState<BankSelection | null>(null);
+  const [bankResult, setBankResult] = useState<BankPreview | null>(null);
+  const [version, setVersion] = useState("draft");
   const [pipelines, setPipelines] = useState<Pipeline[] | null>(null);
   const [pipelineId, setPipelineId] = useState("");
   const [taskId, setTaskId] = useState("");
@@ -900,12 +907,21 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
     };
   }, [assistant.id, solution.reset]);
 
+  useEffect(() => { setRun(null); setBankResult(null); }, [solution.ocrText, taskId, taskText, pipelineId]);
+
   const execute = async () => {
-    if (rubricError) return;
+    if (running || solution.ocrLoading) return;
+    if (source !== "sviridov" && rubricError) return;
     setRunning(true);
     setError("");
-    setRun(null);
+    setRun(null); setBankResult(null);
     try {
+      if (source === "sviridov") {
+        if (!bankTask) return;
+        const {data} = await api.post<BankPreview>(`/assistants/${assistant.id}/courses/${bankTask.courseId}/grading-preview`, {task_id: bankTask.task.id, student_text: solution.ocrText, mode: version});
+        setBankResult(data);
+        return;
+      }
       const result = await pipelinesApi.run(assistant.id, pipelineId, {
         task_id: taskId || null,
         task_text: taskText,
@@ -925,9 +941,11 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 lg:grid-cols-2">
+      <fieldset disabled={running} className="grid min-w-0 gap-5 lg:grid-cols-2">
         <Card className="p-5 space-y-4">
-          <h2 className="text-sm font-semibold">Сценарий и задача</h2>
+          <h2 className="font-semibold">1. Выберите задачу</h2>
+          <Tabs tabs={[{key:"sviridov",label:"Свиридов"},{key:"studio",label:"Из генератора"},{key:"manual",label:"Своё условие"}]} active={source} onChange={next => {setSource(next); setTaskId(""); setSelectedTask(null); setRun(null); setBankResult(null); setError("");}} />
+          {source === "sviridov" ? <CourseBankPicker assistantId={assistant.id} value={bankTask} onChange={task => {setBankTask(task); setBankResult(null);}} disabled={running} /> : <>
           <Field label="Сценарий проверки">
             <Select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
               {pipelines === null && <option value="">— загружаем пайплайны —</option>}
@@ -953,32 +971,36 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
             setMaxScore={setManualMaxScore}
             rubricError={rubricError}
             onSelectedTaskChange={setSelectedTask}
+            manualOnly={source === "manual"}
           />
+          </>}
         </Card>
         <Card className="p-5 space-y-4">
-          <h2 className="text-sm font-semibold">Решение студента</h2>
+          <h2 className="font-semibold">2. Добавьте решение студента</h2>
+          <p className="text-sm text-muted-foreground">Напишите ответ или загрузите работу. После распознавания можно исправить текст перед проверкой.</p>
           {solution.node}
           <p className="text-xs text-muted-foreground">
             Фото распознаётся при загрузке; сценарий использует исправленный текст и не запускает OCR повторно.
           </p>
         </Card>
-      </div>
+      </fieldset>
 
       <ErrorNote message={error} />
+      <Card className="p-5 space-y-4">
+      <h2 className="font-semibold">3. Проверьте работу</h2>
+      {source === "sviridov" && <Field label="Настройки проверки"><Select value={version} disabled={running} onChange={e => {setVersion(e.target.value); setBankResult(null);}}><option value="draft">Текущие настройки Studio</option><option value="published">Опубликованные настройки курса</option></Select></Field>}
       <Button
         onClick={execute}
         loading={running}
-        disabled={
-          Boolean(rubricError) ||
-          !pipelineId ||
-          (!taskId && !taskText.trim()) ||
-          (!solution.ocrText.trim() && solution.imageIds.length === 0)
-        }
+        disabled={solution.ocrLoading || !solution.ocrText.trim() || (source === "sviridov" ? !bankTask : Boolean(rubricError) || !pipelineId || (!taskId && !taskText.trim()))}
       >
-        <Play className="h-4 w-4" /> Запустить сценарий
+        <Play className="h-4 w-4" /> Проверить работу
       </Button>
-      {running && <p className="text-xs text-muted-foreground">Проверка выполняется; распознавание фото может занять пару минут…</p>}
+      {running && <p className="text-xs text-muted-foreground">Проверяем решение. Результат появится здесь; обычно это занимает несколько минут.</p>}
 
+      {!running && !solution.ocrText.trim() && <p className="text-sm text-muted-foreground">Добавьте решение студента, чтобы начать проверку.</p>}
+      </Card>
+      {bankResult && <BankGradingResult key={bankResult.result_id} result={bankResult} />}
       {run && <PipelineRunView run={run} />}
     </div>
   );
@@ -1073,6 +1095,8 @@ const TASK_STATUS_ORDER: Record<string, number> = { approved: 0, validated: 1 };
 
 function TutorMode({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
   const production = useMemo(() => deepSeekV4Options(providers), [providers]);
+  const [source, setSource] = useState("sviridov");
+  const [bankTask, setBankTask] = useState<BankSelection | null>(null);
   const [tasks, setTasks] = useState<GeneratedTask[]>([]);
   const [tutorPrompts, setTutorPrompts] = useState<PromptVersion[]>([]);
   const [taskId, setTaskId] = useState("");
@@ -1148,14 +1172,14 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
 
   const composedWork = () => {
     const parts: string[] = [];
-    if (!taskId && manualTask.trim()) parts.push(`Условие задачи:\n${manualTask.trim()}`);
+    if (source === "manual" && manualTask.trim()) parts.push(`Условие задачи:\n${manualTask.trim()}`);
     if (studentWork.trim()) parts.push(studentWork.trim());
     return parts.join("\n\n");
   };
 
   const send = async () => {
     const text = input.trim();
-    if (!text || !modelEntryId || sending) return;
+    if (!text || !modelEntryId || sending || (source === "sviridov" && !bankTask) || (source === "studio" && !taskId)) return;
     const sentAssistantId = assistant.id;
     const historyMsgs: TutorMessage[] = [...messages, { role: "user", content: text }];
     setMessages(historyMsgs);
@@ -1165,7 +1189,8 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
     try {
       const { run } = await tutorApi.chat(sentAssistantId, {
         run_id: runId,
-        task_id: taskId || null,
+        task_id: source === "studio" ? taskId || null : null,
+        bank_task: source === "sviridov" && bankTask ? {course_id: bankTask.courseId, task_id: bankTask.task.id, task_number: bankTask.task.number} : null,
         prompt_version_id: promptVersionId || null,
         model_entry_id: modelEntryId,
         preview: isPreviewModel,
@@ -1214,6 +1239,8 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
   };
 
   const loadRun = (run: TutorRun) => {
+    setSource(run.bank_task ? "sviridov" : run.task_id ? "studio" : "manual");
+    setBankTask(run.bank_task ?? null);
     setRunId(run.id);
     setMessages(run.messages);
     setStudentWork(run.student_work);
@@ -1235,13 +1262,18 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
     <div className="space-y-5">
       <div className="grid gap-5 lg:grid-cols-3">
         <Card className="p-5 space-y-4">
-          <h2 className="text-sm font-semibold">Сценарий разбора</h2>
+          <h2 className="font-semibold">Задача для разбора</h2>
+          <fieldset disabled={sending || messages.length > 0} className="min-w-0 space-y-3">
+          <Field label="Источник задачи"><Select value={source} onChange={e => {setSource(e.target.value); setTaskId("");}}><option value="sviridov">Свиридов</option><option value="studio">Сгенерированные задачи</option><option value="manual">Своё условие</option></Select></Field>
+          {source === "sviridov" && <CourseBankPicker assistantId={assistant.id} value={bankTask} onChange={setBankTask} disabled={sending || messages.length > 0} />}
+          {source === "studio" && <>
           <Field label="Задача из банка">
             <MathTaskSelect value={taskId} onChange={setTaskId}
               options={tasks.map(task => ({ id: task.id, text: (task.topic ? task.topic + " — " : "") + task.statement }))}
               placeholder="Ввести условие вручную" />
           </Field>
-          {!taskId && (
+          </>}
+          {source === "manual" && (
             <Field label="Условие задачи (вручную)">
               <Textarea rows={3} value={manualTask} onChange={(e) => setManualTask(e.target.value)} />
             </Field>
@@ -1275,6 +1307,8 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
               ))}
             </Select>
           </Field>
+          </fieldset>
+          {messages.length > 0 && <p className="text-xs text-muted-foreground">Чтобы сменить задачу или настройки, начните новый диалог.</p>}
           <Button variant="secondary" onClick={resetDialog} disabled={messages.length === 0 && runId === null}>
             <RotateCcw className="h-4 w-4" /> Новый диалог
           </Button>
@@ -1291,7 +1325,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
             {messages.length === 0 && !sending && (
               <EmptyState
                 title="Диалог не начат"
-                hint="Напишите сообщение от лица студента — вопрос или фрагмент решения"
+                hint={source === "sviridov" && !bankTask ? "Сначала выберите задачу Свиридова слева, затем задайте вопрос от лица студента." : "Задайте вопрос или предложите первый шаг решения. Ассистент поможет разобраться постепенно."}
               />
             )}
             {messages.map((m, i) => (
@@ -1329,7 +1363,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
               placeholder="Сообщение от лица студента... (Ctrl/Cmd+Enter — отправить)"
               className="font-sans"
             />
-            <Button onClick={send} loading={sending} disabled={!input.trim() || !modelEntryId}>
+            <Button onClick={send} loading={sending} disabled={!input.trim() || !modelEntryId || (source === "sviridov" && !bankTask) || (source === "studio" && !taskId)}>
               <Send className="h-4 w-4" /> Отправить
             </Button>
           </div>

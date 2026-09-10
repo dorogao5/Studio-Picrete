@@ -256,6 +256,7 @@ class TutorRun(Base):
     prompt_version_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     provider_name: Mapped[str] = mapped_column(String(128), default="")
     model_id: Mapped[str] = mapped_column(String(256), default="")
+    bank_task: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     student_work: Mapped[str] = mapped_column(Text, default="")
     messages: Mapped[list] = mapped_column(JSON, default=list)
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)

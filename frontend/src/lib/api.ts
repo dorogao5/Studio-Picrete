@@ -275,6 +275,7 @@ export const tutorApi = {
     body: {
       run_id?: string | null;
       task_id?: string | null;
+      bank_task?: {course_id: string; task_id: string; task_number: string} | null;
       prompt_version_id?: string | null;
       model_entry_id: string;
       preview?: boolean;

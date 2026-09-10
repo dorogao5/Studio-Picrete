@@ -75,6 +75,7 @@ async def seed_architect() -> None:
 
 
 SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
+    "tutor_runs": {"bank_task": "JSON"},
     "courses": {
         "published_version": "VARCHAR(64) DEFAULT ''",
         "published_at": "DATETIME",
@@ -142,6 +143,7 @@ async def ensure_sqlite_columns(conn) -> None:
 
 
 async def ensure_postgres_columns(conn) -> None:
+    await conn.exec_driver_sql("ALTER TABLE tutor_runs ADD COLUMN IF NOT EXISTS bank_task JSONB")
     await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS grading_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     await conn.exec_driver_sql(
         "ALTER TABLE task_templates ADD COLUMN IF NOT EXISTS rubric JSONB NOT NULL DEFAULT '[]'::jsonb"

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.integration import _course_or_404, _picrete_request
 from app.api.assistants import get_assistant_or_404, resolve_model
 from app.db import get_db
 from app.llm import client as llm
@@ -44,6 +45,16 @@ async def _resolve_tutor_prompt(
     ).scalars().first()
 
 
+async def resolve_bank_task(db, assistant_id, bank_ref):
+    _, course = await _course_or_404(db, assistant_id, bank_ref.course_id)
+    bank = await _picrete_request("GET", course, "task-bank", params={"q": bank_ref.task_number, "skip": 0})
+    item = next((item for item in bank.get("items", [])
+                 if item["id"] == bank_ref.task_id and item["number"] == bank_ref.task_number), None)
+    if not item:
+        raise HTTPException(404, "Задача Свиридова с эталоном не найдена. Выберите задачу заново.")
+    return {"courseId": bank_ref.course_id, "task": item}
+
+
 @router.post("/assistants/{assistant_id}/tutor/chat", response_model=TutorChatResponse)
 async def tutor_chat(
     assistant_id: str,
@@ -66,7 +77,14 @@ async def tutor_chat(
     prompt = await _resolve_tutor_prompt(db, assistant, body.prompt_version_id)
     system_prompt = prompt.system_prompt if prompt else FALLBACK_TUTOR_PROMPT.format(discipline=assistant.discipline)
 
+    if body.task_id and body.bank_task:
+        raise HTTPException(422, "Выберите один источник задачи")
+    bank_selection = await resolve_bank_task(db, assistant_id, body.bank_task) if body.bank_task else None
     task = None
+    if bank_selection:
+        item = bank_selection["task"]
+        task = GeneratedTask(statement=f"Свиридов № {item['number']}\n{item['text']}",
+                             reference_solution=item.get("solution", ""), answer="")
     if body.task_id:
         task = (
             await db.execute(
@@ -111,8 +129,8 @@ async def tutor_chat(
         run = TutorRun(assistant_id=assistant.id, created_by=user.id)
         db.add(run)
 
-    if body.task_id:
-        run.task_id = body.task_id
+    run.task_id = body.task_id
+    run.bank_task = bank_selection
     run.prompt_version_id = prompt.id if prompt else None
     run.provider_name = provider.name
     run.model_id = model.model_id

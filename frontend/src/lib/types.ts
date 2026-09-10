@@ -402,6 +402,7 @@ export interface TutorMessage {
 }
 
 export interface TutorRun {
+  bank_task?: BankSelection | null;
   id: string;
   assistant_id: string;
   task_id: string | null;
@@ -496,3 +497,6 @@ export interface PlaygroundRun {
   created_at: string;
   results: PlaygroundResult[];
 }
+
+export type BankTask = { id: string; number: string; topic: string; text: string; solution: string; images: string[]; difficulty: string | null };
+export type BankSelection = { courseId: string; task: BankTask };
