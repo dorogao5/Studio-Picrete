@@ -62,7 +62,7 @@ CHEMISTRY_FACT_EXTRACTOR_SYSTEM_PROMPT = """Вы — аккуратный стр
 оговорки применимости. Числа и единицы копируйте точно; неизвестное поле пропускайте. Верните строго JSON
 {"facts": {}} по приложенной схеме. Никакого текста вне JSON."""
 
-VALIDATION_POLICY_VERSION = "evidence-gate-v15-formula-typography"
+VALIDATION_POLICY_VERSION = "evidence-gate-v16-general-electrolysis"
 
 CRITIC_REQUIRED_CHECKS = frozenset(
     {

@@ -1049,7 +1049,7 @@ class ConductometryCheck:
 @dataclass(frozen=True)
 class FaradayCheck:
     check_id: str = "analytical.faraday"
-    disciplines: frozenset[ChemistryDiscipline] = frozenset({ChemistryDiscipline.ANALYTICAL})
+    disciplines: frozenset[ChemistryDiscipline] = frozenset({ChemistryDiscipline.GENERAL, ChemistryDiscipline.ANALYTICAL})
 
     def evaluate(self, task: ChemistryTask) -> CheckResult:
         facts = _facts(task, "faraday")
