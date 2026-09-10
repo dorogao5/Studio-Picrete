@@ -130,3 +130,14 @@ def test_numeric_mole_count_transition_is_not_a_chemical_reaction():
     candidates = reaction_candidates(r"Число моль ($4 \to 2$); N2 + 3H2 \to 2NH3")
     assert len(candidates) == 1
     assert check_reaction_balance(candidates[0]).balanced
+
+
+def test_latex_display_delimiters_do_not_drop_reaction_reagents():
+    text = r"\[\mathrm{CH_3COOH} + \mathrm{NaOH} \rightarrow \mathrm{CH_3COONa} + \mathrm{H_2O}\]"
+    candidates = reaction_candidates(text)
+    assert len(candidates) == 1
+    balance = check_reaction_balance(candidates[0])
+    assert len(balance.reactants) == len(balance.products) == 2
+    assert balance.balanced
+    bad = reaction_candidates(text.replace('CH_3COONa', 'CH_3COOK'))
+    assert not check_reaction_balance(bad[0]).balanced

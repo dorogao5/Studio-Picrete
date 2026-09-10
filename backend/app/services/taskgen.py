@@ -47,7 +47,7 @@ FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподавател�
 Никакого текста вне JSON."""
 
 # Задачи с объёмным LaTeX-решением не помещаются по несколько в один JSON — генерируем порциями.
-GENERATION_CHUNK = 2
+GENERATION_CHUNK = 1
 # Дополнительные запросы сверх минимально необходимого числа порций. Они восполняют
 # недостающие/невалидные элементы, но не дают фоновой задаче зациклиться на плохом ответе модели.
 MAX_REFILL_ATTEMPTS = 3
@@ -588,6 +588,7 @@ async def _generate_batch_items(
     on_progress: Callable[[int], Awaitable[None]] | None = None,
     call_budget: _GenerationCallBudget | None = None,
     on_attempt: Callable[[int, int, str], Awaitable[None]] | None = None,
+    on_items: Callable[[list[dict]], Awaitable[None]] | None = None,
 ) -> tuple[list[dict], list[str]]:
     items: list[dict] = []
     seen_statements = list(existing_statements)
@@ -647,6 +648,8 @@ async def _generate_batch_items(
             detail = ", ".join(sorted(set(rejected_contracts)))
             errors.append(f"Модель вернула порцию без полного evidence-контракта: {detail or 'нет задач'}")
             continue
+        if on_items is not None:
+            await on_items(usable)
         items.extend(usable)
         seen_statements.extend(str(item["statement"]) for item in usable)
         if on_progress is not None:
@@ -837,23 +840,6 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     # связи с общим бюджетом кандидатов.
     candidate_budget = min(count * 2, count + 5)
     call_budget = _GenerationCallBudget(limit=_generation_call_limit(candidate_budget))
-    items, gen_errors = await _generate_batch_items(
-        provider,
-        model,
-        assistant,
-        system_prompt,
-        merged=merged,
-        params=params,
-        count=count,
-        grounding_text=grounding_text,
-        existing_statements=list(existing),
-        on_progress=update_generation_progress,
-        on_attempt=update_attempt,
-        call_budget=call_budget,
-    )
-    if not items and gen_errors:
-        raise llm.LlmError(" || ".join(gen_errors[:3]))
-
     grounding_meta = await build_grounding_meta(
         db,
         sheets,
@@ -885,7 +871,28 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         await db.commit()
         return persisted
 
-    created = await persist_candidates(items)
+    created: list[GeneratedTask] = []
+    async def save_generated(items: list[dict]) -> None:
+        created.extend(await persist_candidates(items))
+
+    items, gen_errors = await _generate_batch_items(
+        provider,
+        model,
+        assistant,
+        system_prompt,
+        merged=merged,
+        params=params,
+        count=count,
+        grounding_text=grounding_text,
+        existing_statements=list(existing),
+        on_progress=update_generation_progress,
+        on_attempt=update_attempt,
+        on_items=save_generated,
+        call_budget=call_budget,
+    )
+    if not items and gen_errors:
+        raise llm.LlmError(" || ".join(gen_errors[:3]))
+
     if not created:
         raise GenerationError("Модель не вернула ни одной валидной задачи")
 

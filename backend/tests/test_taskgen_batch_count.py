@@ -44,7 +44,7 @@ def test_refills_items_missing_from_model_chunks(monkeypatch) -> None:
     items, errors = asyncio.run(run_collection(4))
 
     assert len(items) == 4
-    assert requested == [2, 2, 2, 1]
+    assert requested == [1, 1, 1, 1]
     assert errors == []
 
 
@@ -62,8 +62,8 @@ def test_refill_attempts_are_bounded_and_short_batch_is_failed(monkeypatch) -> N
     items, errors = asyncio.run(run_collection(3))
 
     assert len(items) == 1
-    assert calls == 5  # ceil(3 / 2) обязательных порций + 3 попытки восполнения
-    assert len(errors) == 4
+    assert calls == 6  # 3 одиночные задачи + 3 попытки восполнения
+    assert len(errors) == 5
 
     batch = SimpleNamespace(status="running", error="", progress={}, finished_at=None)
     taskgen._mark_batch_finished(
@@ -158,9 +158,9 @@ def test_shared_call_budget_caps_initial_and_refill_waves(monkeypatch) -> None:
 
 
 def test_generation_call_limit_is_based_on_whole_candidate_budget() -> None:
-    assert taskgen._generation_call_limit(15) == 11
-    assert taskgen._generation_call_limit(30) == 18
-    assert taskgen._generation_call_limit(40) == 23
+    assert taskgen._generation_call_limit(15) == 18
+    assert taskgen._generation_call_limit(30) == 33
+    assert taskgen._generation_call_limit(40) == 43
 
 
 def test_hard_generation_reserves_room_for_reasoning_and_complete_json() -> None:

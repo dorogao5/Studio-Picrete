@@ -352,7 +352,8 @@ def reaction_candidates(text: str) -> list[str]:
     """Return conservative equation-looking fragments from solution text."""
 
     # Normalize presentation commands before extracting chemical spans.
-    text = re.sub(r"\\(?:longrightarrow|rightarrow|to)\b", "→", text or "")
+    text = re.sub(r"\\[\[\]()]", "", text or "")
+    text = re.sub(r"\\(?:longrightarrow|rightarrow|to)\b", "→", text)
     text = re.sub(r"\\(?:rightleftharpoons|leftrightarrow)\b", "⇌", text)
     candidates: list[str] = []
     for fragment in re.split(r"[\n;]+", text or ""):
