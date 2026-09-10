@@ -1,3 +1,5 @@
+import asyncio
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +35,13 @@ async def _set_progress(
 def _generated_candidate_should_be_discarded(task: GeneratedTask, validation: dict) -> bool:
     """Keep failed model candidates out of the teacher's exception queue."""
 
-    return validation.get("verdict") != "validated" and bool(str(task.model_used or "").strip() or task.batch_id)
+    proven_failure = (
+        (validation.get("critic") or {}).get("status") == "fail"
+        or bool((validation.get("chemistry") or {}).get("blocking_codes"))
+        or bool((validation.get("dedup") or {}).get("duplicate"))
+    )
+    return (validation.get("verdict") != "validated" and proven_failure
+            and bool(str(task.model_used or "").strip() or task.batch_id))
 
 
 async def _revalidate_task(
@@ -221,10 +229,11 @@ async def run_revalidation_batch(batch_id: str) -> None:
         if batch is None:
             return
         try:
-            await _execute_revalidation_batch(db, batch)
+            async with asyncio.timeout(1200):
+                await _execute_revalidation_batch(db, batch)
         except Exception as err:
             await db.rollback()
             batch.status = "failed"
-            batch.error = str(err)
+            batch.error = ("Достигнут лимит 20 минут. Проверенные задачи сохранены; повторите проверку остальных." if isinstance(err, TimeoutError) else str(err))
             batch.finished_at = utcnow()
             await db.commit()

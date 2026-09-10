@@ -704,63 +704,73 @@ async def _validate_batch(
     )
     total = len(created)
     stage_name = "Проверка решателем" if merged["validation_solver"] else "Проверка задач"
-    for index, task in enumerate(created, start=1):
-        await _set_progress(db, batch, f"{stage_name} {index}/{total}", index - 1, total)
-        neighbours = [other.statement for other in created if other is not task]
-        contract = validation_contract_for_task(task, merged)
-        validation = await run_validation(
-            statement=task.statement,
-            reference_solution=task.reference_solution,
-            reference_answer=task.answer,
-            rubric=task.rubric,
-            max_score=task.max_score,
-            task_images=getattr(task, "images", []),
-            answer_format=contract["answer_format"],
-            tolerance_pct=contract["tolerance_pct"],
-            grounding=grounding_text,
-            sheets_text=sheets_text,
-            existing_statements=list(prior) + neighbours,
-            data_used=(task.grounding or {}).get("data_used"),
-            solver_provider=solver_provider,
-            solver_model=solver_model,
-            run_solver=contract["validation_solver"],
-            run_data=contract["validation_data_check"],
-            validation_config=contract,
-            discipline_context=discipline_context,
-            topic=getattr(task, "topic", ""),
-            chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
-            chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
-            grounding_sheets=[
-                *((task.grounding or {}).get("sheets") or []),
-                *((task.grounding or {}).get("kb_sources") or []),
-            ],
-        )
-        await db.refresh(task)
-        if not evidence_matches_task(validation, task):
-            # Преподаватель успел изменить содержимое во время LLM-проверки.
-            # Старое evidence не записываем и пользовательские изменения не затираем.
-            continue
-        task.validation = validation
-        if validation["verdict"] == "validated":
-            task.status = "validated"
-            if task_is_export_ready(task):
-                batch.validated_count += 1
+    semaphore = asyncio.Semaphore(2)
+    async def validate_one(task):
+        async with semaphore:
+            neighbours = [other.statement for other in created if other is not task]
+            contract = validation_contract_for_task(task, merged)
+            validation = await run_validation(
+                statement=task.statement,
+                reference_solution=task.reference_solution,
+                reference_answer=task.answer,
+                rubric=task.rubric,
+                max_score=task.max_score,
+                task_images=getattr(task, "images", []),
+                answer_format=contract["answer_format"],
+                tolerance_pct=contract["tolerance_pct"],
+                grounding=grounding_text,
+                sheets_text=sheets_text,
+                existing_statements=list(prior) + neighbours,
+                data_used=(task.grounding or {}).get("data_used"),
+                solver_provider=solver_provider,
+                solver_model=solver_model,
+                run_solver=contract["validation_solver"],
+                run_data=contract["validation_data_check"],
+                validation_config=contract,
+                discipline_context=discipline_context,
+                topic=getattr(task, "topic", ""),
+                chemistry_facts=(task.grounding or {}).get("chemistry_facts"),
+                chemistry_facts_source=str((task.grounding or {}).get("chemistry_facts_source") or ""),
+                grounding_sheets=[
+                    *((task.grounding or {}).get("sheets") or []),
+                    *((task.grounding or {}).get("kb_sources") or []),
+                ],
+            )
+            return task, validation
+
+    await _set_progress(db, batch, f"{stage_name}: готово 0/{total}", 0, total)
+    async with asyncio.TaskGroup() as group:
+        pending = [group.create_task(validate_one(task)) for task in created]
+        for index, completed in enumerate(asyncio.as_completed(pending), start=1):
+            task, validation = await completed
+            await db.refresh(task)
+            if not evidence_matches_task(validation, task):
+                # Преподаватель успел изменить содержимое во время LLM-проверки.
+                # Старое evidence не записываем и пользовательские изменения не затираем.
+                continue
+            task.validation = validation
+            if validation["verdict"] == "validated":
+                task.status = "validated"
+                if task_is_export_ready(task):
+                    batch.validated_count += 1
+                else:
+                    validation = dict(validation)
+                    validation["candidate_disposition"] = "discarded"
+                    validation["reasons"] = [
+                        *(validation.get("reasons") or []),
+                        "Проверка не сформировала полный экспортный evidence-контракт",
+                    ]
+                    task.validation = validation
+                    task.status = "rejected"
             else:
                 validation = dict(validation)
-                validation["candidate_disposition"] = "discarded"
-                validation["reasons"] = [
-                    *(validation.get("reasons") or []),
-                    "Проверка не сформировала полный экспортный evidence-контракт",
-                ]
+                validation["candidate_disposition"] = "needs_review"
                 task.validation = validation
-                task.status = "rejected"
-        else:
-            validation = dict(validation)
-            validation["candidate_disposition"] = "needs_review"
-            task.validation = validation
-            task.status = "needs_review"
-        task.approved = False
-        await db.commit()
+                task.status = "needs_review"
+            task.approved = False
+            await db.commit()
+
+            await _set_progress(db, batch, f"{stage_name}: готово {index}/{total}", index, total)
 
 
 async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:

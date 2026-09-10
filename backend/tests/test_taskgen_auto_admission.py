@@ -205,3 +205,43 @@ def test_failed_candidates_are_discarded_while_green_tasks_are_ready(monkeypatch
     assert discarded.status == "needs_review"
     assert discarded.approved is False
     assert discarded.validation["candidate_disposition"] == "needs_review"
+
+
+def test_batch_checks_two_candidates_concurrently_with_bounded_fanout(monkeypatch):
+    active = 0
+    peak = 0
+    started = 0
+
+    async def scenario():
+        both_started = asyncio.Event()
+
+        async def validate(**_kwargs):
+            nonlocal active, peak, started
+            active += 1
+            started += 1
+            peak = max(peak, active)
+            if active == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            await asyncio.sleep(0)
+            active -= 1
+            return {}
+
+        async def progress(*_args, **_kwargs):
+            pass
+
+        monkeypatch.setattr(taskgen, 'run_validation', validate)
+        monkeypatch.setattr(taskgen, '_set_progress', progress)
+        monkeypatch.setattr(taskgen, 'evidence_matches_task', lambda *_: False)
+        await taskgen._validate_batch(
+            FakeDb(), SimpleNamespace(id='batch', assistant_id='assistant'),
+            [_task(str(i)) for i in range(5)],
+            {'answer_format': 'text', 'tolerance_pct': 2, 'validation_solver': True,
+             'validation_data_check': True, 'task_kind': 'calculation',
+             'sheet_ids': [], 'kb_query': '', 'chemistry_check': 'auto'},
+            SimpleNamespace(name='DeepSeek'), SimpleNamespace(model_id='deepseek-flash'), '', '',
+        )
+
+    asyncio.run(scenario())
+    assert started == 5
+    assert peak == 2

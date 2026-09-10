@@ -54,7 +54,7 @@ class ReactionBalance:
 
 _ARROW_RE = re.compile(r"(?:<=>|<->|=>|->|⇌|↔|→|⟶)")
 _EQUALS_RE = re.compile(r"(?<![<>=])=(?!=)")
-_PHASE_RE = re.compile(r"\((?:aq|s|l|g|газ|ж|тв|р-?р)\)\s*$", re.IGNORECASE)
+_PHASE_RE = re.compile(r"\((?:aq|s|l|g|г|газ|ж|тв|бел|р-?р)\)\s*$", re.IGNORECASE)
 _ELEMENT_RE = re.compile(r"[A-Z][a-z]?")
 _SUBSCRIPTS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
 _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-")
@@ -100,6 +100,8 @@ def _clean_formula(raw: str) -> str:
     value = value.replace("−", "-").replace("∙", "·").replace("⋅", "·")
     value = re.sub(r"\\(?:mathrm|text)\s*\{([^{}]+)\}", r"\1", value)
     value = re.sub(r"_\{?(\d+)\}?", r"\1", value)
+    value = re.sub(r"\\[,;! ]", "", value)
+    value = re.sub(r"\\(?:tfrac|frac)\{(\d+)\}\{(\d+)\}", r"\1/\2", value)
     value = re.sub(r"\s+", "", value)
     while _PHASE_RE.search(value):
         value = _PHASE_RE.sub("", value)
@@ -349,6 +351,9 @@ def _parseable_reaction_spans(
 def reaction_candidates(text: str) -> list[str]:
     """Return conservative equation-looking fragments from solution text."""
 
+    # Normalize presentation commands before extracting chemical spans.
+    text = re.sub(r"\\(?:longrightarrow|rightarrow|to)\b", "→", text or "")
+    text = re.sub(r"\\(?:rightleftharpoons|leftrightarrow)\b", "⇌", text)
     candidates: list[str] = []
     for fragment in re.split(r"[\n;]+", text or ""):
         arrows = [
@@ -366,6 +371,16 @@ def reaction_candidates(text: str) -> list[str]:
         spans = _parseable_reaction_spans(fragment)
         if spans:
             candidates.extend(candidate for candidate in spans if candidate not in candidates)
+            continue
+        # A bond-count bullet followed by an energy calculation is not a
+        # reaction. Keep this narrow: unsupported chemical arrows still fail
+        # closed, including a real equation elsewhere in the same fragment.
+        if all(
+            re.search(r"\bсвяз(?:ь|и|ей)\s*$", fragment[:arrow.start()])
+            and re.match(r"\s*\$?[-+]?\d", fragment[arrow.end():])
+            and re.search(r"кДж|кдж|kJ", fragment[arrow.end():])
+            for arrow in arrows
+        ):
             continue
         # Fail closed for unsupported notation: preserve the arrow-containing
         # fragment so the balance check reports INDETERMINATE instead of

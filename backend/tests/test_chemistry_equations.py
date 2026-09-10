@@ -112,3 +112,14 @@ def test_oxidation_state_note_does_not_hide_a_real_equation() -> None:
     text = "Cr: +6 → +3; Cr2O7^2- + 14H+ + 6e- → 2Cr^3+ + 7H2O"
 
     assert reaction_candidates(text) == ["Cr2O7^2- + 14H+ + 6e- → 2Cr^3+ + 7H2O"]
+
+
+def test_latex_bond_energy_solution_checks_reaction_not_calculation_arrows():
+    text = r'''$$\mathrm{C_2H_2(г)} + 2\,\mathrm{H_2(г)} \rightarrow \mathrm{C_2H_6(г)}$$
+- $\mathrm{C\equiv C}$ в $\mathrm{C_2H_2}$: 1 связь → $1 \cdot 806{,}7 = 806{,}7$ кДж
+- $\mathrm{C{-}H}$ в $\mathrm{C_2H_6}$: 6 связей → $6 \cdot 413{,}8 = 2482{,}8$ кДж.'''
+    candidates = reaction_candidates(text)
+    assert len(candidates) == 1
+    assert check_reaction_balance(candidates[0]).balanced
+    broken = reaction_candidates(text.replace(r'2\,\mathrm{H_2', r'3\,\mathrm{H_2'))
+    assert not check_reaction_balance(broken[0]).balanced

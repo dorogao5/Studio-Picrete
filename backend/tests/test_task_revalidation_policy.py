@@ -10,11 +10,11 @@ def _task(*, model_used: str = "", batch_id: str | None = None):
 def test_failed_generated_candidate_is_discarded_without_teacher_queue() -> None:
     assert _generated_candidate_should_be_discarded(
         _task(model_used="DeepSeek/deepseek-v4-pro"),
-        {"verdict": "needs_review"},
+        {"verdict": "needs_review", "critic": {"status": "fail"}},
     )
     assert _generated_candidate_should_be_discarded(
         _task(batch_id="batch-1"),
-        {"verdict": "needs_review"},
+        {"verdict": "needs_review", "critic": {"status": "fail"}},
     )
 
 
@@ -26,4 +26,12 @@ def test_manual_material_and_validated_candidate_are_not_discarded() -> None:
     assert not _generated_candidate_should_be_discarded(
         _task(model_used="DeepSeek/deepseek-v4-pro"),
         {"verdict": "validated"},
+    )
+
+
+def test_skipped_or_unavailable_checks_do_not_reject_a_candidate():
+    assert not _generated_candidate_should_be_discarded(
+        _task(batch_id="batch-1"),
+        {"verdict": "needs_review", "critic": {"status": "skipped"},
+         "chemistry": {"indeterminate_codes": ["chemistry.reaction_balance"]}},
     )
