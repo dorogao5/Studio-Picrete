@@ -852,6 +852,12 @@ function BatchCard({ batch, templates }: { batch: GenerationBatch; templates: Ta
 
 type EvidenceState = "success" | "warning" | "error" | "neutral";
 
+function chemistryEvidenceState(effect?: string): EvidenceState {
+  if (effect === "pass" || effect === "reviewed") return "success";
+  if (effect === "block") return "error";
+  return effect === "limited" ? "warning" : "neutral";
+}
+
 function EvidenceMark({ state }: { state: EvidenceState }) {
   if (state === "success") return <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden />;
   if (state === "error") return <XCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />;
@@ -924,8 +930,7 @@ function ValidationReport({ task }: { task: GeneratedTask }) {
   const resultLabel = (status?: string) => ({ match: "подтверждено", pass: "подтверждено", mismatch: "ответ отличается", incomplete: "не все пункты подтверждены", uncertain: "нужна сверка", fail: "найдены замечания", error: "ошибка запроса", skipped: "не запускался" }[status ?? "skipped"] ?? status);
   const solutionsSkipped = (!v.solver?.status || v.solver.status === "skipped") && (!v.verifier?.status || v.verifier.status === "skipped");
   const chemistryEffect = v.chemistry?.admission_effect;
-  const chemistryState: EvidenceState = (chemistryEffect === "pass" || chemistryEffect === "reviewed") ? "success"
-    : chemistryEffect === "block" ? "error" : chemistryEffect === "limited" ? "warning" : "neutral";
+  const chemistryState = chemistryEvidenceState(chemistryEffect);
   const requiredChecks = v.chemistry?.required_check_ids ?? [];
   const passedRequired = requiredChecks.filter((checkId) =>
     v.chemistry?.results?.some((result) => result.check_id === checkId && result.state === "pass"),
@@ -1082,9 +1087,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
       </button>
       {task.validation?.chemistry && (
         <div className="ml-6 flex items-start gap-1.5 text-xs text-muted-foreground">
-          <EvidenceMark state={task.validation.chemistry.admission_effect === "pass"
-            ? "success"
-            : task.validation.chemistry.admission_effect === "limited" ? "warning" : "error"} />
+          <EvidenceMark state={chemistryEvidenceState(task.validation.chemistry.admission_effect)} />
           <span>
             {task.validation.chemistry.admission_effect === "pass"
               ? `Предметный контроль: подтверждено ${task.validation.chemistry.required_check_ids?.length ?? 0}`
