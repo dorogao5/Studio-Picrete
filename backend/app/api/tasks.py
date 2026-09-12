@@ -235,6 +235,7 @@ async def generate(
             grounding_meta=grounding_meta,
             validation_contract=validation_contract,
             template_rubric=merged["rubric"],
+            authoritative_topic=is_physical_chemistry(assistant),
         )
         if task is not None:
             db.add(task)

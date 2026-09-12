@@ -132,6 +132,8 @@ def _normalized_correction(candidate: object, original: dict[str, Any]) -> dict[
     if not isinstance(result.get("rubric"), list) or not isinstance(result.get("data_used"), list):
         return None
     result["chemistry_facts"] = {}
+    # Grouping metadata belongs to the selected task, not the verifier's wording.
+    result["topic"] = original["topic"]
     return result
 
 

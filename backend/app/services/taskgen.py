@@ -597,6 +597,7 @@ def task_from_item(
     grounding_meta: dict,
     validation_contract: dict | None = None,
     template_rubric: list[dict] | None = None,
+    authoritative_topic: bool = False,
 ) -> GeneratedTask | None:
     if not isinstance(item, dict) or not item.get("statement"):
         return None
@@ -642,7 +643,7 @@ def task_from_item(
         rubric=rubric if isinstance(rubric, list) else [],
         max_score=max_score,
         difficulty=str(item.get("difficulty") or difficulty),
-        topic=str(item.get("topic") or topic),
+        topic=str(topic if authoritative_topic else item.get("topic") or topic),
         model_used=model_used,
         status="draft",
         grounding={
@@ -1096,6 +1097,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
                 grounding_meta=grounding_meta,
                 validation_contract=validation_contract,
                 template_rubric=merged.get("rubric", []),
+                authoritative_topic=physical,
             )
             if task is not None:
                 db.add(task)

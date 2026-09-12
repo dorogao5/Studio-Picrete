@@ -26,6 +26,18 @@ def correction():
 
 
 @pytest.mark.parametrize("physical", [True, False])
+def test_selected_topic_metadata_is_authoritative_only_when_requested(physical):
+    item = {**correction(), "topic": "Model shorthand", "chemistry_facts": {}, "data_used": []}
+    saved = taskgen.task_from_item(item, assistant_id="assistant", template_id=None, batch_id="batch",
+        topic="Selected canonical topic", difficulty="easy", model_used="test", grounding_meta={},
+        authoritative_topic=physical)
+    assert saved.topic == ("Selected canonical topic" if physical else "Model shorthand")
+    assert item["topic"] == "Model shorthand"
+    fixed = pc._normalized_correction({**correction(), "topic": "Verifier rename"}, pc._task_payload(saved))
+    assert fixed["topic"] == saved.topic
+
+
+@pytest.mark.parametrize("physical", [True, False])
 def test_generator_blueprint_and_json_contract_are_scoped(monkeypatch, physical):
     from app.services.contracts import GENERATION_JSON_CONTRACT, PHYSICAL_GENERATION_JSON_EXAMPLE
     discipline = "Физическая химия" if physical else "Аналитическая химия"
@@ -216,7 +228,7 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit, overlay):
                             [{"criterion_name": "teacher", "max_score": 10}] if edit == "rubric" else "teacher")
                         await other.commit()
                 return SimpleNamespace(text=json.dumps(dict(verdict="pass", issues=["fix"],
-                    corrected_task=None if overlay else correction(),
+                    corrected_task=None if overlay else {**correction(), "topic": "Verifier rename"},
                     verification={"solution": "repaired", "answer": "4"})), raw={})
             monkeypatch.setattr(pc.llm, "chat", chat)
             monkeypatch.setattr(taskgen, "task_is_export_ready", lambda _: True)
@@ -227,6 +239,8 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit, overlay):
             assert len(calls) == 1 and "CONFIGURED VERIFIER" in calls[0][2]
             assert "STUDENT GRADING ONLY" not in calls[0][2]
             assert t.id == "task" and t.batch_id == "batch"
+            if edit != "topic":
+                assert t.topic == "kinetics"
             if edit:
                 assert t.reference_solution == "original" and t.status == "draft"
                 assert t.validation == {} and b.validated_count == 0
@@ -297,7 +311,7 @@ def test_physical_batch_never_buys_replacement(monkeypatch, generation_error, to
                 verifier_model_id="deepseek", criteria=[], topics=[], nuances=[])
             batch = GenerationBatch(id="batch", assistant_id=assistant.id,
                 requested_count=1, generated_count=0, validated_count=0,
-                params={"model_entry_id": "qwen", "count": 1})
+                params={"model_entry_id": "qwen", "count": 1, "topic": "Selected canonical topic"})
             db.add_all([assistant, batch])
             await db.commit()
             calls = []
@@ -316,7 +330,7 @@ def test_physical_batch_never_buys_replacement(monkeypatch, generation_error, to
                         "tool_traces": [{"arguments": "PRIVATE"}], "messages": "PRIVATE"}
                         if tools_audit else failed)
                     raise pc.llm.LlmError("mock provider failure", raw=raw)
-                return [{**correction(), "data_used": [], "chemistry_facts": {}}]
+                return [{**correction(), "topic": "Model shorthand", "data_used": [], "chemistry_facts": {}}]
             async def chat(*a, **k):
                 calls.append("verifier")
                 return SimpleNamespace(text=json.dumps({"verdict": "fail", "issues": ["cannot repair"], "corrected_task": None}))
@@ -349,6 +363,7 @@ def test_physical_batch_never_buys_replacement(monkeypatch, generation_error, to
                 assert calls == ["generator", "verifier"]
                 tasks = (await db.execute(select(GeneratedTask))).scalars().all()
                 assert len(tasks) == 1 and tasks[0].status == "needs_review"
+                assert tasks[0].topic == "Selected canonical topic"
                 assert batch.params["quality_summary"]["replacement_generations"] == 0
                 # Completion describes the finished generation run, not the
                 # admission of every candidate; review tasks remain stored.
