@@ -230,6 +230,7 @@ class PromptGenerateRequest(BaseModel):
 
 
 class ExampleTask(BaseModel):
+    generation_anchor: bool = False
     source_number: str | None = None
     source_task_id: str | None = None
     source_document: str | None = None

@@ -248,7 +248,8 @@ async def generate_tasks(
     if getattr(assistant, "generation_policy", "legacy") == "single_verifier" and example_tasks:
         import secrets
         candidates = [e for e in example_tasks if isinstance(e, dict) and e.get("statement")]
-        example_tasks = [secrets.choice(candidates)] if candidates else []
+        anchors = [e for e in candidates if e.get("generation_anchor") is True]
+        example_tasks = [secrets.choice(anchors or candidates)] if candidates else []
     if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
         # Recent tasks are not exemplars. Their full text made the model copy the
         # preceding blueprint instead of the selected one, and defeated prefix caching.

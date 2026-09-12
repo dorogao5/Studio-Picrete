@@ -50,9 +50,12 @@ def test_one_complete_example_and_socratic_override(monkeypatch):
     a=Assistant(name="Неорганика",discipline="Общая химия",generation_policy="single_verifier",
                 topics=[],criteria=[],nuances=[])
     examples=[{"statement":f"EXAMPLE-{i}","solution":f"COMPLETE-{i}"} for i in range(18)]
+    examples[7]["generation_anchor"] = True
     asyncio.run(taskgen.generate_tasks(None,None,a,None,topic="pH",difficulty="medium",count=1,example_tasks=examples,existing_statements=["UNRELATED_PREVIOUS_TASK"]))
     msg=calls[0][0][3]
     assert sum(f"Условие: EXAMPLE-{i}\n" in msg for i in range(18)) == 1
+    assert "Условие: EXAMPLE-7\n" in msg
+    assert "COMPLETE-7" in msg
     assert len(examples)==18
     assert "UNRELATED_PREVIOUS_TASK" not in msg
     assert "НЕ повторяйте их сюжеты" not in msg

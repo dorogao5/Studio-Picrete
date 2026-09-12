@@ -1595,6 +1595,11 @@ function TemplateModal({
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={ex.generation_anchor === true}
+                    onChange={(e) => updateExample(i, { generation_anchor: e.target.checked })} />
+                  Опорный пример для типовых вариантов
+                </label>
                 {ex.source_course_id && ex.source_task_id && ex.source_image_ids?.map((imageId) => (
                   <BankImage key={imageId} url={`/assistants/${encodeURIComponent(assistant.id)}/courses/${encodeURIComponent(ex.source_course_id!)}/task-bank/${encodeURIComponent(ex.source_task_id!)}/images/${encodeURIComponent(imageId)}`} />
                 ))}

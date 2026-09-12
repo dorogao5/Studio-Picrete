@@ -61,6 +61,10 @@ async def main(args):
             row=byid[target['id']]
             assert row.name==target['name']
             row.instructions=target['instructions']
+            anchor=target['generation_source_number']
+            assert sum(e.get('source_number')==anchor for e in row.example_tasks)==1
+            row.example_tasks=[{**e,'generation_anchor':e.get('source_number')==anchor}
+                               for e in row.example_tasks]
         for role,text in data['prompts'].items():
             active=[p for p in prompts if p.role==role and p.status=="active"]
             if len(active)==1 and active[0].system_prompt==text and active[0].target_family=="deepseek":
