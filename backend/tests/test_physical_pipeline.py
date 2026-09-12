@@ -124,10 +124,12 @@ def test_verifier_contract(monkeypatch, verdict, issues, repair, expected):
 
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("verdict", [" PASS ", "fail"])
-def test_verified_reference_overlay_only_for_tools_pass(monkeypatch, enabled, verdict):
+def test_explicit_verified_task_only_for_tools_pass(monkeypatch, enabled, verdict):
     async def chat(*args, **kwargs):
         return SimpleNamespace(text=json.dumps({"verdict": verdict, "issues": ["rounding note"],
-            "corrected_task": None, "verification": {"solution": "Full derivation: k=0.1276434",
+            "corrected_task": None, "verified_task": {**pc._task_payload(task()), "images": [],
+                "reference_solution": "Full derivation: k=0.1276434", "answer": "0.1276"},
+            "verification": {"solution": "Partial diagnostic only",
                 "answer": "0.1276", "statement": "untrusted replacement", "rubric": []}}), raw={})
     monkeypatch.setattr(pc.llm, "chat", chat)
     original = task()
@@ -138,7 +140,7 @@ def test_verified_reference_overlay_only_for_tools_pass(monkeypatch, enabled, ve
     assert evidence_matches_task(validation, original)
     assert validation["verdict"] == ("validated" if verdict.strip().lower() == "pass" else "needs_review")
     if enabled and verdict.strip().lower() == "pass":
-        assert fixed == {**before, "reference_solution": "Full derivation: k=0.1276434", "answer": "0.1276"}
+        assert fixed == {**before, "images": [], "reference_solution": "Full derivation: k=0.1276434", "answer": "0.1276"}
         assert original.id == "task" and validation["correction"]["applied"] is False
     else:
         assert fixed is None
@@ -148,7 +150,7 @@ def test_verified_reference_overlay_only_for_tools_pass(monkeypatch, enabled, ve
     {"solution": "", "answer": "4"}, {"solution": "full", "answer": "  "},
     {"solution": 123, "answer": "4"}, {"solution": "full", "answer": {"value": 4}}])
 @pytest.mark.parametrize("enabled", [False, True])
-def test_overlay_requires_nonempty_string_fields_without_breaking_legacy(monkeypatch, verification, enabled):
+def test_diagnostics_never_become_task_patch_without_breaking_legacy(monkeypatch, verification, enabled):
     async def chat(*args, **kwargs):
         return SimpleNamespace(text=json.dumps({"verdict": "pass", "issues": [],
             "corrected_task": None, "verification": verification}), raw={})
@@ -158,6 +160,44 @@ def test_overlay_requires_nonempty_string_fields_without_breaking_legacy(monkeyp
         model="deepseek-v4-pro", grounding="", discipline_context="", essential_tools=enabled))
     assert validation["verdict"] == ("needs_review" if enabled else "validated")
     assert fixed is None and original.reference_solution == "original"
+
+
+@pytest.mark.parametrize("payload_kind", ["full", "null", "partial", "legacy_only", "fail_full"])
+def test_three_part_reference_comes_only_from_verified_task_and_keeps_before(monkeypatch, payload_kind):
+    original = task()
+    original.reference_solution = "Part 1 diameter/sigma. Part 2 relative velocity. Part 3 steric factor. ORIGINAL_PRIVATE"
+    before = pc._task_payload(original)
+    verified = {**before, "reference_solution": "Part 1 checked. Part 2 checked. Part 3 checked.", "answer": "all 3 answers"}
+    response = {"verdict": "fail" if payload_kind == "fail_full" else "pass", "issues": [],
+        "verified_task": verified, "verification": {"solution": "Only part 1 diameter/sigma", "answer": "all 3 answers"}}
+    if payload_kind in {"null", "legacy_only"}:
+        response["verified_task"] = None
+    if payload_kind == "partial":
+        response["verified_task"] = {"reference_solution": "partial", "answer": "all 3 answers"}
+    if payload_kind == "legacy_only":
+        response["corrected_task"] = verified
+    async def chat(*args, **kwargs):
+        assert "verified_task" in kwargs["response_schema"]["required"]
+        assert "corrected_task" not in kwargs["response_schema"]["properties"]
+        return SimpleNamespace(text=json.dumps(response), raw={})
+    monkeypatch.setattr(pc.llm, "chat", chat)
+    validation, fixed = asyncio.run(pc.run_physical_validation(task=original, provider=None,
+        model="deepseek-v4-pro", grounding="", discipline_context="", essential_tools=True))
+    assert pc._task_payload(original) == before
+    if payload_kind == "full":
+        assert validation["verdict"] == "validated" and fixed == verified
+        assert validation["correction"]["before"] == before
+        original.reference_solution = fixed["reference_solution"]
+        original.answer = fixed["answer"]
+        original.validation = validation
+        assert "Part 3 steric factor" in validation["correction"]["before"]["reference_solution"]
+        from app.services.export import build_bank_export
+        exported = build_bank_export([original], source_code="test", source_title="test", version="1")
+        assert "ORIGINAL_PRIVATE" not in json.dumps(exported)
+        assert "correction" not in json.dumps(exported)
+    else:
+        assert validation["verdict"] == "needs_review" and fixed is None
+        assert "before" not in validation["correction"]
 
 
 @pytest.mark.parametrize("configured", [None, "", "  \n", "Editable domain rules and JSON contract"])
@@ -229,6 +269,7 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit, overlay):
                         await other.commit()
                 return SimpleNamespace(text=json.dumps(dict(verdict="pass", issues=["fix"],
                     corrected_task=None if overlay else {**correction(), "topic": "Verifier rename"},
+                    verified_task={**pc._task_payload(t), "images": [], "reference_solution": "repaired", "answer": "4"},
                     verification={"solution": "repaired", "answer": "4"})), raw={})
             monkeypatch.setattr(pc.llm, "chat", chat)
             monkeypatch.setattr(taskgen, "task_is_export_ready", lambda _: True)
@@ -250,6 +291,7 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit, overlay):
                 assert t.rubric[0]["criterion_name"] == ("old" if overlay else "corrected")
                 assert t.max_score == (10 if overlay else 8)
                 assert t.validation["correction"]["applied"] is True
+                assert t.validation["correction"]["before"]["reference_solution"] == "original"
                 assert evidence_matches_task(t.validation, t) and b.validated_count == 1
         await engine.dispose()
     asyncio.run(run())

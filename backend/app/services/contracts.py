@@ -119,7 +119,7 @@ GRADING_RESPONSE_SCHEMA = _strict_object({
 PHYSICAL_VERIFIER_RESPONSE_SCHEMA = _strict_object({
     "verdict": {"type": "string", "enum": ["pass", "fail"]},
     "issues": {"type": "array", "items": {"type": "string"}},
-    "corrected_task": {"anyOf": [
+    "verified_task": {"anyOf": [
         {"type": "null"}, PHYSICAL_GENERATION_RESPONSE_SCHEMA["properties"]["tasks"]["items"],
     ]},
     "verification": _strict_object({"solution": {"type": "string"}, "answer": {"type": "string"}}),

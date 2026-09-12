@@ -10,6 +10,7 @@ instead of buying a replacement generation.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
@@ -66,9 +67,26 @@ def is_physical_chemistry(assistant: Assistant) -> bool:
     return "физичес" in normalized and "хим" in normalized
 
 
-def physical_verifier_prompt(system_prompt: str | None) -> str:
+PHYSICAL_TOOLS_VERIFIER_PROMPT = """Вы — единственный независимый verifier задачи по физической химии.
+Проверьте модель, вывод, единицы, вычисления и все подпункты, используя доступные инструменты.
+На pass всегда верните полный verified_task той же задачи, даже если исправлений не требуется.
+Сохраните все корректные абзацы исходного reference_solution, все подпункты, условие и данные;
+исправляйте только необходимое. reference_solution — полный самодостаточный учебный эталон,
+answer — чистые ответы на все вопросы. Не заменяйте задачу и не меняйте выбранную тему.
+verification.solution и verification.answer — только диагностика, они не сохраняются как эталон.
+Для бимолекулярных столкновений r=k[A][B], k=P A_coll(T)exp(-E_0/(RT)), A_exp=P A_coll(T).
+Не подменяйте k предэкспонентой в законе скорости: r не равно A_exp[A][B] без барьерного множителя.
+Если безопасно проверить или исправить нельзя, верните fail и verified_task=null.
+Ответ строго JSON по схеме: verdict, issues, verified_task, verification.
+verified_task содержит statement, reference_solution, answer, images, rubric, max_score,
+difficulty, topic, data_used и chemistry_facts={}. Не возвращайте сокращённый объект или инструкции замены.
+"""
+
+
+def physical_verifier_prompt(system_prompt: str | None, *, essential_tools: bool = False) -> str:
     """Use the editable prompt verbatim; domain rules are fallback content only."""
-    return system_prompt if system_prompt and system_prompt.strip() else PHYSICAL_CHEMISTRY_VERIFIER_PROMPT
+    return system_prompt if system_prompt and system_prompt.strip() else (
+        PHYSICAL_TOOLS_VERIFIER_PROMPT if essential_tools else PHYSICAL_CHEMISTRY_VERIFIER_PROMPT)
 
 
 def physical_json_schema_enabled(assistant: Assistant | None, provider: Provider | None, model: ModelEntry) -> bool:
@@ -108,6 +126,7 @@ def _task_payload(task: GeneratedTask) -> dict[str, Any]:
         "statement": task.statement,
         "reference_solution": task.reference_solution,
         "answer": task.answer,
+        "images": list(task.images or []),
         "rubric": task.rubric or [],
         "max_score": task.max_score,
         "difficulty": task.difficulty,
@@ -175,7 +194,7 @@ async def run_physical_validation(
         result = await llm.chat(
             provider,
             model,
-            physical_verifier_prompt(system_prompt) + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else ""),
+            physical_verifier_prompt(system_prompt, essential_tools=essential_tools) + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else ""),
             json.dumps(prompt_context, ensure_ascii=False),
             temperature=0.1,
             json_mode=True,
@@ -199,7 +218,15 @@ async def run_physical_validation(
         verdict = str(response.get("verdict") or "fail").strip().casefold()
         verification = response.get("verification")
         verification = verification if isinstance(verification, dict) else {}
-        correction = _normalized_correction(response.get("corrected_task"), original)
+        if essential_tools:
+            candidate = response.get("verified_task")
+            # Structural contract only: diagnostics never become a task patch.
+            required = set(original) | {"images"}
+            if (verdict == "pass" and isinstance(candidate, dict) and required <= candidate.keys()
+                    and isinstance(candidate.get("images"), list)):
+                correction = _normalized_correction(candidate, original)
+        else:
+            correction = _normalized_correction(response.get("corrected_task"), original)
         if correction is not None and verdict in {"pass", "fail"}:
             verifier_report = {
                 "status": "match",
@@ -209,14 +236,8 @@ async def run_physical_validation(
                 "answer": str(verification.get("answer") or ""),
                 "solution_truncated": False,
             }
-        elif (verdict == "pass" and response.get("corrected_task") is None
-              and (not essential_tools or all(isinstance(verification.get(key), str) and verification[key].strip()
-                                             for key in ("solution", "answer")))):
+        elif not essential_tools and verdict == "pass" and response.get("corrected_task") is None:
             # The verdict is semantic; issues may contain harmless notes.
-            # Return a patch, not an in-place mutation: callers must still check the original fingerprint.
-            if essential_tools:
-                correction = {**original, "reference_solution": verification["solution"],
-                              "answer": verification["answer"]}
             verifier_report = {
                 "status": "match",
                 "comparison": {"verdict": "match", "basis": "single_independent_verifier"},
@@ -226,8 +247,8 @@ async def run_physical_validation(
                 "solution_truncated": False,
             }
         else:
-            if essential_tools and verdict == "pass" and response.get("corrected_task") is None:
-                reasons.append("Верификатор не вернул непустые verification.solution и verification.answer")
+            if essential_tools and verdict == "pass":
+                reasons.append("Верификатор не вернул полный verified_task по контракту")
             reasons.extend(issues or ["Верификатор обнаружил несогласованность, но не вернул безопасное исправление"])
             verifier_report = {
                 "status": "mismatch",
@@ -263,6 +284,7 @@ async def run_physical_validation(
         "correction": {
             "applied": False,
             "issues": (verifier_report.get("issues") or []) if correction is not None else [],
+            **({"before": deepcopy(original)} if correction is not None and correction != original else {}),
         },
     }
     if calculation_audit is not None:
