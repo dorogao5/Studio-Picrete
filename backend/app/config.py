@@ -1,5 +1,6 @@
 from functools import lru_cache
 import json
+import math
 from pathlib import Path
 from typing import Annotated
 
@@ -38,6 +39,41 @@ class Settings(BaseSettings):
     architect_family: str = "gpt"
 
     llm_request_timeout: float = 300.0
+    llm_sampling_by_model: Annotated[dict[str, dict[str, float]], NoDecode] = Field(
+        default_factory=dict, validation_alias=AliasChoices(
+            "LLM_SAMPLING_BY_MODEL", "STUDIO_LLM_SAMPLING_BY_MODEL", "llm_sampling_by_model"))
+
+    @field_validator("llm_sampling_by_model", mode="before")
+    @classmethod
+    def validate_sampling_map(cls, value):
+        def pairs(items):
+            result = {}
+            for key, item in items:
+                if key in result:
+                    raise ValueError
+                result[key] = item
+            return result
+        ranges = {"temperature": (0, 2), "top_p": (0, 1), "presence_penalty": (-2, 2)}
+        try:
+            if isinstance(value, str):
+                if len(value.encode()) > 65536:
+                    raise ValueError
+                value = json.loads(value, object_pairs_hook=pairs) if value.strip() else {}
+            if not isinstance(value, dict) or len(value) > 256:
+                raise ValueError
+            for key, options in value.items():
+                if (not isinstance(key, str) or not key or len(key.encode()) > 2048
+                        or any(c.isspace() or ord(c) < 32 or 127 <= ord(c) <= 159 for c in key)
+                        or not isinstance(options, dict) or set(options) - ranges.keys()):
+                    raise ValueError
+                for name, number in options.items():
+                    if (type(number) not in (int, float) or not math.isfinite(number)
+                            or not ranges[name][0] <= number <= ranges[name][1]):
+                        raise ValueError
+            return value
+        except (ValueError, TypeError, OverflowError, RecursionError):
+            raise ValueError("Invalid model sampling map") from None
+
     llm_max_output_tokens_by_model: Annotated[dict[str, int], NoDecode] = Field(
         default_factory=dict, validation_alias=AliasChoices(
             "LLM_MAX_OUTPUT_TOKENS_BY_MODEL", "STUDIO_LLM_MAX_OUTPUT_TOKENS_BY_MODEL",

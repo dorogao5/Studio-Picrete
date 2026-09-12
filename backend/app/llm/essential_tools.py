@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import get_settings
-from app.llm.client import LlmError, LlmResult, _apply_family_params, completion_failure_audit
+from app.llm.client import LlmError, LlmResult, _apply_family_params, _apply_sampling_overrides, completion_failure_audit
 from app.security import decrypt_secret
 
 
@@ -124,6 +124,7 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                "tools": [{"type": "function", "function": {"name": name, **definition}}
                          for name, definition in DEFINITIONS.items()], "tool_choice": "auto"}
     _apply_family_params(payload, model, temperature, thinking)
+    _apply_sampling_overrides(payload, model)
     if reasoning_effort is not None:
         payload["reasoning_effort"] = reasoning_effort
     if max_tokens is not None:

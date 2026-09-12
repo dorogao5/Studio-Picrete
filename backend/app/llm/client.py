@@ -45,6 +45,11 @@ def _apply_family_params(payload: dict, model: ModelEntry, temperature: float | 
         payload["temperature"] = temperature
 
 
+def _apply_sampling_overrides(payload: dict, model: ModelEntry) -> None:
+    # Explicit operator settings win over application/family sampling defaults.
+    payload.update(get_settings().llm_sampling_by_model.get(model.model_id, {}))
+
+
 # Семейства, у OpenAI-совместимых API которых поддерживается stream_options.include_usage.
 STREAM_USAGE_FAMILIES = {"deepseek", "qwen", "gpt", "generic"}
 RETRYABLE_ATTEMPTS = 3
@@ -156,6 +161,7 @@ async def _chat(
         "stream": True,
     }
     _apply_family_params(payload, model, temperature, thinking)
+    _apply_sampling_overrides(payload, model)
     if reasoning_effort is not None:
         payload["reasoning_effort"] = reasoning_effort
     if model.family in STREAM_USAGE_FAMILIES:
