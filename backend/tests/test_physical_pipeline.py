@@ -93,7 +93,7 @@ def test_verifier_contract(monkeypatch, verdict, issues, repair, expected):
     async def chat(*args, **kwargs):
         calls.append(args)
         return SimpleNamespace(text=json.dumps(dict(verdict=verdict, issues=issues,
-            corrected_task=repair, verification={})))
+            corrected_task=repair, verification={"solution": "verified full solution", "answer": "4"})))
     monkeypatch.setattr(pc.llm, "chat", chat)
     async def run():
         original = task()
@@ -108,6 +108,44 @@ def test_verifier_contract(monkeypatch, verdict, issues, repair, expected):
             assert result["verifier"]["issues"] == issues
             assert result["reasons"] == []
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("verdict", [" PASS ", "fail"])
+def test_verified_reference_overlay_only_for_tools_pass(monkeypatch, enabled, verdict):
+    async def chat(*args, **kwargs):
+        return SimpleNamespace(text=json.dumps({"verdict": verdict, "issues": ["rounding note"],
+            "corrected_task": None, "verification": {"solution": "Full derivation: k=0.1276434",
+                "answer": "0.1276", "statement": "untrusted replacement", "rubric": []}}), raw={})
+    monkeypatch.setattr(pc.llm, "chat", chat)
+    original = task()
+    before = pc._task_payload(original)
+    validation, fixed = asyncio.run(pc.run_physical_validation(task=original, provider=None,
+        model="deepseek-v4-pro", grounding="", discipline_context="", essential_tools=enabled))
+    assert pc._task_payload(original) == before
+    assert evidence_matches_task(validation, original)
+    assert validation["verdict"] == ("validated" if verdict.strip().lower() == "pass" else "needs_review")
+    if enabled and verdict.strip().lower() == "pass":
+        assert fixed == {**before, "reference_solution": "Full derivation: k=0.1276434", "answer": "0.1276"}
+        assert original.id == "task" and validation["correction"]["applied"] is False
+    else:
+        assert fixed is None
+
+
+@pytest.mark.parametrize("verification", [None, {}, [], "bad", {"solution": "full"},
+    {"solution": "", "answer": "4"}, {"solution": "full", "answer": "  "},
+    {"solution": 123, "answer": "4"}, {"solution": "full", "answer": {"value": 4}}])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_overlay_requires_nonempty_string_fields_without_breaking_legacy(monkeypatch, verification, enabled):
+    async def chat(*args, **kwargs):
+        return SimpleNamespace(text=json.dumps({"verdict": "pass", "issues": [],
+            "corrected_task": None, "verification": verification}), raw={})
+    monkeypatch.setattr(pc.llm, "chat", chat)
+    original = task()
+    validation, fixed = asyncio.run(pc.run_physical_validation(task=original, provider=None,
+        model="deepseek-v4-pro", grounding="", discipline_context="", essential_tools=enabled))
+    assert validation["verdict"] == ("needs_review" if enabled else "validated")
+    assert fixed is None and original.reference_solution == "original"
 
 
 @pytest.mark.parametrize("configured", [None, "", "  \n", "Editable domain rules and JSON contract"])
@@ -153,12 +191,14 @@ async def setup_db():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
+@pytest.mark.parametrize("overlay", [False, True])
 @pytest.mark.parametrize("edit", [None, "statement", "rubric", "topic", "difficulty", "grounding"])
-def test_batch_same_row_and_concurrent_edit(monkeypatch, edit):
+def test_batch_same_row_and_concurrent_edit(monkeypatch, edit, overlay):
     async def run():
         engine, sessions = await setup_db()
         async with sessions() as db:
-            a = Assistant(id="assistant", name="Физическая химия", discipline="Физическая химия")
+            a = Assistant(id="assistant", name="Физическая химия", discipline="Физическая химия",
+                          verifier_tools_enabled=overlay)
             b = GenerationBatch(id="batch", assistant_id=a.id, validated_count=0)
             t = task()
             db.add_all([a, b, t, PromptVersion(assistant_id=a.id, role="verifier", status="active",
@@ -176,7 +216,8 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit):
                             [{"criterion_name": "teacher", "max_score": 10}] if edit == "rubric" else "teacher")
                         await other.commit()
                 return SimpleNamespace(text=json.dumps(dict(verdict="pass", issues=["fix"],
-                    corrected_task=correction(), verification={})))
+                    corrected_task=None if overlay else correction(),
+                    verification={"solution": "repaired", "answer": "4"})), raw={})
             monkeypatch.setattr(pc.llm, "chat", chat)
             monkeypatch.setattr(taskgen, "task_is_export_ready", lambda _: True)
             await taskgen._validate_batch(db, b, [t], dict(validation_solver=False,
@@ -192,7 +233,8 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit):
                 assert "teacher" in str(getattr(t, edit))
             else:
                 assert t.reference_solution == "repaired" and t.answer == "4"
-                assert t.rubric[0]["criterion_name"] == "corrected" and t.max_score == 8
+                assert t.rubric[0]["criterion_name"] == ("old" if overlay else "corrected")
+                assert t.max_score == (10 if overlay else 8)
                 assert t.validation["correction"]["applied"] is True
                 assert evidence_matches_task(t.validation, t) and b.validated_count == 1
         await engine.dispose()

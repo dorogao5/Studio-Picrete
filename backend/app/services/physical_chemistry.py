@@ -195,27 +195,37 @@ async def run_physical_validation(
     if isinstance(response, dict):
         issues = [str(issue).strip() for issue in response.get("issues") or [] if str(issue).strip()]
         verdict = str(response.get("verdict") or "fail").strip().casefold()
+        verification = response.get("verification")
+        verification = verification if isinstance(verification, dict) else {}
         correction = _normalized_correction(response.get("corrected_task"), original)
         if correction is not None and verdict in {"pass", "fail"}:
             verifier_report = {
                 "status": "match",
                 "comparison": {"verdict": "match", "basis": "single_independent_verifier_repair"},
                 "issues": issues,
-                "solution": str((response.get("verification") or {}).get("solution") or ""),
-                "answer": str((response.get("verification") or {}).get("answer") or ""),
+                "solution": str(verification.get("solution") or ""),
+                "answer": str(verification.get("answer") or ""),
                 "solution_truncated": False,
             }
-        elif verdict == "pass" and response.get("corrected_task") is None:
+        elif (verdict == "pass" and response.get("corrected_task") is None
+              and (not essential_tools or all(isinstance(verification.get(key), str) and verification[key].strip()
+                                             for key in ("solution", "answer")))):
             # The verdict is semantic; issues may contain harmless notes.
+            # Return a patch, not an in-place mutation: callers must still check the original fingerprint.
+            if essential_tools:
+                correction = {**original, "reference_solution": verification["solution"],
+                              "answer": verification["answer"]}
             verifier_report = {
                 "status": "match",
                 "comparison": {"verdict": "match", "basis": "single_independent_verifier"},
                 "issues": issues,
-                "solution": str((response.get("verification") or {}).get("solution") or ""),
-                "answer": str((response.get("verification") or {}).get("answer") or ""),
+                "solution": str(verification.get("solution") or ""),
+                "answer": str(verification.get("answer") or ""),
                 "solution_truncated": False,
             }
         else:
+            if essential_tools and verdict == "pass" and response.get("corrected_task") is None:
+                reasons.append("Верификатор не вернул непустые verification.solution и verification.answer")
             reasons.extend(issues or ["Верификатор обнаружил несогласованность, но не вернул безопасное исправление"])
             verifier_report = {
                 "status": "mismatch",

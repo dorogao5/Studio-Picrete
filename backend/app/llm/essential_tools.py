@@ -153,7 +153,25 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                 audit["usage_by_call"].append(usage)
                 calls = message.get("tool_calls") or []
                 if not calls:
-                    if not message.get("content"):
+                    if (not message.get("content", "").strip()
+                            and any(trace.get("status") == "success" for trace in audit["tool_traces"])):
+                        # Finish the existing calculation once, retaining all inputs and
+                        # tool results. Never restart generation or repeat computations.
+                        audit["finalization_continuations"] = 1
+                        payload["tool_choice"] = "none"
+                        payload["messages"].append({"role": "user", "content": (
+                            "Предыдущий ответ завершился без итогового текста. Завершите ответ для этой же "
+                            "задачи в ранее заданном формате, используя уже полученные результаты инструментов. "
+                            "Не меняйте выбранные исходные данные и вопросы, не создавайте другую задачу, "
+                            "не повторяйте расчёты и не приписывайте невыполненных проверок. "
+                            "Сохраните учебный режим: для подсказки отвечайте только на текущий шаг.")})
+                        audit["model_calls"] += 1
+                        message, usage = await completion(
+                            client, provider.base_url.rstrip("/") + "/chat/completions", headers, payload)
+                        audit["usage_by_call"].append(usage)
+                        if message.get("tool_calls"):
+                            raise LlmError("Unexpected tool call during finalization; not executed")
+                    if not message.get("content", "").strip():
                         raise LlmError("Empty final tool-dialogue answer")
                     totals = {key: (sum(u[key] for u in audit["usage_by_call"])
                                    if all(isinstance(u.get(key), int) for u in audit["usage_by_call"]) else None)

@@ -78,6 +78,47 @@ def test_default_tool_choice_stays_auto(monkeypatch):
     assert [call["tool_choice"] for call in calls] == ["auto", "auto"]
 
 
+@pytest.mark.parametrize("still_empty", [False, True])
+def test_empty_final_finishes_same_context_once_without_recalculating(monkeypatch, still_empty):
+    requests, calls = mock_dialogue(monkeypatch)
+    original = et.completion
+    async def completion(*args):
+        message, usage = await original(*args)
+        if len(calls) == 2 or (still_empty and len(calls) == 3):
+            message["content"] = "  "
+        return message, usage
+    monkeypatch.setattr(et, "completion", completion)
+    if still_empty:
+        with pytest.raises(client.LlmError, match="Empty final") as caught:
+            run()
+        audit = caught.value.raw
+    else:
+        result = run()
+        assert result.text == '{"value":4}' and result.tokens_total == 45
+        audit = result.raw
+    assert len(calls) == 3
+    assert [call["tool_choice"] for call in calls] == ["auto", "auto", "none"]
+    assert calls[2]["messages"][:-1] == calls[1]["messages"]
+    assert calls[2]["model"] == calls[0]["model"]
+    assert calls[2]["response_format"] == calls[0]["response_format"]
+    assert len([r for r in requests if r[0].endswith("/invoke")]) == 1
+    assert audit["finalization_continuations"] == 1 and audit["model_calls"] == 3
+
+
+def test_empty_initial_answer_does_not_start_replacement_generation(monkeypatch):
+    requests, calls = mock_dialogue(monkeypatch)
+    original = et.completion
+    async def completion(*args):
+        _, usage = await original(*args)
+        return {"role": "assistant", "content": ""}, usage
+    monkeypatch.setattr(et, "completion", completion)
+    with pytest.raises(client.LlmError, match="Empty final") as caught:
+        run()
+    assert len(calls) == len(requests) == 1
+    assert caught.value.raw["tool_traces"] == []
+    assert "finalization_continuations" not in caught.value.raw
+
+
 def test_initial_choice_ignored_without_tools(monkeypatch):
     _, calls = mock_dialogue(monkeypatch)
     async def stream(client_, url, payload, headers, provider_name):
