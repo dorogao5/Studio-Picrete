@@ -83,10 +83,25 @@ difficulty, topic, data_used и chemistry_facts={}. Не возвращайте 
 """
 
 
+PHYSICAL_VERIFIER_PLATFORM_CONTRACT = """ПЛАТФОРМЕННЫЙ JSON-КОНТРАКТ (приоритет только формата и назначения полей).
+Сохраните предметные инструкции выше. Если прежний формат ответа им противоречит, используйте этот контракт.
+Корневые поля JSON: verdict (pass|fail), issues (массив строк), verified_task, verification.
+На verdict=pass verified_task ОБЯЗАТЕЛЕН: полный объект той же задачи, даже если изменений нет.
+Его поля: statement, reference_solution, answer, images, rubric, max_score, difficulty, topic,
+data_used, chemistry_facts. reference_solution — полный самостоятельный эталон по всем подпунктам,
+с сохранением всех корректных исходных абзацев; answer — чистый полный ответ, не отчёт сравнения.
+На verdict=fail verified_task=null. verification содержит solution и answer исключительно для диагностики;
+эти поля никогда не заменяют reference_solution или answer задачи.
+Устаревшее corrected_task НЕ используется и не возвращается. Не добавляйте лишних корневых полей.
+Соблюдайте переданную API JSON Schema. Этот блок не меняет химические правила проверки.
+"""
+
+
 def physical_verifier_prompt(system_prompt: str | None, *, essential_tools: bool = False) -> str:
-    """Use the editable prompt verbatim; domain rules are fallback content only."""
-    return system_prompt if system_prompt and system_prompt.strip() else (
+    """Preserve editable domain rules; only the platform output contract takes format precedence."""
+    base = system_prompt if system_prompt and system_prompt.strip() else (
         PHYSICAL_TOOLS_VERIFIER_PROMPT if essential_tools else PHYSICAL_CHEMISTRY_VERIFIER_PROMPT)
+    return base + "\n\n" + PHYSICAL_VERIFIER_PLATFORM_CONTRACT if essential_tools else base
 
 
 def physical_json_schema_enabled(assistant: Assistant | None, provider: Provider | None, model: ModelEntry) -> bool:

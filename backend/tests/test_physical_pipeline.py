@@ -213,6 +213,28 @@ def test_verifier_prompt_is_authoritative_or_fallback(monkeypatch, configured):
     assert calls[0][2] == expected
 
 
+@pytest.mark.parametrize("configured", [
+    "CUSTOM CHEMISTRY: use teacher conventions. On pass return corrected_task=null.",
+    "CUSTOM CHEMISTRY: keep all parts. Return full verified_task; verification is diagnostic.",
+])
+def test_tools_platform_contract_supersedes_old_format_not_editable_chemistry(monkeypatch, configured):
+    captured = []
+    async def chat(*args, **kwargs):
+        captured.append(args[2])
+        return SimpleNamespace(text='{"verdict":"fail","issues":[],"verified_task":null}', raw={})
+    monkeypatch.setattr(pc.llm, "chat", chat)
+    asyncio.run(pc.run_physical_validation(task=task(), provider=None, model="deepseek-v4-pro",
+        grounding="", discipline_context="", system_prompt=configured, essential_tools=True))
+    prompt = pc.physical_verifier_prompt(configured, essential_tools=True)
+    assert prompt.startswith(configured + "\n\n")
+    assert prompt.endswith(pc.PHYSICAL_VERIFIER_PLATFORM_CONTRACT)
+    assert "verified_task ОБЯЗАТЕЛЕН" in prompt and "corrected_task НЕ используется" in prompt
+    assert "исключительно для диагностики" in prompt
+    assert "r=k[A][B]" not in prompt  # no hardcoded domain fallback added to custom instructions
+    assert captured[0].startswith(prompt)
+    assert pc.physical_verifier_prompt(configured, essential_tools=False) == configured
+
+
 @pytest.mark.parametrize("configured", [None, "Editable verifier rules"])
 def test_verifier_preview_matches_runtime_prompt(monkeypatch, configured):
     from app.api import preview
