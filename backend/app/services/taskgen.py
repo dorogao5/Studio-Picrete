@@ -292,6 +292,15 @@ async def generate_tasks(
     use_tools = assistant_tools_enabled(assistant, "generator")
     if use_tools:
         prompt += ESSENTIAL_TOOLS_INSTRUCTION
+    if getattr(assistant, "generation_policy", "legacy") == "single_verifier" and example_tasks:
+        prompt += (
+            "\n\nФиксированный шаблон варианта: "
+            + json.dumps({"statement":example_tasks[0]["statement"]}, ensure_ascii=False)
+            + "\nСохраните вещество, данные как данные, искомое как искомое и число вопросов. "
+            "Разрешено менять численные значения входных величин и пересчитать результат; "
+            "запрещено вводить вместо заданной величины другую физическую/химическую величину. "
+            "Для качественного вопроса сохраняйте форму и предмет сравнения."
+        )
     result = await llm.chat(
         provider,
         model,

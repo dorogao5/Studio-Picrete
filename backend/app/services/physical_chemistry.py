@@ -232,11 +232,22 @@ async def run_physical_validation(
     verifier_report: dict[str, Any] = {"status": "error", "comparison": {"verdict": "uncertain"}}
     model_use = current_model_use_policy().classify(model)
     calculation_audit = None
+    verifier_prompt = physical_verifier_prompt(system_prompt, essential_tools=essential_tools) + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else "")
+    if generation_policy == "single_verifier" and prompt_context["blueprint_contract"]:
+        verifier_prompt += (
+            "\n\nПриоритет типового варианта: сравните с blueprint_contract роли заданных и искомых "
+            "величин, вещества и число вопросов. Совпадения общей темы недостаточно. "
+            "Лишние вопросы генератора следует удалить вопреки общему правилу сохранения подпунктов: "
+            "сохраняются вопросы опорного примера. Если генератор поменял местами данное и искомое, "
+            "восстановите исходный приём в том же кандидате, используя согласованные значения "
+            "и пересчитав решение и рубрику. Не подтверждайте другой тип только за верную арифметику. "
+            "Если корректный ремонт невозможен, сохраните fail с точной причиной."
+        )
     try:
         result = await llm.chat(
             provider,
             model,
-            physical_verifier_prompt(system_prompt, essential_tools=essential_tools) + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else ""),
+            verifier_prompt,
             json.dumps(prompt_context, ensure_ascii=False),
             temperature=0.1,
             json_mode=True,
