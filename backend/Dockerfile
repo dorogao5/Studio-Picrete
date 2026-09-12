@@ -19,5 +19,9 @@ COPY ops/release_physical_chemistry.py ./ops/release_physical_chemistry.py
 COPY ops/apply_live_generation_corrections.py ./ops/apply_live_generation_corrections.py
 COPY ops/content/physical_chemistry ./ops/content/physical_chemistry
 
+COPY ops/check_general_inorganic.py ./ops/check_general_inorganic.py
+COPY ops/release_general_inorganic.py ./ops/release_general_inorganic.py
+COPY ops/content/general_inorganic ./ops/content/general_inorganic
+
 EXPOSE 8100
 CMD ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8100"]

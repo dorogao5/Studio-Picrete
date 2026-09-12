@@ -8,7 +8,7 @@ from app.services.task_evidence import (
     task_content_fingerprint,
 )
 from app.services.validation import CRITIC_REQUIRED_CHECKS, VALIDATION_POLICY_VERSION
-from app.services.physical_chemistry import PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION
+from app.services.physical_chemistry import PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION, SINGLE_VERIFIER_POLICY_VERSION
 
 
 def validation_is_current_decision(value: object, task: object | None = None) -> bool:
@@ -19,7 +19,7 @@ def validation_is_current_decision(value: object, task: object | None = None) ->
         return False
     model_id = str(model_policy.get("model_id") or "").strip()
     current_use = current_model_use_policy().classify(model_id)
-    if value.get("policy_version") == PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION:
+    if value.get("policy_version") in {PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION, SINGLE_VERIFIER_POLICY_VERSION}:
         verifier = value.get("verifier")
         config = value.get("validation_config")
         return (

@@ -77,6 +77,7 @@ export interface Assistant {
   generator_tools_enabled?: boolean;
   verifier_tools_enabled?: boolean;
   tutor_tools_enabled?: boolean;
+  generation_policy?: "legacy" | "single_verifier";
   decision_tools_enabled?: boolean;
   created_by: string;
   created_by_name: string;

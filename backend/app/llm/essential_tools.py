@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+import jsonschema
 
 from app.config import get_settings
 from app.llm.client import LlmError, LlmResult, _apply_family_params, _apply_sampling_overrides, completion_failure_audit, aggregate_usage
@@ -125,6 +126,10 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                          for name, definition in DEFINITIONS.items()], "tool_choice": "auto"}
     _apply_family_params(payload, model, temperature, thinking)
     _apply_sampling_overrides(payload, model)
+    # Native DeepSeek thinking accepts auto/none, but rejects required (HTTP 400).
+    # Keep reasoning enabled and ask for relevant calculations in the course prompt.
+    if getattr(provider, "kind", "") == "deepseek" and payload.get("thinking", {}).get("type") == "enabled":
+        initial_tool_choice = "auto"
     if reasoning_effort is not None:
         payload["reasoning_effort"] = reasoning_effort
     if max_tokens is not None:
@@ -132,8 +137,12 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
     if response_schema is not None:
         if not model.supports_json:
             raise LlmError("Model does not support JSON")
-        payload["response_format"] = {"type": "json_schema", "json_schema": {
-            "name": "picrete_response", "strict": True, "schema": response_schema}}
+        if getattr(provider, "kind", "") == "deepseek":
+            payload["response_format"] = {"type": "json_object"}
+            payload["messages"][0]["content"] += "\nJSON Schema ответа: " + json.dumps(response_schema, ensure_ascii=False, separators=(",", ":"))
+        else:
+            payload["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": "picrete_response", "strict": True, "schema": response_schema}}
     elif json_mode and model.supports_json:
         payload["response_format"] = {"type": "json_object"}
     headers = {**(provider.extra_headers or {}), "Authorization": f"Bearer {decrypt_secret(provider.api_key_encrypted)}"}
@@ -174,6 +183,11 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                             raise LlmError("Unexpected tool call during finalization; not executed")
                     if not message.get("content", "").strip():
                         raise LlmError("Empty final tool-dialogue answer")
+                    if response_schema is not None and getattr(provider, "kind", "") == "deepseek":
+                        try:
+                            jsonschema.validate(json.loads(message["content"]), response_schema)
+                        except (ValueError, jsonschema.ValidationError) as err:
+                            raise LlmError("Final answer does not match the requested JSON schema; no regeneration") from err
                     totals = aggregate_usage(audit["usage_by_call"])
                     audit["usage"] = totals
                     return LlmResult(text=message["content"], raw=audit,

@@ -111,6 +111,7 @@ class Criterion(BaseModel):
 
 
 class AssistantOut(ORMModel):
+    generation_policy: str = Field(default="legacy", pattern="^(legacy|single_verifier)$")
     grading_enabled: bool = False
     id: str
     name: str
@@ -166,6 +167,7 @@ class CourseUpdate(BaseModel):
 
 
 class AssistantCreate(BaseModel):
+    generation_policy: str = Field(default="legacy", pattern="^(legacy|single_verifier)$")
     decision_tools_enabled: bool = False
     tutor_tools_enabled: bool = False
     generator_tools_enabled: bool = False
@@ -181,6 +183,7 @@ class AssistantCreate(BaseModel):
 
 
 class AssistantUpdate(BaseModel):
+    generation_policy: str | None = Field(default=None, pattern="^(legacy|single_verifier)$")
     generator_tools_enabled: bool | None = None
     verifier_tools_enabled: bool | None = None
     decision_tools_enabled: bool | None = None

@@ -34,7 +34,7 @@ from app.services.model_policy import current_model_use_policy
 from app.services.export import build_bank_export
 from app.services.model_policy import ModelUsePolicyError, require_decision_model
 from app.services.physical_chemistry import (
-    is_physical_chemistry, student_grading_model_use, task_verifier_model_id, physical_json_schema_enabled,
+    uses_single_verifier, is_physical_chemistry, student_grading_model_use, task_verifier_model_id, physical_json_schema_enabled,
 )
 from app.services.taskgen import GenerationError, resolve_generator_prompt_version, run_batch
 from app.services.task_approval import task_is_export_ready
@@ -85,21 +85,22 @@ async def generate_student_trainer_tasks(
     """
     _authenticate_picrete_generation(authorization)
     assistant = await get_assistant_or_404(body.assistant_id, db)
-    if not is_physical_chemistry(assistant):
+    if not uses_single_verifier(assistant):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Генерация через студенческий тренажёр включена только для физической химии",
+            "Для курса не включена политика генерации с независимой проверкой",
         )
 
     topic = body.topic.strip()
-    template = (
+    templates = (
         await db.execute(
             select(TaskTemplate)
             .where(TaskTemplate.assistant_id == assistant.id, TaskTemplate.topic == topic,
                    TaskTemplate.difficulty == body.difficulty)
             .order_by(TaskTemplate.created_at, TaskTemplate.id)
         )
-    ).scalars().first()
+    ).scalars().all()
+    template = secrets.choice(templates) if templates else None
     if template is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                             "Для выбранной подтемы и сложности нет канонического шаблона")
@@ -168,8 +169,9 @@ async def generate_student_trainer_tasks(
 
     export = build_bank_export(
         ready,
-        source_code="studio_fizicheskaya_himiya_dynamic",
-        source_title="Физическая химия · задачи, сгенерированные для тренажёра",
+        source_code=("studio_fizicheskaya_himiya_dynamic" if is_physical_chemistry(assistant)
+                     else f"studio_{assistant.id}_dynamic"),
+        source_title=f"{assistant.discipline} · задачи, сгенерированные для тренажёра",
         version=f"student-{batch.id}",
     )
     for paragraph in export["paragraphs"]:
@@ -267,6 +269,7 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
     }
     if is_physical_chemistry(assistant):
         runtime["decision_supports_json_schema"] = physical_json_schema_enabled(assistant, grader_provider, grader)
+    runtime["generation_policy"] = getattr(assistant, "generation_policy", "legacy")
     runtime["decision_tools_enabled"] = getattr(assistant, "decision_tools_enabled", False) is True
     runtime["tutor_tools_enabled"] = getattr(assistant, "tutor_tools_enabled", False) is True
     # Compatibility for lightweight callers/tests that provide model objects

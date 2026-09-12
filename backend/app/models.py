@@ -77,6 +77,7 @@ class Assistant(Base):
     default_grader_model_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     default_generator_model_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     verifier_model_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    generation_policy: Mapped[str] = mapped_column(String(32), default="legacy", server_default="legacy")
     generator_tools_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     verifier_tools_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     decision_tools_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

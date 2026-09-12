@@ -33,7 +33,7 @@ from app.services.task_evidence import (
     task_content_fingerprint,
 )
 from app.services.task_revalidation import run_revalidation_batch
-from app.services.physical_chemistry import is_physical_chemistry, task_verifier_model_id
+from app.services.physical_chemistry import uses_single_verifier, task_verifier_model_id
 from app.services.taskgen import (
     GenerationError,
     _validate_batch,
@@ -235,7 +235,7 @@ async def generate(
             grounding_meta=grounding_meta,
             validation_contract=validation_contract,
             template_rubric=merged["rubric"],
-            authoritative_topic=is_physical_chemistry(assistant),
+            authoritative_topic=uses_single_verifier(assistant),
         )
         if task is not None:
             db.add(task)
@@ -275,7 +275,7 @@ async def create_batch(
         ) from err
     solver_entry_id = (
         body.solver_model_entry_id or task_verifier_model_id(assistant)
-        or (None if is_physical_chemistry(assistant) else body.model_entry_id)
+        or (None if uses_single_verifier(assistant) else body.model_entry_id)
     )
     if not solver_entry_id:
         raise HTTPException(422, "Выберите отдельную модель верификации задач")
@@ -359,7 +359,7 @@ async def create_revalidation_batch(
 
     solver_entry_id = (
         body.solver_model_entry_id or task_verifier_model_id(assistant)
-        or (None if is_physical_chemistry(assistant) else assistant.default_generator_model_id)
+        or (None if uses_single_verifier(assistant) else assistant.default_generator_model_id)
     )
     if not solver_entry_id:
         raise HTTPException(
@@ -448,11 +448,11 @@ async def revalidate_task(
 
     solver_entry_id = (
         body.solver_model_entry_id or task_verifier_model_id(assistant)
-        or (None if is_physical_chemistry(assistant) else assistant.default_generator_model_id)
+        or (None if uses_single_verifier(assistant) else assistant.default_generator_model_id)
     )
 
     solver_provider = solver_model = None
-    if contract["validation_solver"] or is_physical_chemistry(assistant):
+    if contract["validation_solver"] or uses_single_verifier(assistant):
         if not solver_entry_id:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -468,7 +468,7 @@ async def revalidate_task(
     sheet_ids = contract["sheet_ids"] or None
     sheets = await load_reference_sheets(db, assistant_id, sheet_ids)
     grounding_text = await build_generation_grounding(db, assistant_id, sheet_ids=sheet_ids, query=grounding_query)
-    if is_physical_chemistry(assistant):
+    if uses_single_verifier(assistant):
         # Reuse the same verifier and repair persistence path; this transient
         # progress object is never added as a new generation batch.
         progress = GenerationBatch(assistant_id=assistant_id, validated_count=0)

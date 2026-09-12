@@ -82,6 +82,7 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
     },
     "assistants": {
         "verifier_model_id": "VARCHAR(32)",
+        "generation_policy": "VARCHAR(32) NOT NULL DEFAULT 'legacy'",
         "generator_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
         "verifier_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
         "decision_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
@@ -148,6 +149,7 @@ async def ensure_sqlite_columns(conn) -> None:
 
 
 async def ensure_postgres_columns(conn) -> None:
+    await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS generation_policy VARCHAR(32) NOT NULL DEFAULT 'legacy'")
     await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS verifier_model_id VARCHAR(32)")
     await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS generator_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS verifier_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE")

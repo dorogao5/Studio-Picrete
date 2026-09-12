@@ -54,6 +54,7 @@ def test_runtime_policy_resolves_actual_default_model_id(monkeypatch) -> None:
         "allowed_uses": ["student_tutor", "task_validation", "grading"],
         "decision_tools_enabled": False,
         "tutor_tools_enabled": False,
+        "generation_policy": "legacy",
     }
 
 

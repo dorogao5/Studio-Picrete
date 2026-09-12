@@ -27,6 +27,7 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
   const decisionModels = models.filter((model) => !isKnownAdvisoryModel(model));
   const physical = /физичес/i.test(`${assistant.name} ${assistant.discipline}`) && /хим/i.test(`${assistant.name} ${assistant.discipline}`);
   const gradingModels = models.filter((model) => !isKnownAdvisoryModel(model) || (physical && model.family === "qwen"));
+  const [generationPolicy, setGenerationPolicy] = useState(assistant.generation_policy ?? "legacy");
   const [verifierModel, setVerifierModel] = useState(assistant.verifier_model_id ?? "");
   const [graderModel, setGraderModel] = useState(assistant.default_grader_model_id ?? "");
   const [generatorModel, setGeneratorModel] = useState(assistant.default_generator_model_id ?? "");
@@ -58,6 +59,7 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
         default_grader_model_id: graderModel || null,
         default_generator_model_id: generatorModel || null,
         verifier_model_id: verifierModel || null,
+        generation_policy: generationPolicy,
         ...toolsSettings,
         grading_enabled: gradingEnabled,        description,
         audience,
@@ -90,6 +92,12 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
             <option value="">— выберите модель —</option>
             {generatorModel && !models.some((m) => m.id === generatorModel) && <option value={generatorModel} disabled>Текущая модель недоступна — выберите другую</option>}
             {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Проверка новых задач" hint="Один независимый верификатор проверяет и исправляет тот же вариант без автоматической генерации замены.">
+          <Select aria-label="Политика генерации" value={generationPolicy} onChange={(e) => setGenerationPolicy(e.target.value as "legacy" | "single_verifier")}>
+            <option value="legacy">Существующий режим курса</option>
+            <option value="single_verifier">Генератор и один верификатор</option>
           </Select>
         </Field>
         <Field label="Верификация задач" hint="Независимая модель проверяет и исправляет задачи до выдачи студентам. Для физической химии выберите отдельную модель; у других дисциплин по умолчанию используется модель проверки решений.">

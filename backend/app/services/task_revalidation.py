@@ -19,7 +19,7 @@ from app.services.taskgen import (
     validation_contract_for_task,
 )
 from app.services.validation import run_validation
-from app.services.physical_chemistry import is_physical_chemistry
+from app.services.physical_chemistry import uses_single_verifier
 
 
 async def _set_progress(
@@ -121,7 +121,7 @@ async def _revalidate_task(
         assistant_id=batch.assistant_id,
     )
     assistant = await db.get(Assistant, batch.assistant_id)
-    if assistant is not None and is_physical_chemistry(assistant):
+    if assistant is not None and uses_single_verifier(assistant):
         await _validate_batch(db, batch, [task], merged, solver_provider, solver_model,
                               grounding_text, sheets_to_text(sheets), discipline_context)
         await sync_generation_batch(db, task)

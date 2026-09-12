@@ -11,7 +11,7 @@ from app.models import Assistant, GeneratedTask, PromptVersion, TaskTemplate, Us
 from app.schemas import PromptPreviewRequest, PromptPreviewResponse
 from app.security import get_current_user
 from app.services import taskgen
-from app.services.physical_chemistry import physical_verifier_prompt, _task_payload, is_physical_chemistry
+from app.services.physical_chemistry import physical_verifier_prompt, _task_payload, uses_single_verifier
 from app.services.assistant_profile import build_assistant_profile
 from app.services.assistant_profile import with_assistant_profile
 from app.services.contracts import GENERATION_JSON_CONTRACT, PHYSICAL_GENERATION_JSON_EXAMPLE
@@ -57,7 +57,7 @@ async def _resolve_system_prompt(
     if role == "generator":
         return taskgen.FALLBACK_GENERATOR_PROMPT.format(
             discipline=assistant.discipline,
-            contract=PHYSICAL_GENERATION_JSON_EXAMPLE if is_physical_chemistry(assistant) else GENERATION_JSON_CONTRACT,
+            contract=PHYSICAL_GENERATION_JSON_EXAMPLE if uses_single_verifier(assistant) else GENERATION_JSON_CONTRACT,
         )
     if role == "tutor":
         return FALLBACK_TUTOR_PROMPT.format(discipline=assistant.discipline)
@@ -137,7 +137,7 @@ async def prompt_preview(
             ).scalars()
         )
         user_message = _build_generation_message(
-            template, grounding, existing_statements, reuse_blueprint=is_physical_chemistry(assistant)
+            template, grounding, existing_statements, reuse_blueprint=uses_single_verifier(assistant)
         )
     elif body.role == "verifier":
         grounding = await build_grounding_block(db, assistant.id, query=task.topic if task else "")

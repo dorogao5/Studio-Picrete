@@ -67,6 +67,28 @@ def is_physical_chemistry(assistant: Assistant) -> bool:
     return "физичес" in normalized and "хим" in normalized
 
 
+SINGLE_VERIFIER_POLICY_VERSION = "single-verifier-v1"
+
+
+def uses_single_verifier(assistant: Assistant | None) -> bool:
+    """Explicit course policy, with compatibility for the existing physical course."""
+    return assistant is not None and (
+        getattr(assistant, "generation_policy", "legacy") == "single_verifier"
+        or is_physical_chemistry(assistant)
+    )
+
+
+SINGLE_VERIFIER_PROMPT = """Вы — независимый верификатор учебной задачи по переданному профилю курса.
+Проверьте самодостаточность условия, химическую модель, баланс вещества и заряда,
+фазы, допущения, единицы, расчёты и ответы на все подпункты. Используйте инструменты
+для вычислений и символьной проверки; справочные значения — только с условиями и источником.
+Исправьте эту же задачу, сохраняя замысел и корректные исходные данные. Эквивалентная
+запись, название темы и допустимое округление не являются причиной отклонения.
+Не заменяйте исходные данные ради красивого ответа. Если безопасный ремонт невозможен,
+верните fail. На pass верните полный самостоятельный эталон в verified_task.
+"""
+
+
 PHYSICAL_TOOLS_VERIFIER_PROMPT = """Вы — единственный независимый verifier задачи по физической химии.
 Проверьте модель, вывод, единицы, вычисления и все подпункты, используя доступные инструменты.
 На pass всегда верните полный verified_task той же задачи, даже если исправлений не требуется.
@@ -117,7 +139,7 @@ def physical_json_schema_enabled(assistant: Assistant | None, provider: Provider
 
 
 def task_verifier_model_id(assistant: Assistant) -> str | None:
-    if is_physical_chemistry(assistant):
+    if uses_single_verifier(assistant):
         return getattr(assistant, "verifier_model_id", None)
     return getattr(assistant, "verifier_model_id", None) or getattr(assistant, "default_grader_model_id", None)
 
@@ -182,6 +204,7 @@ async def run_physical_validation(
     tolerance_pct: float = 2.0,
     system_prompt: str | None = None,
     essential_tools: bool = False,
+    generation_policy: str = "legacy",
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     config = normalize_validation_config(
         {
@@ -193,6 +216,8 @@ async def run_physical_validation(
             "chemistry_check": "off",
         }
     )
+    if generation_policy == "single_verifier" and not (system_prompt or "").strip():
+        system_prompt = SINGLE_VERIFIER_PROMPT
     original = _task_payload(task)
     fingerprint = task_content_fingerprint(task, config)
     prompt_context = {
@@ -277,14 +302,15 @@ async def run_physical_validation(
     if not validated:
         correction = None
     validation: dict[str, Any] = {
-        "policy_version": PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION,
+        "policy_version": (SINGLE_VERIFIER_POLICY_VERSION if generation_policy == "single_verifier"
+                           else PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION),
         "validation_config": config,
         "content_fingerprint": fingerprint,
         "model_policy": model_use.as_dict(),
-        "solver": {"status": "skipped", "reason": "Физхимия: используется один независимый verifier"},
+        "solver": {"status": "skipped", "reason": "Используется один независимый verifier"},
         "verifier": verifier_report,
-        "cross_comparison": {"verdict": "skipped", "reason": "Не используется в физхимии"},
-        "critic": {"status": "skipped", "reason": "Не используется в физхимии"},
+        "cross_comparison": {"verdict": "skipped", "reason": "Не используется в политике одного верификатора"},
+        "critic": {"status": "skipped", "reason": "Не используется в политике одного верификатора"},
         "chemistry": {"validation_version": "not_applicable", "admission_effect": "not_applicable"},
         "reference_solution_check": {"verdict": "match", "basis": "single_independent_verifier"}
         if validated

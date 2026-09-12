@@ -32,7 +32,7 @@ from app.services.contracts import (
 )
 from app.services.grounding import AUTHORITY_LABELS, KB_HEADER, build_grounding_block
 from app.services.physical_chemistry import (
-    is_physical_chemistry,
+    uses_single_verifier,
     run_physical_validation,
     assistant_tools_enabled,
     task_verifier_model_id,
@@ -193,7 +193,7 @@ def build_generation_user_message(
         if reuse_blueprint else GENERATION_JSON_CONTRACT
     )
     evidence_line = (
-        "Верните chemistry_facts: {}: физхимия проверяется отдельным независимым verifier и не использует "
+        "Верните chemistry_facts: {}: задача проверяется отдельным независимым verifier и не использует "
         "общий chemistry-facts классификатор."
         if chemistry_check == "off"
         else (
@@ -237,7 +237,7 @@ async def generate_tasks(
     temperature: float = 0.7,
     chemistry_check: str = "auto",
 ) -> list[dict]:
-    physical = is_physical_chemistry(assistant)
+    physical = uses_single_verifier(assistant)
     if physical:
         chemistry_check = "off"
     prompt = system_prompt or FALLBACK_GENERATOR_PROMPT.format(
@@ -245,6 +245,10 @@ async def generate_tasks(
         contract=PHYSICAL_GENERATION_JSON_EXAMPLE if physical else GENERATION_JSON_CONTRACT,
     )
     prompt = with_assistant_profile(prompt, assistant)
+    if getattr(assistant, "generation_policy", "legacy") == "single_verifier" and example_tasks:
+        import secrets
+        candidates = [e for e in example_tasks if isinstance(e, dict) and e.get("statement")]
+        example_tasks = [secrets.choice(candidates)] if candidates else []
     user_message = build_generation_user_message(
         topic=topic,
         difficulty=difficulty,
@@ -834,7 +838,7 @@ async def _validate_batch(
         # unit tests and migration tooling. A missing assistant is generic,
         # never physical-chemistry, by default.
         assistant = None
-    physical = assistant is not None and is_physical_chemistry(assistant)
+    physical = assistant is not None and uses_single_verifier(assistant)
     verifier_prompt = None
     if physical:
         verifier_prompt = (
@@ -884,11 +888,12 @@ async def _validate_batch(
                     provider=solver_provider,
                     model=solver_model,
                     grounding=grounding_text,
-                    discipline_context=discipline_context,
+                    discipline_context=discipline_context + "\n\nБлюпринт задания:\n" + str(merged.get("instructions", "")),
                     answer_format=contract["answer_format"],
                     tolerance_pct=contract["tolerance_pct"],
                     system_prompt=verifier_prompt.system_prompt if verifier_prompt else None,
                     essential_tools=assistant_tools_enabled(assistant, "verifier"),
+                    generation_policy=getattr(assistant, "generation_policy", "legacy"),
                 )
                 return task, validation, correction
             validation = await run_validation(
@@ -1003,13 +1008,13 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     assistant = (await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))).scalar_one_or_none()
     if assistant is None:
         raise GenerationError("Дисциплина не найдена")
-    physical = is_physical_chemistry(assistant)
+    physical = uses_single_verifier(assistant)
     provider, model = await _resolve_batch_model(db, str(params.get("model_entry_id") or ""))
     physical_verifier = None
     if physical:
         verifier_id = params.get("solver_model_entry_id") or task_verifier_model_id(assistant)
         if not verifier_id:
-            raise GenerationError("Выберите отдельную модель верификации задач по физической химии")
+            raise GenerationError("Выберите отдельную модель верификации задач")
         physical_verifier = await _resolve_batch_model(db, str(verifier_id))
         if not physical_verifier[1].enabled:
             raise GenerationError("Модель верификации отключена")
@@ -1159,7 +1164,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         batch.params = {
             **(batch.params or {}),
             "quality_summary": {
-                "pipeline": "physchem-qwen-generator-deepseek-verifier-v1",
+                "pipeline": "single-generator-single-verifier-v1",
                 "candidate_count": batch.generated_count,
                 "ready_count": batch.validated_count,
                 "discarded_count": 0,
