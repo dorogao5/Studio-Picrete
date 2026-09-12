@@ -10,6 +10,9 @@ services:
     # Private .env passes unprefixed ESSENTIAL_TOOLS_* through validated aliases.
     # Gateway URL after private-v2 deployment: http://172.30.80.2:8080.
     env_file: .env
+    environment:
+      LLM_MAX_OUTPUT_TOKENS_BY_MODEL: ${LLM_MAX_OUTPUT_TOKENS_BY_MODEL:-}
+      LLM_SAMPLING_BY_MODEL: ${LLM_SAMPLING_BY_MODEL:-}
     volumes:
       - ./data:/app/data
     restart: always
