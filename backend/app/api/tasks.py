@@ -37,11 +37,10 @@ from app.services.physical_chemistry import uses_single_verifier, task_verifier_
 from app.services.taskgen import (
     GenerationError,
     _validate_batch,
-    build_generation_grounding,
     build_grounding_meta,
     build_validation_contract,
     generate_tasks,
-    load_reference_sheets,
+    load_blueprint_context,
     merge_template_params,
     resolve_generator_prompt,
     resolve_generator_prompt_version,
@@ -176,12 +175,9 @@ async def generate(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(err))
 
     grounding_query = merged["kb_query"] or merged["topic"]
-    sheets = await load_reference_sheets(db, assistant_id, merged["sheet_ids"])
-    grounding_text = await build_generation_grounding(
-        db, assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query,
-        include_kb=not (getattr(assistant, "generation_policy", "legacy") == "single_verifier"
-                        and bool(merged["example_tasks"])),
-    )
+    anchored = getattr(assistant, "generation_policy", "legacy") == "single_verifier" and bool(merged["example_tasks"])
+    sheets, grounding_text = await load_blueprint_context(db, assistant_id,
+        sheet_ids=merged["sheet_ids"], query=grounding_query, anchored=anchored)
 
     existing = (
         (
@@ -470,11 +466,10 @@ async def revalidate_task(
 
     grounding_query = contract["kb_query"] or task.topic
     sheet_ids = contract["sheet_ids"] or None
-    sheets = await load_reference_sheets(db, assistant_id, sheet_ids)
-    grounding_text = await build_generation_grounding(
-        db, assistant_id, sheet_ids=sheet_ids, query=grounding_query,
-        include_kb=not (getattr(assistant, "generation_policy", "legacy") == "single_verifier" and (task.grounding or {}).get("blueprint")),
-    )
+    anchored = getattr(assistant, "generation_policy", "legacy") == "single_verifier" and (task.grounding or {}).get("blueprint")
+    sheets, grounding_text = await load_blueprint_context(db, assistant_id,
+        sheet_ids=sheet_ids, query=grounding_query, anchored=anchored)
+
     if uses_single_verifier(assistant):
         # Reuse the same verifier and repair persistence path; this transient
         # progress object is never added as a new generation batch.

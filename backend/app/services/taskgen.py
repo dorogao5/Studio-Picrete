@@ -173,7 +173,8 @@ def build_generation_user_message(
             "Поле max_score задачи должно быть равно 10."
         )
     sections.append(f"Инструкции преподавателя:\n{instructions or '(нет)'}")
-    sections.append(f"Примеры задач в нужном стиле:\n{examples or '(нет)'}")
+    if not reuse_blueprint:
+        sections.append(f"Примеры задач в нужном стиле:\n{examples or '(нет)'}")
     existing_rule = (
         "Повторное использование сюжета, физической модели и структуры выбранного blueprint разрешено. "
         "Сохраняйте учебный замысел и меняйте числовые исходные данные в допустимых диапазонах blueprint. "
@@ -215,6 +216,16 @@ def build_generation_user_message(
         "Ответ — строго JSON по схеме (эта схема главнее любых других форматов):\n"
         f"{output_contract}\n{JSON_LATEX_ESCAPING_NOTE}"
     )
+    if reuse_blueprint and examples:
+        sections.append(
+            "ОБЯЗАТЕЛЬНЫЙ ОПОРНЫЙ ВАРИАНТ (это точная структура задания, а не пример стиля):\n"
+            f"{examples}\n"
+            "Верните ту же задачу с другими независимыми исходными данными. Сохраните вещества, "
+            "набор искомых величин и метод решения. Не меняйте местами данные и искомое; "
+            "не заменяйте заданные величины другими и не добавляйте новые искомые. "
+            "Не превращайте один вопрос в несколько. Справочные сведения выше — только справка; "
+            "они не меняют этого задания."
+        )
     return "\n\n".join(sections)
 
 
@@ -1032,6 +1043,16 @@ async def _validate_batch(
             await _set_progress(db, batch, f"{stage_name}: готово {index}/{total}", index, total)
 
 
+async def load_blueprint_context(db, assistant_id, *, sheet_ids, query, anchored):
+    if anchored and not sheet_ids:
+        # Empty dependencies are not a request for the entire course library.
+        return [], ""
+    sheets = await load_reference_sheets(db, assistant_id, sheet_ids)
+    text = await build_generation_grounding(db, assistant_id, sheet_ids=sheet_ids,
+                                           query=query, include_kb=not anchored)
+    return sheets, text
+
+
 async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     params = batch.params or {}
     count = int(params.get("count") or batch.requested_count or 5)
@@ -1068,13 +1089,10 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     system_prompt = await resolve_generator_prompt(db, batch.assistant_id, params.get("prompt_version_id"))
 
     await _set_progress(db, batch, "Сбор справочных материалов", 0, count)
-    sheets = await load_reference_sheets(db, batch.assistant_id, merged["sheet_ids"])
+    anchored = getattr(assistant, "generation_policy", "legacy") == "single_verifier" and bool(merged["example_tasks"])
     grounding_query = merged["kb_query"] or merged["topic"]
-    grounding_text = await build_generation_grounding(
-        db, batch.assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query,
-        include_kb=not (getattr(assistant, "generation_policy", "legacy") == "single_verifier"
-                        and bool(merged["example_tasks"])),
-    )
+    sheets, grounding_text = await load_blueprint_context(db, batch.assistant_id,
+        sheet_ids=merged["sheet_ids"], query=grounding_query, anchored=anchored)
 
     existing = (
         (

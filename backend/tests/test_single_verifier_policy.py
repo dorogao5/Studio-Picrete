@@ -123,9 +123,30 @@ def test_malformed_json_gets_one_same_dialogue_format_continuation(monkeypatch, 
             ModelEntry(model_id="deepseek-flash",family="deepseek",supports_json=True),"JSON","same task",
             essential_tools=True,response_schema={"type":"object","required":["value"]}))
     if recovers:
-        result=run();assert result.raw["finalization_reason"]=="invalid_json_syntax"
+        result=run()
+        assert result.raw["finalization_reason"]=="invalid_json_syntax"
     else:
-        with pytest.raises(client.LlmError,match="JSON schema"):run()
+        with pytest.raises(client.LlmError,match="JSON schema"):
+            run()
     assert len(calls)==2
     assert calls[1]["tool_choice"]=="none"
     assert calls[1]["messages"][-2]["content"]=="Result is four"
+
+
+def test_anchor_context_does_not_load_unrequested_course_library(monkeypatch):
+    calls=[]
+    async def sheets(*args):
+        calls.append(("sheets",args[-1]))
+        return ["explicit"]
+    async def grounding(*args,**kwargs):
+        calls.append(("grounding",kwargs))
+        return "reference"
+    monkeypatch.setattr(taskgen,"load_reference_sheets",sheets)
+    monkeypatch.setattr(taskgen,"build_generation_grounding",grounding)
+    assert asyncio.run(taskgen.load_blueprint_context(None,"a",sheet_ids=None,query="topic",anchored=True))==([],"")
+    assert calls==[]
+    assert asyncio.run(taskgen.load_blueprint_context(None,"a",sheet_ids=["s"],query="topic",anchored=True))==(["explicit"],"reference")
+    assert calls[-1][1]["include_kb"] is False
+    calls.clear()
+    asyncio.run(taskgen.load_blueprint_context(None,"a",sheet_ids=None,query="topic",anchored=False))
+    assert calls[-1][1]["include_kb"] is True

@@ -261,11 +261,8 @@ def test_revalidation_atomically_clears_previous_approval(monkeypatch) -> None:
     async def fake_model(*_args):
         return SimpleNamespace(name="DeepSeek"), SimpleNamespace(model_id="deepseek-v4-pro")
 
-    async def fake_sheets(*_args, **_kwargs):
-        return []
-
-    async def fake_grounding(*_args, **_kwargs):
-        return ""
+    async def fake_context(*_args, **_kwargs):
+        return [], ""
 
     async def fake_validation(**_kwargs):
         result = current_validation(task, verdict="needs_review")
@@ -276,8 +273,7 @@ def test_revalidation_atomically_clears_previous_approval(monkeypatch) -> None:
     monkeypatch.setattr(tasks_api, "get_assistant_or_404", fake_assistant)
     monkeypatch.setattr(tasks_api, "_get_task_or_404", fake_task)
     monkeypatch.setattr(tasks_api, "resolve_model", fake_model)
-    monkeypatch.setattr(tasks_api, "load_reference_sheets", fake_sheets)
-    monkeypatch.setattr(tasks_api, "build_generation_grounding", fake_grounding)
+    monkeypatch.setattr(tasks_api, "load_blueprint_context", fake_context)
     monkeypatch.setattr(tasks_api, "run_validation", fake_validation)
     db = FakeDb()
 

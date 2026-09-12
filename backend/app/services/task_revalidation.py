@@ -11,9 +11,8 @@ from app.services.task_evidence import evidence_matches_task
 from app.services.taskgen import (
     _validate_batch,
     _resolve_batch_model,
-    build_generation_grounding,
     build_grounding_meta,
-    load_reference_sheets,
+    load_blueprint_context,
     merge_template_params,
     sheets_to_text,
     validation_contract_for_task,
@@ -106,16 +105,10 @@ async def _revalidate_task(
     solver_provider, solver_model = await _resolve_batch_model(db, solver_model_entry_id)
     grounding_query = contract["kb_query"] or task.topic
     sheet_ids = contract["sheet_ids"] or None
-    sheets = await load_reference_sheets(db, batch.assistant_id, sheet_ids)
     assistant = await db.get(Assistant, batch.assistant_id)
-    grounding_text = await build_generation_grounding(
-        db,
-        batch.assistant_id,
-        sheet_ids=sheet_ids,
-        query=grounding_query,
-        include_kb=not (assistant and getattr(assistant, "generation_policy", "legacy") == "single_verifier"
-                        and (task.grounding or {}).get("blueprint")),
-    )
+    anchored = assistant and getattr(assistant, "generation_policy", "legacy") == "single_verifier" and (task.grounding or {}).get("blueprint")
+    sheets, grounding_text = await load_blueprint_context(db, batch.assistant_id,
+        sheet_ids=sheet_ids, query=grounding_query, anchored=anchored)
     grounding_meta = await build_grounding_meta(
         db,
         sheets,
