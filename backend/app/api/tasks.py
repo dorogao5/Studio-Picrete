@@ -168,6 +168,8 @@ async def generate(
     merged = merge_template_params(
         template, topic=body.topic, difficulty=body.difficulty, instructions=body.instructions
     )
+    if uses_single_verifier(assistant):
+        merged["chemistry_check"] = "off"
     try:
         system_prompt = await resolve_generator_prompt(db, assistant_id, body.prompt_version_id)
     except GenerationError as err:

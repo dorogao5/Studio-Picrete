@@ -713,6 +713,8 @@ async def _generate_batch_items(
     on_items: Callable[[list[dict]], Awaitable[None]] | None = None,
     on_error_audit: Callable[[dict], Awaitable[None]] | None = None,
 ) -> tuple[list[dict], list[str]]:
+    if uses_single_verifier(assistant):
+        merged = {**merged, "chemistry_check": "off"}
     items: list[dict] = []
     seen_statements = list(existing_statements)
     errors: list[str] = []
@@ -1033,6 +1035,8 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             raise GenerationError("Шаблон не найден")
 
     merged = merge_batch_template_params(template, params)
+    if physical:
+        merged["chemistry_check"] = "off"
     system_prompt = await resolve_generator_prompt(db, batch.assistant_id, params.get("prompt_version_id"))
 
     await _set_progress(db, batch, "Сбор справочных материалов", 0, count)
