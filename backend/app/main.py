@@ -134,7 +134,7 @@ async def ensure_sqlite_columns(conn) -> None:
             await conn.exec_driver_sql(
                 """UPDATE task_templates SET chemistry_check = 'auto'
                 WHERE chemistry_check IS NULL OR chemistry_check NOT IN (
-                    'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
+                    'off', 'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
                     'analytical.titration', 'analytical.faraday', 'analytical.calibration',
                     'analytical.gravimetry', 'analytical.conductometry',
                     'colloid.bet', 'colloid.smoluchowski', 'colloid.dlvo'
@@ -154,7 +154,7 @@ async def ensure_postgres_columns(conn) -> None:
     await conn.exec_driver_sql(
         """UPDATE task_templates SET chemistry_check = 'auto'
         WHERE chemistry_check IS NULL OR chemistry_check NOT IN (
-            'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
+            'off', 'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
             'analytical.titration', 'analytical.faraday', 'analytical.calibration',
             'analytical.gravimetry', 'analytical.conductometry',
             'colloid.bet', 'colloid.smoluchowski', 'colloid.dlvo'
@@ -172,7 +172,7 @@ async def ensure_postgres_columns(conn) -> None:
             SELECT 1 FROM pg_constraint
             WHERE conname = 'ck_task_templates_chemistry_check'
               AND conrelid = 'task_templates'::regclass
-              AND pg_get_constraintdef(oid) NOT LIKE '%analytical.gravimetry%'
+              AND pg_get_constraintdef(oid) NOT LIKE '%off%'
         ) THEN
             ALTER TABLE task_templates DROP CONSTRAINT ck_task_templates_chemistry_check;
         END IF;
@@ -183,7 +183,7 @@ async def ensure_postgres_columns(conn) -> None:
         ) THEN
             ALTER TABLE task_templates ADD CONSTRAINT ck_task_templates_chemistry_check CHECK (
                 chemistry_check IN (
-                    'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
+                    'off', 'auto', 'chemistry.stoichiometry', 'chemistry.dilution',
                     'analytical.titration', 'analytical.faraday', 'analytical.calibration',
                     'analytical.gravimetry', 'analytical.conductometry',
                     'colloid.bet', 'colloid.smoluchowski', 'colloid.dlvo'
