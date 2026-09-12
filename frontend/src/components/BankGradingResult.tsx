@@ -22,7 +22,7 @@ export default function BankGradingResult({ result }: {result: BankPreview}) {
     finally { setSaving(false); }
   };
   return <Card className="p-5 space-y-3" aria-label="Результат проверки">
-    <h2 className="font-semibold">Результат проверки · Свиридов № {result.task_number}</h2>
+    <h2 className="font-semibold">Результат проверки · задача курса № {result.task_number}</h2>
           <div className="flex flex-wrap gap-2"><Badge>{result.draft ? "Черновик" : "Опубликовано"}</Badge><Badge>{result.output.total_score} / {result.output.max_score}</Badge></div>
           {result.output.needs_teacher_review && <p className="text-sm text-warning">Требуется проверка преподавателя</p>}
           <MathText>{result.output.feedback}</MathText>

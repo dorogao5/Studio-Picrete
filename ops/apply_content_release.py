@@ -26,7 +26,7 @@ import re
 import ssl
 import sys
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -38,8 +38,10 @@ DEFAULT_ASSISTANT_IDS = {
     "general_inorganic_lab": "9fbc228df47e4d679c7a49b57d65af59",
     "colloid_chemistry": "bb3be1b8a8aa46769fa63c270d4ee6a3",
     "analytical_chemistry": "9243941e323d457aa57ec00cd0192a92",
+    "physical_chemistry": "dc0d7a2fa01749b98f7af520739c3364",
 }
-DEFAULT_DEEPSEEK_MODEL_ENTRY_ID = "4afae41c3ef7438fae8799fe0ab37763"
+DEFAULT_DEEPSEEK_MODEL_ENTRY_ID = "88c6b31119d04d14a3e62fbfb12b0588"
+DEFAULT_QWEN_MODEL_ENTRY_ID = "179d8425e71e47ffb6ae0da47f7a48c6"
 TOKEN_ENV = "PICRETE_STUDIO_TOKEN"
 PIPELINE_NAME = "Основной сценарий"
 PIPELINE_DESCRIPTION = "Распознавание → две независимые проверки → автоматическая сверка"
@@ -453,7 +455,15 @@ def build_template_payloads(manifest: dict[str, Any], sheet_ids: dict[str, str])
     return payloads
 
 
-def _desired_pipeline(model_entry_id: str) -> dict[str, Any]:
+def _desired_pipeline(model_entry_id: str, *, single_verifier: bool = False) -> dict[str, Any]:
+    if single_verifier:
+        return {
+            "name": PIPELINE_NAME,
+            "description": "Генерация Qwen → одна независимая проверка DeepSeek → исправление на месте",
+            "steps": [
+                {"type": "grade", "config": {"model_entry_id": model_entry_id, "role": "verifier"}},
+            ],
+        }
     return {
         "name": PIPELINE_NAME,
         "description": PIPELINE_DESCRIPTION,
@@ -527,7 +537,7 @@ def _read_prompts(package_dir: Path) -> dict[str, str]:
     return prompts
 
 
-def _verify_model(providers: object, model_entry_id: str) -> None:
+def _verify_model(providers: object, model_entry_id: str, *, family: str = "deepseek") -> None:
     if not isinstance(providers, list):
         raise ReleaseError("Studio /providers response is invalid")
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -538,28 +548,30 @@ def _verify_model(providers: object, model_entry_id: str) -> None:
             if isinstance(model, dict) and model.get("id") == model_entry_id:
                 matches.append((provider, model))
     if len(matches) != 1:
-        raise ReleaseError(f"DeepSeek model entry {model_entry_id} must resolve exactly once in production providers")
+        raise ReleaseError(f"{family} model entry {model_entry_id} must resolve exactly once in production providers")
     provider, model = matches[0]
     if provider.get("purpose") != "production" or provider.get("enabled") is not True:
-        raise ReleaseError(f"DeepSeek model entry {model_entry_id} is not on an enabled production provider")
-    if model.get("enabled") is not True or "deepseek" not in str(model.get("family", "")).casefold():
-        raise ReleaseError(f"Model entry {model_entry_id} is not an enabled DeepSeek-family model")
+        raise ReleaseError(f"{family} model entry {model_entry_id} is not on an enabled production provider")
+    if model.get("enabled") is not True or family.casefold() not in str(model.get("family", "")).casefold():
+        raise ReleaseError(f"Model entry {model_entry_id} is not an enabled {family}-family model")
 
 
-def _select_prompt(prompts: list[dict[str, Any]], role: str, content: str) -> dict[str, Any] | None:
+def _select_prompt(
+    prompts: list[dict[str, Any]], role: str, content: str, *, target_family: str = "deepseek"
+) -> dict[str, Any] | None:
     exact = [
         prompt
         for prompt in prompts
         if prompt.get("role") == role
         and prompt.get("system_prompt") == content
-        and str(prompt.get("target_family", "")).casefold() == "deepseek"
+        and str(prompt.get("target_family", "")).casefold() == target_family.casefold()
     ]
     if not exact:
         same_content = [
             prompt for prompt in prompts if prompt.get("role") == role and prompt.get("system_prompt") == content
         ]
         if same_content:
-            raise ReleaseError(f"Exact {role} prompt already exists but is not marked for the DeepSeek family")
+            raise ReleaseError(f"Exact {role} prompt already exists but is not marked for the {target_family} family")
         return None
     active = [prompt for prompt in exact if prompt.get("status") == "active"]
     candidates = active or exact
@@ -581,6 +593,7 @@ class PackagePlan:
     resolved_sheet_count: int
     tasks_with_evidence_invalidated: int
     approved_tasks_invalidated: int
+    prompt_target_families: dict[str, str] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         prompt_install = sum(existing_id is None for _, _, existing_id, _ in self.prompts)
@@ -603,7 +616,11 @@ class PackagePlan:
 
 
 def preflight_package(
-    api: Api, package_dir: Path, assistant_id: str, model_entry_id: str
+    api: Api,
+    package_dir: Path,
+    assistant_id: str,
+    model_entry_id: str,
+    generator_model_entry_id: str | None = None,
 ) -> PackagePlan:
     package_name = package_dir.name
     manifest = _read_json(package_dir / "import-manifest.json")
@@ -678,14 +695,26 @@ def preflight_package(
         elif _changed(current, desired):
             templates_update.append((str(current["id"]), desired))
 
+    selection = manifest.get("model_selection") if isinstance(manifest.get("model_selection"), dict) else {}
+    generator_model_entry_id = generator_model_entry_id or str(selection.get("generator_model_entry_id") or model_entry_id)
+    single_verifier = package_name == "physical_chemistry" or selection.get("pipeline_mode") == "single_verifier"
+    prompt_target_families = {
+        role: ("qwen" if role in {"generator", "tutor"} and single_verifier else "deepseek")
+        for role in PROMPT_ROLES
+    }
     prompt_plans: list[tuple[str, str, str | None, bool]] = []
     for role in PROMPT_ROLES:
-        selected = _select_prompt(existing_prompts, role, prompt_files[role])
+        selected = _select_prompt(
+            existing_prompts,
+            role,
+            prompt_files[role],
+            target_family=prompt_target_families[role],
+        )
         existing_id = None if selected is None else str(selected["id"])
         needs_activation = selected is None or selected.get("status") != "active"
         prompt_plans.append((role, prompt_files[role], existing_id, needs_activation))
 
-    desired_pipeline = _desired_pipeline(model_entry_id)
+    desired_pipeline = _desired_pipeline(model_entry_id, single_verifier=single_verifier)
     current_pipeline = pipelines_by_name.get(PIPELINE_NAME)
     pipeline_create = desired_pipeline if current_pipeline is None else None
     pipeline_update = None
@@ -693,8 +722,8 @@ def preflight_package(
         pipeline_update = (str(current_pipeline["id"]), desired_pipeline)
 
     defaults_patch: dict[str, str] = {}
-    if assistant.get("default_generator_model_id") != model_entry_id:
-        defaults_patch["default_generator_model_id"] = model_entry_id
+    if assistant.get("default_generator_model_id") != generator_model_entry_id:
+        defaults_patch["default_generator_model_id"] = generator_model_entry_id
     if assistant.get("default_grader_model_id") != model_entry_id:
         defaults_patch["default_grader_model_id"] = model_entry_id
 
@@ -723,6 +752,7 @@ def preflight_package(
         approved_tasks_invalidated=sum(
             task.get("approved") is True or task.get("status") == "approved" for task in affected_tasks
         ),
+        prompt_target_families=prompt_target_families,
     )
 
 
@@ -748,7 +778,7 @@ def apply_package(api: Api, plan: PackagePlan) -> None:
                 "role": role,
                 "system_prompt": content,
                 "notes": f"Curated content release {plan.content_version}",
-                "target_family": "deepseek",
+                "target_family": plan.prompt_target_families.get(role, "deepseek"),
             },
         )
         if not isinstance(created, dict) or not isinstance(created.get("id"), str):
@@ -818,16 +848,37 @@ def run(argv: list[str] | None = None, *, api: Api | None = None, content_root: 
     selected = list(dict.fromkeys(args.packages or DEFAULT_ASSISTANT_IDS))
     root = content_root or Path(__file__).resolve().parent / "content"
 
-    _verify_model(api.get("providers"), args.deepseek_model_entry_id)
+    providers = api.get("providers")
+    package_model_ids: dict[str, str] = {}
+    for package_name in selected:
+        manifest = _read_json(root / package_name / "import-manifest.json")
+        selection = manifest.get("model_selection") if isinstance(manifest.get("model_selection"), dict) else {}
+        generator_id = str(selection.get("generator_model_entry_id") or args.deepseek_model_entry_id)
+        package_model_ids[package_name] = generator_id
+        _verify_model(providers, args.deepseek_model_entry_id, family="deepseek")
+        if generator_id != args.deepseek_model_entry_id:
+            _verify_model(providers, generator_id, family="qwen")
     plans = [
-        preflight_package(api, root / package_name, mappings[package_name], args.deepseek_model_entry_id)
+        preflight_package(
+            api,
+            root / package_name,
+            mappings[package_name],
+            args.deepseek_model_entry_id,
+            package_model_ids[package_name],
+        )
         for package_name in selected
     ]
     if args.apply:
         for plan in plans:
             apply_package(api, plan)
         verification = [
-            preflight_package(api, root / package_name, mappings[package_name], args.deepseek_model_entry_id)
+            preflight_package(
+                api,
+                root / package_name,
+                mappings[package_name],
+                args.deepseek_model_entry_id,
+                package_model_ids[package_name],
+            )
             for package_name in selected
         ]
         remaining = {

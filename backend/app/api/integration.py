@@ -12,11 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Assistant, Course, ModelEntry, PromptVersion, ReferenceSheet, User, PlaygroundRun, PlaygroundResult
+from app.models import Assistant, Course, GeneratedTask, ModelEntry, PromptVersion, Provider, ReferenceSheet, User, PlaygroundRun, PlaygroundResult
 from app.schemas import PublishReviewRequest
 from app.security import get_current_user
 from app.services.content_preflight import create_review_token, verify_review_token
 from app.services.model_policy import current_model_use_policy
+from app.services.export import build_bank_export
+from app.services.task_approval import task_is_export_ready
 
 router = APIRouter(tags=["integration"])
 
@@ -71,27 +73,54 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Перед публикацией выберите основную модель проверки ассистента.",
         )
-    model = await db.get(ModelEntry, assistant.default_grader_model_id)
-    if model is None or not model.enabled:
+    grader = await db.get(ModelEntry, assistant.default_grader_model_id)
+    if grader is None or not grader.enabled:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Основная модель проверки не найдена или отключена.",
         )
-    use = current_model_use_policy().classify(model)
-    if not use.decision_capable:
+    grader_use = current_model_use_policy().classify(grader)
+    if not grader_use.decision_capable:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"Модель {model.model_id} нельзя опубликовать для работы со студентами: {use.reason}.",
+            f"Модель {grader.model_id} нельзя опубликовать для проверки решений: {grader_use.reason}.",
         )
-    return {
-        "policy_version": use.policy_version,
-        # Пока Studio не хранит отдельную tutor-модель: student-facing tutor использует
-        # ту же decision-grade модель, что и итоговая проверка.
-        "tutor_model_id": model.model_id,
-        "decision_model_id": model.model_id,
-        "tier": use.tier,
+    generator_id = getattr(assistant, "default_generator_model_id", None) or assistant.default_grader_model_id
+    generator = await db.get(ModelEntry, generator_id)
+    if generator is None or not generator.enabled:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Модель генерации/разбора не найдена или отключена.",
+        )
+    generator_provider_id = getattr(generator, "provider_id", None)
+    grader_provider_id = getattr(grader, "provider_id", None)
+    generator_provider = await db.get(Provider, generator_provider_id) if generator_provider_id else None
+    grader_provider = await db.get(Provider, grader_provider_id) if grader_provider_id else None
+    if generator_provider_id and (generator_provider is None or not generator_provider.enabled):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Провайдер выбранной модели генерации отключён или не найден.",
+        )
+    if grader_provider_id and (grader_provider is None or not grader_provider.enabled):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Провайдер выбранной модели проверки отключён или не найден.",
+        )
+    runtime = {
+        "policy_version": grader_use.policy_version,
+        "tutor_model_id": generator.model_id,
+        "tutor_provider_kind": getattr(generator_provider, "kind", ""),
+        "decision_model_id": grader.model_id,
+        "decision_provider_kind": getattr(grader_provider, "kind", ""),
+        "tier": grader_use.tier,
         "allowed_uses": ["student_tutor", "task_validation", "grading"],
     }
+    # Compatibility for lightweight callers/tests that provide model objects
+    # without provider metadata. Real persisted model entries always carry it.
+    if generator_provider is None or grader_provider is None:
+        runtime.pop("tutor_provider_kind", None)
+        runtime.pop("decision_provider_kind", None)
+    return runtime
 
 
 def _seal_snapshot(snapshot: dict) -> dict:
@@ -141,6 +170,27 @@ async def _build_snapshot(db: AsyncSession, assistant: Assistant) -> dict:
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Перед публикацией активируйте промпт режима «Разбор со студентом».",
         )
+
+    grader_model_id = getattr(assistant, "default_grader_model_id", None)
+    generator_model_id = getattr(assistant, "default_generator_model_id", None) or grader_model_id
+    model_roles = {
+        "tutor": (generator_model_id, "модели разбора"),
+        "generator": (generator_model_id, "модели генерации"),
+        "grader": (grader_model_id, "модели проверки"),
+    }
+    for role, (model_id, label) in model_roles.items():
+        prompt = active_prompts.get(role)
+        if prompt is None or not model_id:
+            continue
+        model = await db.get(ModelEntry, model_id)
+        expected_family = str(getattr(model, "family", "") or "").strip().casefold()
+        prompt_family = str(prompt.get("target_family") or "").strip().casefold()
+        if expected_family and prompt_family and expected_family != prompt_family:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Активный промпт роли «{role}» рассчитан на {prompt_family}, "
+                f"а выбранная {label} — на {expected_family}.",
+            )
 
     if getattr(assistant, "grading_enabled", False) and "grader" not in active_prompts:
         raise HTTPException(422, "Проверка работ включена, но нет активного промпта «Проверка решений». Активируйте его перед публикацией.")
@@ -284,8 +334,8 @@ async def _build_publication_preflight(db: AsyncSession, assistant: Assistant, c
         )
         if not tested:
             blockers.append({"severity": "blocker", "code": "grading_not_reviewed",
-                             "title": "Проверьте текущую версию на задаче из банка",
-                             "message": "Playground → Банк Picrete · Свиридов → Черновик: проверьте ответ и отметьте «Проверка корректна». После изменения настроек повторите прогон.",
+                             "title": "Проверьте текущую версию на задаче из банка курса",
+                             "message": "Playground → Банк курса → Черновик: проверьте ответ и отметьте «Проверка корректна». После изменения настроек повторите прогон.",
                              "field": "grading"})
 
     digest = ""
@@ -411,6 +461,52 @@ class BankPreviewRequest(BaseModel):
     task_id: str = Field(min_length=1, max_length=128)
     student_text: str = Field(min_length=1, max_length=30000)
     mode: str = "draft"
+
+
+class TaskBankImportRequest(BaseModel):
+    source_code: str = Field(default="studio_fizicheskaya_himiya", min_length=1, max_length=128)
+    source_title: str = Field(default="Физическая химия", min_length=1, max_length=256)
+    version: str = Field(default="1.0", min_length=1, max_length=64)
+
+
+@router.post("/assistants/{assistant_id}/courses/{course_id}/task-bank/import")
+async def import_course_task_bank(
+    assistant_id: str,
+    course_id: str,
+    body: TaskBankImportRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Push the already reviewed Studio task bank into the bound Picrete course."""
+
+    _, course = await _course_or_404(db, assistant_id, course_id)
+    tasks = list(
+        (
+            await db.execute(
+                select(GeneratedTask)
+                .where(
+                    GeneratedTask.assistant_id == assistant_id,
+                    GeneratedTask.status.in_(("validated", "approved")),
+                )
+                .order_by(GeneratedTask.created_at)
+            )
+        ).scalars()
+    )
+    not_ready = [task.id for task in tasks if not task_is_export_ready(task)]
+    if not tasks:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нет готовых задач для импорта в Picrete")
+    if not_ready:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Импорт остановлен: {len(not_ready)} задач не прошли ручную или автоматическую проверку",
+        )
+    payload = build_bank_export(
+        tasks,
+        source_code=body.source_code.strip(),
+        source_title=body.source_title.strip(),
+        version=body.version.strip(),
+    )
+    return await _picrete_request("POST", course, "task-bank/import", json=payload)
 
 
 async def _picrete_request(method: str, course: Course, path: str, **kwargs) -> dict:

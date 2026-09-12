@@ -36,4 +36,5 @@ def test_legacy_variants_export_falls_back_to_current_template_tolerance() -> No
 def test_bank_export_preserves_relative_image_paths() -> None:
     result = build_bank_export([_task({})], source_code="studio", source_title="Химия", version="1")
 
+    assert result["paragraphs"][0]["tasks"][0]["solution"] == "По исходным данным c = 100 мг/л."
     assert result["paragraphs"][0]["tasks"][0]["images"] == ["images/calibration.png"]

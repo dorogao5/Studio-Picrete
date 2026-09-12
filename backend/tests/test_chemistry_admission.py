@@ -115,6 +115,22 @@ def test_auto_contract_cannot_promote_an_irrelevant_fact_block_to_core_evidence(
     assert evidence["admission_effect"] == "limited"
 
 
+def test_auto_chemistry_findings_are_advisory_and_do_not_stop_model_review() -> None:
+    evidence = chemistry_admission_evidence(
+        discipline="Физическая химия",
+        statement="Для кинетической схемы найдите константу скорости.",
+        reference_solution="Используем кинетическое уравнение и получаем k = 2.0 с^-1.",
+        answer="k = 2.0 с^-1",
+        topic="Формальная кинетика",
+        facts={},
+        facts_source="not_available",
+        chemistry_check="auto",
+    )
+
+    assert evidence["admission_effect"] == "limited"
+    assert evidence["blocking_codes"] == []
+
+
 def test_deterministic_failure_stops_expensive_semantic_agents(monkeypatch) -> None:
     solver_calls = 0
 

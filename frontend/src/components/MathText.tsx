@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
 import { MathViewport } from "./MathViewport";
-import remarkReadableMath from "../lib/remarkReadableMath";
+import remarkReadableMath, { normalizeEscapedLineBreaks } from "../lib/remarkReadableMath";
 
 import { clsx as cn } from "clsx";
 
@@ -88,7 +88,7 @@ function MathText({ children, className, inline = false }: RichTextProps) {
         rehypePlugins={[rehypeRaw, rehypeSanitize, [rehypeKatex, { strict: "ignore" }]]}
         components={inline ? inlineComponents : blockComponents}
       >
-        {children
+        {normalizeEscapedLineBreaks(children)
           .replace(/\\\(([\s\S]*?)\\\)/g, (_, math: string) => `$${math}$`)
           .replace(/\\\[([\s\S]*?)\\\]/g, (_, math: string) => `\n\n$$\n${math}\n$$\n\n`)}
       </ReactMarkdown>

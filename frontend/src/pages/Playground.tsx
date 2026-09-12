@@ -428,7 +428,7 @@ function TaskPicker({
           placeholder={loadingTasks ? "Загружаем задачи…" : "Выберите сгенерированную задачу"} />
       </Field>}
       <ErrorNote message={tasksError} />
-      {manualOnly === false && !taskId && <p className="text-sm text-muted-foreground">{loadingTasks ? "Загружаем задачи…" : tasks.length ? "Выберите задачу из списка выше." : "Сгенерированных задач пока нет. Выберите Свиридова или введите своё условие."}</p>}
+      {manualOnly === false && !taskId && <p className="text-sm text-muted-foreground">{loadingTasks ? "Загружаем задачи…" : tasks.length ? "Выберите задачу из списка выше." : "Сгенерированных задач пока нет. Выберите задачу из банка курса или введите своё условие."}</p>}
       {!taskId && manualOnly !== false && (
         <>
           <Field label="Условие задачи">
@@ -944,7 +944,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
       <fieldset disabled={running} className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-2">
         <Card className="min-w-0 p-5 space-y-4">
           <h2 className="font-semibold">1. Выберите задачу</h2>
-          <Tabs tabs={[{key:"sviridov",label:"Свиридов"},{key:"studio",label:"Из генератора"},{key:"manual",label:"Своё условие"}]} active={source} onChange={next => {setSource(next); setTaskId(""); setSelectedTask(null); setRun(null); setBankResult(null); setError("");}} />
+          <Tabs tabs={[{key:"sviridov",label:"Банк курса"},{key:"studio",label:"Из генератора"},{key:"manual",label:"Своё условие"}]} active={source} onChange={next => {setSource(next); setTaskId(""); setSelectedTask(null); setRun(null); setBankResult(null); setError("");}} />
           {source === "sviridov" ? <CourseBankPicker assistantId={assistant.id} value={bankTask} onChange={task => {setBankTask(task); setBankResult(null);}} disabled={running} /> : <>
           <Field label="Сценарий проверки">
             <Select value={pipelineId} onChange={(e) => setPipelineId(e.target.value)}>
@@ -1264,7 +1264,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
         <Card className="min-w-0 p-5 space-y-4">
           <h2 className="font-semibold">Задача для разбора</h2>
           <fieldset disabled={sending || messages.length > 0} className="min-w-0 space-y-3">
-          <Field label="Источник задачи"><Select value={source} onChange={e => {setSource(e.target.value); setTaskId("");}}><option value="sviridov">Свиридов</option><option value="studio">Сгенерированные задачи</option><option value="manual">Своё условие</option></Select></Field>
+          <Field label="Источник задачи"><Select value={source} onChange={e => {setSource(e.target.value); setTaskId("");}}><option value="sviridov">Банк курса</option><option value="studio">Сгенерированные задачи</option><option value="manual">Своё условие</option></Select></Field>
           {source === "sviridov" && <CourseBankPicker assistantId={assistant.id} value={bankTask} onChange={setBankTask} disabled={sending || messages.length > 0} />}
           {source === "studio" && <>
           <Field label="Задача из банка">
@@ -1325,7 +1325,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
             {messages.length === 0 && !sending && (
               <EmptyState
                 title="Диалог не начат"
-                hint={source === "sviridov" && !bankTask ? "Сначала выберите задачу Свиридова слева, затем задайте вопрос от лица студента." : "Задайте вопрос или предложите первый шаг решения. Ассистент поможет разобраться постепенно."}
+                hint={source === "sviridov" && !bankTask ? "Сначала выберите задачу из банка курса слева, затем задайте вопрос от лица студента." : "Задайте вопрос или предложите первый шаг решения. Ассистент поможет разобраться постепенно."}
               />
             )}
             {messages.map((m, i) => (

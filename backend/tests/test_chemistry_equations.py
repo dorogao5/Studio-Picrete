@@ -127,9 +127,16 @@ def test_latex_bond_energy_solution_checks_reaction_not_calculation_arrows():
 
 def test_numeric_mole_count_transition_is_not_a_chemical_reaction():
     assert reaction_candidates(r"Число моль газа уменьшается ($4 \to 2$).") == []
+    assert reaction_candidates("Концентрация изменяется от 0,10 → 0,20 M.") == []
     candidates = reaction_candidates(r"Число моль ($4 \to 2$); N2 + 3H2 \to 2NH3")
     assert len(candidates) == 1
     assert check_reaction_balance(candidates[0]).balanced
+
+
+def test_formal_kinetics_symbolic_scheme_is_not_an_atom_balance_equation():
+    text = "Для формальной кинетики используем схему 2 A + B → C."
+
+    assert reaction_candidates(text) == []
 
 
 def test_latex_display_delimiters_do_not_drop_reaction_reagents():

@@ -12,6 +12,8 @@ PROVIDER_PRESETS: list[dict] = [
         "models": [
             {"model_id": "gpt://FOLDER_ID/yandexgpt/rc", "display_name": "YandexGPT 5.1 Pro", "family": "yandexgpt", "supports_vision": False, "supports_json": False},
             {"model_id": "gpt://FOLDER_ID/yandexgpt/latest", "display_name": "YandexGPT 5 Pro", "family": "yandexgpt", "supports_vision": False, "supports_json": False},
+            {"model_id": "gpt://FOLDER_ID/qwen3.6-35b-a3b", "display_name": "Qwen3.6-35B", "family": "qwen", "supports_vision": False, "supports_json": True},
+            {"model_id": "gpt://FOLDER_ID/deepseek-v4-flash", "display_name": "DeepSeek V4 Flash High", "family": "deepseek", "supports_vision": False, "supports_json": True},
             {"model_id": "gpt://FOLDER_ID/aliceai-llm", "display_name": "Alice AI LLM", "family": "alice", "supports_vision": False, "supports_json": False},
         ],
     },

@@ -25,8 +25,15 @@ def build_bank_export(
                     {
                         "number": f"{index}.{position}",
                         "text": task.statement,
+                        "solution": task.reference_solution,
                         "images": normalize_task_images(getattr(task, "images", [])),
                         "answer": task.answer,
+                        # Older generated-task fixtures and legacy rows do not
+                        # have the field. Curated physical-chemistry exports
+                        # always set it explicitly to easy.
+                        "difficulty": getattr(task, "difficulty", None) or "hard",
+                        "volume": "large",
+                        "task_type": "calculation",
                     }
                     for position, task in enumerate(groups[topic], start=1)
                 ],

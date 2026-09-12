@@ -8,6 +8,7 @@ from app.services.task_evidence import (
     task_content_fingerprint,
 )
 from app.services.validation import CRITIC_REQUIRED_CHECKS, VALIDATION_POLICY_VERSION
+from app.services.physical_chemistry import PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION
 
 
 def validation_is_current_decision(value: object, task: object | None = None) -> bool:
@@ -18,6 +19,29 @@ def validation_is_current_decision(value: object, task: object | None = None) ->
         return False
     model_id = str(model_policy.get("model_id") or "").strip()
     current_use = current_model_use_policy().classify(model_id)
+    if value.get("policy_version") == PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION:
+        verifier = value.get("verifier")
+        config = value.get("validation_config")
+        return (
+            value.get("verdict") == "validated"
+            and value.get("answer_format") in {"numeric", "choice", "text", "formula"}
+            and bool(str(value.get("content_fingerprint") or "").strip())
+            and model_policy.get("decision_capable") is True
+            and current_use.decision_capable
+            and isinstance(verifier, dict)
+            and verifier.get("status") == "match"
+            and isinstance(verifier.get("comparison"), dict)
+            and verifier["comparison"].get("verdict") == "match"
+            and isinstance(value.get("reference_solution_check"), dict)
+            and value["reference_solution_check"].get("verdict") == "match"
+            and isinstance(value.get("sanity"), dict)
+            and value["sanity"].get("issues") == []
+            and isinstance(value.get("reasons"), list)
+            and value.get("reasons") == []
+            and isinstance(config, dict)
+            and config.get("chemistry_check") == "off"
+            and (task is None or evidence_matches_task(value, task))
+        )
     solver = value.get("solver")
     verifier = value.get("verifier")
     cross_comparison = value.get("cross_comparison")

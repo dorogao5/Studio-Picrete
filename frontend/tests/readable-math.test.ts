@@ -4,12 +4,22 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkMath from 'remark-math';
 import katex from 'katex';
-import readableMath, { splitImportedMath } from '../src/lib/remarkReadableMath.ts';
+import readableMath, { normalizeEscapedLineBreaks, splitImportedMath } from '../src/lib/remarkReadableMath.ts';
 
 const parse = (source) => {
   const processor = unified().use(remarkParse).use(remarkMath).use(readableMath);
   return processor.runSync(processor.parse(source));
 };
+
+test('escaped prose line breaks become real markdown line breaks', () => {
+  const source = "Первый абзац\\n\\n$K_M = 2$\\nНайдём V_max:";
+  assert.equal(normalizeEscapedLineBreaks(source), "Первый абзац\n\n$K_M = 2$\nНайдём V_max:");
+});
+
+test('escaped line breaks inside math and code stay intact', () => {
+  const source = String.raw`$\\neq$ and \`\\n\``;
+  assert.equal(normalizeEscapedLineBreaks(source), source);
+});
 
 test('numbered reactions in flat text macros become real list items', () => {
   const root = parse(String.raw`Выберите: $\text{1) N}_{2}+\text{O}_{2}=\text{2NO; 2) H}_{2}+\text{Cl}_{2}=\text{2HCl.}$`);

@@ -5,7 +5,9 @@ interface ModelMetadata {
 }
 
 export function isKnownAdvisoryModel(model: ModelMetadata): boolean {
-  if (model.modelId.trim().toLowerCase() === "deepseek-flash") return false;
+  const modelId = model.modelId.trim().toLowerCase();
+  if (modelId === "deepseek-flash" || /\/deepseek-v4-flash(?:$|[?#])/i.test(modelId)) return false;
+  if (modelId === "qwen3.6-35b-a3b" || /\/qwen3\.6-35b-a3b(?:$|[?#])/i.test(modelId)) return true;
   const identity = [model.modelId, model.displayName].join(" ").replace(/[-_/]+/g, " ");
   if (/(?:^|\s)(?:flash|advisory|preview)(?:\s|$)/i.test(identity)) return true;
 

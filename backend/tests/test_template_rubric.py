@@ -208,7 +208,7 @@ def test_generated_task_rejects_malformed_data_provenance() -> None:
     assert task is None
 
 
-def test_generated_task_requires_explicit_structured_chemistry_facts() -> None:
+def test_auto_generated_task_does_not_require_structured_chemistry_facts() -> None:
     task = task_from_item(
         {"statement": "Условие", "rubric": [], "max_score": 10, "data_used": []},
         assistant_id="assistant-1",
@@ -220,7 +220,8 @@ def test_generated_task_requires_explicit_structured_chemistry_facts() -> None:
         grounding_meta={},
     )
 
-    assert task is None
+    assert task is not None
+    assert task.grounding["chemistry_facts"] == {}
 
 
 def test_required_subject_check_requires_its_fact_block() -> None:

@@ -54,14 +54,14 @@ export default function CourseBankPicker({ assistantId, value, onChange, disable
   }, [base, courseId, query, skip, browsing, retry]);
   return <div className="space-y-3">
     {error && <><ErrorNote message={error} /><Button variant="secondary" onClick={() => setRetry(n => n + 1)}>Повторить загрузку</Button></>}
-    {courses === null ? <p className="text-sm text-muted-foreground">Загружаем курсы…</p> : !courses.length && !error ? <p className="text-sm text-muted-foreground">Чтобы выбирать задачи Свиридова, <Link className="text-accent underline" to={`/disciplines/${assistantId}?tab=courses`}>привяжите курс Picrete</Link>.</p> : null}
+    {courses === null ? <p className="text-sm text-muted-foreground">Загружаем курсы…</p> : !courses.length && !error ? <p className="text-sm text-muted-foreground">Чтобы выбирать задачи из банка курса, <Link className="text-accent underline" to={`/disciplines/${assistantId}?tab=courses`}>привяжите курс Picrete</Link>.</p> : null}
     {browsing && courseId && <>
       {courses && courses.length > 1 && <Field label="Курс"><Select value={courseId} disabled={disabled} onChange={e => { setCourseId(e.target.value); setSkip(0); onChange(null); }}>{courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>}
       <form className="flex gap-2" onSubmit={e => { e.preventDefault(); setQuery(search.trim()); setSkip(0); }}>
-        <Input aria-label="Номер или текст задачи Свиридова" placeholder="Номер, например 7.61, или текст задачи" value={search} disabled={disabled} onChange={e => setSearch(e.target.value)} />
+        <Input aria-label="Номер или текст задачи курса" placeholder="Номер или часть условия задачи" value={search} disabled={disabled} onChange={e => setSearch(e.target.value)} />
         <Button type="submit" variant="secondary" disabled={disabled || loading} aria-label="Найти задачу"><Search className="h-4 w-4" /></Button>
       </form>
-      <p className="text-xs text-muted-foreground">Задачи Свиридова с полным эталонным решением</p>
+      <p className="text-xs text-muted-foreground">Задачи текущего курса с полным эталонным решением</p>
       <div ref={listRef} className="max-h-72 overflow-y-auto space-y-2" aria-busy={loading}>
         {loading ? <p role="status" className="py-6 text-center text-sm text-muted-foreground">Загружаем задачи…</p> : !items.length && !error ? <p className="py-6 text-center text-sm text-muted-foreground">Ничего не найдено. Попробуйте другой номер или часть условия.</p> : items.map(task => <button key={task.id} type="button" disabled={disabled} aria-pressed={value?.task.id === task.id} onClick={() => { onChange({courseId, task}); setBrowsing(false); }} className="w-full rounded-lg border border-border p-3 text-left transition-colors hover:border-accent hover:bg-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
           <span className="flex justify-between gap-2"><strong className="text-sm">№ {task.number}</strong><span className="text-xs text-accent">Выбрать</span></span>
@@ -77,7 +77,7 @@ export default function CourseBankPicker({ assistantId, value, onChange, disable
       {value && <Button variant="ghost" onClick={() => setBrowsing(false)}>Вернуться к выбранной задаче</Button>}
     </>}
     {value && !browsing && <section className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2"><Badge tone="success"><Check className="h-3 w-3" /> Свиридов · № {value.task.number}</Badge><Button variant="ghost" disabled={disabled} onClick={() => setBrowsing(true)}>Сменить задачу</Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><Badge tone="success"><Check className="h-3 w-3" /> Банк курса · № {value.task.number}</Badge><Button variant="ghost" disabled={disabled} onClick={() => setBrowsing(true)}>Сменить задачу</Button></div>
       <MathText className="text-sm">{value.task.text}</MathText>
       {value.task.images?.map(id => <BankImage key={id} url={`/assistants/${assistantId}/courses/${value.courseId}/task-bank/${value.task.id}/images/${id}`} />)}
       {!!value.task.images?.length && <p className="text-xs text-warning">Рисунок виден здесь, но текстовая модель его не получает. Если он нужен для решения, проверьте ответ вручную.</p>}

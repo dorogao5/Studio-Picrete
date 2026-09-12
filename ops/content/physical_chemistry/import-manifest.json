@@ -1,0 +1,86 @@
+{
+  "schema_version": "picrete-content-manifest-v1",
+  "content_version": "PHYS-CHEM-KINETICS-2026-09-R1",
+  "assistant_scope": "physical-chemistry-kinetics",
+  "course_scope": "Физическая химия",
+  "binding_status": "bound_to_course_scope",
+  "release_artifacts": {
+    "release_readme": "README.md"
+  },
+  "source": {
+    "title": "Производный канонический слой физической химии · кинетика",
+    "file": "/Users/doroga/Documents/projects/физха",
+    "authority": "course_lecture",
+    "visibility": "student",
+    "quality_notes": [
+      "Оригинальные презентации и PDF в Studio не загружаются.",
+      "Нотация сверена с лекционным курсом и формулами Ерёмина; опечатки исходных примеров не копируются.",
+      "Исходные задачи из каталога физха классифицированы как базовые.",
+      "Для A -> B + C с k в с^-1 исключена ошибочная интерпретация частоты бимолекулярных столкновений."
+    ]
+  },
+  "source_and_blueprint_certification": {
+    "certification_status": "certified",
+    "checked_on": "2026-09-12",
+    "per_task_teacher_approval": false,
+    "certification_scope": "derived_grounding + canonical_notation + five_topic_templates",
+    "task_admission": {
+      "mode": "physical_chemistry_single_independent_verifier",
+      "required": [
+        "Qwen generator returns a self-contained task with reference solution",
+        "one independent DeepSeek V4 verifier passes or repairs the same task",
+        "all corrections are applied in place and no replacement generation is triggered"
+      ],
+      "exception_states": ["fail", "needs_review", "stale evidence"]
+    }
+  },
+  "document_upload": {
+    "file": "grounding.md",
+    "title": "Физическая химия · каноническая кинетика · R1",
+    "doc_type": "methodical",
+    "authority": "course_lecture",
+    "visibility": "student",
+    "course_scope": "Физическая химия",
+    "effective_version": "PHYS-CHEM-KINETICS-2026-09-R1",
+    "content_sha256": "c17ad4b5b8769acc6a03a39018e83dde4311b74c20d1ac08364d5e236e65f5d4",
+    "analyze": false
+  },
+  "assistant_profile_patch": {
+    "topics_to_add": [
+      "Формальная кинетика и метод начальных скоростей",
+      "Уравнение Аррениуса и энергия активации",
+      "Последовательные реакции первого порядка",
+      "Теория столкновений и стерический фактор",
+      "Кинетика Михаэлиса–Ментен"
+    ],
+    "nuances_to_add": [
+      "Типовые задачи из физха — базовый уровень (easy/Базовый).",
+      "Каноническая нотация: v, v_0, [A], [B], [S], [E]_0, K_M, r_max, E_a, A.",
+      "Каждый разбор показывает вывод, подстановку, размерности, расчёт и физическую интерпретацию.",
+      "Для мономолекулярного A -> B + C с k в с^-1 не использовать модель бимолекулярных столкновений.",
+      "Проверка физхимических задач — один независимый DeepSeek verifier; исправление выполняется на месте."
+    ]
+  },
+  "reference_sheet_proposals": [
+    {"slug":"phys-00-conventions","title":"PHYS-00 · Канонические обозначения и уровни","kind":"conventions","description":"Нотация курса и шкала сложности.","content_anchor":"PHYS-00","visibility":"student","is_canonical":true,"ord":500,"release_binding":{"normalization":"picrete-markdown-nfc-lf-v1","content_file":"sheets/phys-00-conventions.md","content_sha256":"109a9078b0419982e91fd6c7699b55c2c1fa80721c3f08856b9fdf428f6aac95","source_document_title":"Физическая химия · каноническая кинетика · R1","source_effective_version":"PHYS-CHEM-KINETICS-2026-09-R1","source_course_scope":"Физическая химия"}},
+    {"slug":"phys-01-formal","title":"PHYS-01 · Формальная кинетика","kind":"formulas","description":"Начальные скорости и интегральный закон второго порядка.","content_anchor":"PHYS-01","visibility":"student","is_canonical":true,"ord":501,"release_binding":{"normalization":"picrete-markdown-nfc-lf-v1","content_file":"sheets/phys-01-formal.md","content_sha256":"5f60a92175609777909caf9c5713f32cad9bbbc1cfd9b506d5f4aa9ca6b3f1a3","source_document_title":"Физическая химия · каноническая кинетика · R1","source_effective_version":"PHYS-CHEM-KINETICS-2026-09-R1","source_course_scope":"Физическая химия"}},
+    {"slug":"phys-02-arrhenius","title":"PHYS-02 · Аррениус","kind":"formulas","description":"E_a, A и корректное обращение с температурой.","content_anchor":"PHYS-02","visibility":"student","is_canonical":true,"ord":502,"release_binding":{"normalization":"picrete-markdown-nfc-lf-v1","content_file":"sheets/phys-02-arrhenius.md","content_sha256":"7f9993db99a828c9c0e4ba669bff1d9807b0841e56cba98dadfded83fe03baff","source_document_title":"Физическая химия · каноническая кинетика · R1","source_effective_version":"PHYS-CHEM-KINETICS-2026-09-R1","source_course_scope":"Физическая химия"}},
+    {"slug":"phys-03-sequential","title":"PHYS-03 · Последовательные реакции","kind":"formulas","description":"A -> B -> P и максимум промежуточного вещества.","content_anchor":"PHYS-03","visibility":"student","is_canonical":true,"ord":503,"release_binding":{"normalization":"picrete-markdown-nfc-lf-v1","content_file":"sheets/phys-03-sequential.md","content_sha256":"b0c32bb17af5d2d3fa9c78ded8c3c41629059717e12d9cda52dab13df59140ba4","source_document_title":"Физическая химия · каноническая кинетика · R1","source_effective_version":"PHYS-CHEM-KINETICS-2026-09-R1","source_course_scope":"Физическая химия"}},
+    {"slug":"phys-04-collision","title":"PHYS-04 · Теория столкновений","kind":"formulas","description":"sigma_AB, mu, relative speed and steric factor.","content_anchor":"PHYS-04","visibility":"student","is_canonical":true,"ord":504,"release_binding":{"normalization":"picrete-markdown-nfc-lf-v1","content_file":"sheets/phys-04-collision.md","content_sha256":"6110a357591a1a45fa03357db770752d32b413dc7e83e2117d79bd598afda204","source_document_title":"Физическая химия · каноническая кинетика · R1","source_effective_version":"PHYS-CHEM-KINETICS-2026-09-R1","source_course_scope":"Физическая химия"}},
+    {"slug":"phys-05-mm","title":"PHYS-05 · Михаэлис–Ментен","kind":"formulas","description":"r, r_max, K_M and competitive inhibition.","content_anchor":"PHYS-05","visibility":"student","is_canonical":true,"ord":505,"release_binding":{"normalization":"picrete-markdown-nfc-lf-v1","content_file":"sheets/phys-05-mm.md","content_sha256":"41147c5f10ca7ad0eccc07dba049f13634436eb0e8fb5fe1ee1aa5cd5f0cd393","source_document_title":"Физическая химия · каноническая кинетика · R1","source_effective_version":"PHYS-CHEM-KINETICS-2026-09-R1","source_course_scope":"Физическая химия"}}
+  ],
+  "task_templates": [
+    {"slug":"phys-formal-easy","reference_sheet_slugs":["phys-00-conventions","phys-01-formal"],"payload":{"name":"Физхимия · формальная кинетика · базовый","topic":"Формальная кинетика и метод начальных скоростей","difficulty":"easy","instructions":"Используйте v, v_0 и [A]. Стройте задачи уровня исходных примеров физха; допускаются метод начальных скоростей и интегральный закон A+B -> P.","task_kind":"calculation","answer_format":"numeric","numeric_tolerance_pct":2.0,"validation_solver":false,"validation_data_check":false,"chemistry_check":"off","kb_query":"PHYS-01"},"recommended_rubric":[{"criterion_name":"Модель и обозначения","max_score":2,"description":"Верно записаны закон скорости, порядок и обозначения."},{"criterion_name":"Вывод и подстановка","max_score":4,"description":"Показаны вывод формулы и подстановка исходных данных."},{"criterion_name":"Расчёт и единицы","max_score":3,"description":"Арифметика и размерности согласованы."},{"criterion_name":"Физический вывод","max_score":1,"description":"Сформулирован краткий вывод."}]},
+    {"slug":"phys-arrhenius-easy","reference_sheet_slugs":["phys-00-conventions","phys-02-arrhenius"],"payload":{"name":"Физхимия · Аррениус · базовый","topic":"Уравнение Аррениуса и энергия активации","difficulty":"easy","instructions":"Температуры можно давать в °C, но в решении обязательно перейти к K. Не смешивайте мономолекулярную и бимолекулярную модели.","task_kind":"calculation","answer_format":"numeric","numeric_tolerance_pct":2.0,"validation_solver":false,"validation_data_check":false,"chemistry_check":"off","kb_query":"PHYS-02"},"recommended_rubric":[{"criterion_name":"Модель Аррениуса","max_score":2,"description":"Верно выбрана логарифмическая форма и область применимости."},{"criterion_name":"Вывод","max_score":3,"description":"E_a и A выведены из уравнения."},{"criterion_name":"Расчёт","max_score":3,"description":"K, единицы и арифметика корректны."},{"criterion_name":"Интерпретация","max_score":2,"description":"Описано приближение постоянных E_a и A."}]},
+    {"slug":"phys-sequential-easy","reference_sheet_slugs":["phys-00-conventions","phys-03-sequential"],"payload":{"name":"Физхимия · последовательные реакции · базовый","topic":"Последовательные реакции первого порядка","difficulty":"easy","instructions":"Используйте A -> B -> P, k_1 и k_2; выведите [B](t) и/или t_max.","task_kind":"calculation","answer_format":"numeric","numeric_tolerance_pct":2.0,"validation_solver":false,"validation_data_check":false,"chemistry_check":"off","kb_query":"PHYS-03"},"recommended_rubric":[{"criterion_name":"Кинетическая схема","max_score":2,"description":"Записаны стадии и начальные условия."},{"criterion_name":"Вывод","max_score":4,"description":"Показан вывод концентрации промежуточного вещества."},{"criterion_name":"Расчёт","max_score":3,"description":"Величины и единицы вычислены без ошибки."},{"criterion_name":"Проверка","max_score":1,"description":"Сделан физический вывод о максимуме."}]},
+    {"slug":"phys-collision-easy","reference_sheet_slugs":["phys-00-conventions","phys-04-collision"],"payload":{"name":"Физхимия · столкновения · базовый","topic":"Теория столкновений и стерический фактор","difficulty":"easy","instructions":"Это только бимолекулярная газовая реакция A+B -> P. Все диаметры, массы и константы задайте явно.","task_kind":"calculation","answer_format":"numeric","numeric_tolerance_pct":2.0,"validation_solver":false,"validation_data_check":false,"chemistry_check":"off","kb_query":"PHYS-04"},"recommended_rubric":[{"criterion_name":"Применимость модели","max_score":2,"description":"Верно указана бимолекулярная модель."},{"criterion_name":"Формулы","max_score":3,"description":"sigma_AB, mu и относительная скорость записаны верно."},{"criterion_name":"Расчёт","max_score":4,"description":"SI и перевод в L согласованы."},{"criterion_name":"Смысл P","max_score":1,"description":"Объяснён стерический фактор."}]},
+    {"slug":"phys-mm-easy","reference_sheet_slugs":["phys-00-conventions","phys-05-mm"],"payload":{"name":"Физхимия · Михаэлис–Ментен · базовый","topic":"Кинетика Михаэлиса–Ментен","difficulty":"easy","instructions":"Используйте r, r_max и K_M; проверьте отношение [S]/K_M и не называйте переходный режим предельным.","task_kind":"calculation","answer_format":"numeric","numeric_tolerance_pct":2.0,"validation_solver":false,"validation_data_check":false,"chemistry_check":"off","kb_query":"PHYS-05"},"recommended_rubric":[{"criterion_name":"Механизм и модель","max_score":2,"description":"Записаны механизм и уравнение Михаэлиса–Ментен."},{"criterion_name":"Вывод параметров","max_score":3,"description":"K_M, r_max или k_2 выведены по данным."},{"criterion_name":"Расчёт","max_score":3,"description":"Подстановка, единицы и арифметика верны."},{"criterion_name":"Режим и вывод","max_score":2,"description":"Корректно интерпретировано отношение [S]/K_M."}]}
+  ],
+  "model_selection": {
+    "generator_model_entry_id": "179d8425e71e47ffb6ae0da47f7a48c6",
+    "verifier_model_entry_id": "88c6b31119d04d14a3e62fbfb12b0588",
+    "pipeline_mode": "single_verifier",
+    "tutor_family": "qwen",
+    "verifier_family": "deepseek"
+  }
+}

@@ -23,8 +23,11 @@ export function modelOptions(providers: Provider[], productionOnly: boolean) {
 export function deepSeekV4Options(providers: Provider[], productionOnly = true) {
   return modelOptions(providers, productionOnly).filter(
     (model) =>
-      model.family.toLocaleLowerCase() === "deepseek" &&
-      /^(?:deepseek-flash|deepseek-v4(?:\.1)?-(?:pro|flash)(?:-.*)?)$/i.test(model.modelId),
+      (model.family.toLocaleLowerCase() === "deepseek" &&
+        (/^(?:deepseek-flash|deepseek-v4(?:\.1)?-(?:pro|flash)(?:-.*)?)$/i.test(model.modelId) ||
+          /\/deepseek-v4-flash(?:$|[?#])/i.test(model.modelId))) ||
+      (model.family.toLocaleLowerCase() === "qwen" &&
+        (/^qwen3\.6-35b-a3b$/i.test(model.modelId) || /\/qwen3\.6-35b-a3b(?:$|[?#])/i.test(model.modelId))),
   );
 }
 
@@ -402,7 +405,7 @@ function ManualModal({
     setLoading(true);
     setError("");
     try {
-      await promptsApi.create(assistant.id, { role, system_prompt: text, notes });
+      await promptsApi.create(assistant.id, { role, system_prompt: text, notes, target_family: "deepseek" });
       onCreated();
       onClose();
       setText("");

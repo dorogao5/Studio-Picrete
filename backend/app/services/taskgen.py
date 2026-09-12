@@ -25,8 +25,12 @@ from app.services.assistant_profile import build_assistant_profile, with_assista
 from app.services.chemistry_facts import FACT_BLOCK_BY_CHECK, normalize_chemistry_facts
 from app.services.contracts import CHEMISTRY_FACTS_GUIDE, GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE
 from app.services.grounding import AUTHORITY_LABELS, KB_HEADER, build_grounding_block
+from app.services.physical_chemistry import (
+    is_physical_chemistry,
+    run_physical_validation,
+)
 from app.services.task_approval import task_is_export_ready
-from app.services.task_evidence import evidence_matches_task, normalize_validation_config
+from app.services.task_evidence import evidence_matches_task, normalize_validation_config, task_content_fingerprint
 from app.services.validation import run_validation
 
 FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподаватель и методист высшей школы по дисциплине «{discipline}».
@@ -46,13 +50,24 @@ FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподавател�
 {contract}
 Никакого текста вне JSON."""
 
+REPAIR_GENERATOR_APPENDIX = """
+
+РЕЖИМ ИСПРАВЛЕНИЯ УЖЕ СГЕНЕРИРОВАННОЙ ЗАДАЧИ
+Вход содержит исходную задачу и отчёт независимой проверки. Не создавайте другую задачу
+вместо исправления. Сохраните тему и учебный замысел, исправьте только найденные противоречия:
+условие, числа, единицы, формулы, эталонное решение и answer должны стать взаимно согласованными.
+Если verifier указал на ошибку, перепроверьте её самостоятельно; не переносите ошибку verifier
+в исправленный вариант. Для Михаэлиса–Ментен значения [S]/K_M порядка 0,1 и 10 — переходная
+область, а не строгие пределы; меняйте данные только если это необходимо для однозначного условия.
+Верните ровно один объект tasks с исправленной версией исходной задачи в том же JSON-контракте.
+Не добавляйте внешние константы и не удаляйте подпункты. Перед ответом пересчитайте все числа.
+""".strip()
+
 # Задачи с объёмным LaTeX-решением не помещаются по несколько в один JSON — генерируем порциями.
 GENERATION_CHUNK = 1
 # Дополнительные запросы сверх минимально необходимого числа порций. Они восполняют
 # недостающие/невалидные элементы, но не дают фоновой задаче зациклиться на плохом ответе модели.
 MAX_REFILL_ATTEMPTS = 3
-STANDARD_GENERATION_MAX_TOKENS = 16000
-HARD_GENERATION_MAX_TOKENS = 24000
 
 
 @dataclass(slots=True)
@@ -74,13 +89,6 @@ def _generation_call_limit(candidate_budget: int) -> int:
 
     minimum_calls = (candidate_budget + GENERATION_CHUNK - 1) // GENERATION_CHUNK
     return minimum_calls + MAX_REFILL_ATTEMPTS
-
-
-def _generation_max_tokens(difficulty: str) -> int:
-    # DeepSeek thinking tokens share the response budget with the JSON payload.
-    # Hard chemistry solutions are materially longer, so the standard ceiling
-    # can truncate an otherwise valid JSON object after the hidden reasoning.
-    return HARD_GENERATION_MAX_TOKENS if difficulty.strip().casefold() == "hard" else STANDARD_GENERATION_MAX_TOKENS
 
 
 TASK_KIND_LABELS = {
@@ -156,16 +164,24 @@ def build_generation_user_message(
     sections.append(f"Инструкции преподавателя:\n{instructions or '(нет)'}")
     sections.append(f"Примеры задач в нужном стиле:\n{examples or '(нет)'}")
     sections.append(f"Уже существующие задачи (НЕ повторяйте их сюжеты и числа):\n{existing or '(нет)'}")
+    evidence_line = (
+        "Верните chemistry_facts: {}: физхимия проверяется отдельным независимым verifier и не использует "
+        "общий chemistry-facts классификатор."
+        if chemistry_check == "off"
+        else (
+            "chemistry_facts для детерминированной перепроверки.\n"
+            f"Предметная проверка: {chemistry_check}. Если указан конкретный тип вместо auto, "
+            "соответствующий блок chemistry_facts обязателен и должен содержать полный набор величин.\n"
+            f"{CHEMISTRY_FACTS_GUIDE}"
+        )
+    )
     sections.append(
         "Каждая задача: условие + подробное эталонное решение + краткий финальный ответ (answer) "
-        "+ рубрика с баллами + список использованных справочных значений (data_used) "
-        "+ chemistry_facts для детерминированной перепроверки.\n"
+        "+ рубрика с баллами + список использованных справочных значений (data_used) + "
+        f"{evidence_line}\n"
         "В data_used перечисляйте только значения, действительно скопированные из приложенного справочного листа, "
         "с его точным заголовком. Самостоятельно заданные числа условия туда не входят; если справочник не "
-        "использован, верните data_used: [].\n"
-        f"Предметная проверка: {chemistry_check}. Если указан конкретный тип вместо auto, "
-        "соответствующий блок chemistry_facts обязателен и должен содержать полный набор величин.\n"
-        f"{CHEMISTRY_FACTS_GUIDE}\n\n"
+        "использован, верните data_used: [].\n\n"
         "Ответ — строго JSON по схеме (эта схема главнее любых других форматов):\n"
         f"{GENERATION_JSON_CONTRACT}\n{JSON_LATEX_ESCAPING_NOTE}"
     )
@@ -215,13 +231,57 @@ async def generate_tasks(
         user_message,
         temperature=temperature,
         json_mode=True,
-        max_tokens=_generation_max_tokens(difficulty),
     )
     parsed = llm.extract_json(result.text)
     tasks = _coerce_tasks(parsed)
     if tasks is None:
         raise llm.LlmError(f"Генератор не вернул массив tasks; начало ответа: {result.text[:180]}")
     return tasks
+
+
+async def repair_generated_task(
+    provider: Provider,
+    model: ModelEntry,
+    assistant: Assistant,
+    system_prompt: str | None,
+    task: GeneratedTask,
+    validation: dict,
+) -> dict | None:
+    """Ask the generator to repair a rejected candidate before making a replacement."""
+
+    prompt = system_prompt or FALLBACK_GENERATOR_PROMPT.format(
+        discipline=assistant.discipline, contract=GENERATION_JSON_CONTRACT
+    )
+    prompt = with_assistant_profile(f"{prompt.rstrip()}\n\n{REPAIR_GENERATOR_APPENDIX}", assistant)
+    payload = {
+        "task": {
+            "statement": task.statement,
+            "reference_solution": task.reference_solution,
+            "answer": task.answer,
+            "images": task.images or [],
+            "rubric": task.rubric or [],
+            "max_score": task.max_score,
+            "difficulty": task.difficulty,
+            "topic": task.topic,
+            "data_used": (task.grounding or {}).get("data_used", []),
+            "chemistry_facts": (task.grounding or {}).get("chemistry_facts", {}),
+        },
+        "validation": validation,
+    }
+    try:
+        result = await llm.chat(
+            provider,
+            model,
+            prompt,
+            json.dumps(payload, ensure_ascii=False),
+            temperature=0.2,
+            json_mode=True,
+        )
+        parsed = llm.extract_json(result.text)
+    except llm.LlmError:
+        return None
+    tasks = _coerce_tasks(parsed)
+    return tasks[0] if tasks else None
 
 
 def _coerce_tasks(parsed: dict) -> list | None:
@@ -512,10 +572,14 @@ def task_from_item(
     data_used = _normalize_data_used(item.get("data_used"))
     if data_used is None:
         return None
+    contract = normalize_validation_config(validation_contract or {})
     chemistry_facts = normalize_chemistry_facts(item.get("chemistry_facts"))
+    if chemistry_facts is None and contract.get("chemistry_check") == "off":
+        chemistry_facts = {}
+    if chemistry_facts is None and contract.get("chemistry_check", "auto") == "auto" and "chemistry_facts" not in item:
+        chemistry_facts = {}
     if chemistry_facts is None:
         return None
-    contract = normalize_validation_config(validation_contract or {})
     required_block = FACT_BLOCK_BY_CHECK.get(contract.get("chemistry_check", "auto"))
     if required_block and required_block not in chemistry_facts:
         return None
@@ -551,6 +615,10 @@ def generation_item_contract_error(item: object, chemistry_check: str) -> str | 
     if _normalize_data_used(item.get("data_used")) is None:
         return "нет явного data_used"
     chemistry_facts = normalize_chemistry_facts(item.get("chemistry_facts"))
+    if chemistry_facts is None and chemistry_check == "off":
+        chemistry_facts = {}
+    if chemistry_facts is None and chemistry_check == "auto" and "chemistry_facts" not in item:
+        chemistry_facts = {}
     if chemistry_facts is None:
         return "нет корректного chemistry_facts"
     required_block = FACT_BLOCK_BY_CHECK.get(chemistry_check)
@@ -693,6 +761,15 @@ async def _validate_batch(
     sheets_text: str,
     discipline_context: str = "",
 ) -> None:
+    assistant_result = await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))
+    if hasattr(assistant_result, "scalar_one_or_none"):
+        assistant = assistant_result.scalar_one_or_none()
+    else:
+        # Keep the helper usable with the small in-memory DB doubles used by
+        # unit tests and migration tooling. A missing assistant is generic,
+        # never physical-chemistry, by default.
+        assistant = None
+    physical = assistant is not None and is_physical_chemistry(assistant)
     prior = (
         (
             await db.execute(
@@ -715,6 +792,17 @@ async def _validate_batch(
         async with semaphore:
             neighbours = [other.statement for other in created if other is not task]
             contract = validation_contract_for_task(task, merged)
+            if physical:
+                validation, correction = await run_physical_validation(
+                    task=task,
+                    provider=solver_provider,
+                    model=solver_model,
+                    grounding=grounding_text,
+                    discipline_context=discipline_context,
+                    answer_format=contract["answer_format"],
+                    tolerance_pct=contract["tolerance_pct"],
+                )
+                return task, validation, correction
             validation = await run_validation(
                 statement=task.statement,
                 reference_solution=task.reference_solution,
@@ -742,14 +830,48 @@ async def _validate_batch(
                     *((task.grounding or {}).get("kb_sources") or []),
                 ],
             )
-            return task, validation
+            return task, validation, None
 
     await _set_progress(db, batch, f"{stage_name}: готово 0/{total}", 0, total)
     async with asyncio.TaskGroup() as group:
         pending = [group.create_task(validate_one(task)) for task in created]
         for index, completed in enumerate(asyncio.as_completed(pending), start=1):
-            task, validation = await completed
+            task, validation, correction = await completed
             await db.refresh(task)
+            if physical and correction is not None:
+                repaired = task_from_item(
+                    correction,
+                    assistant_id=task.assistant_id,
+                    template_id=task.template_id,
+                    batch_id=task.batch_id,
+                    topic=task.topic,
+                    difficulty=task.difficulty,
+                    model_used=task.model_used,
+                    grounding_meta=task.grounding or {},
+                    validation_contract=validation.get("validation_config"),
+                    template_rubric=task.rubric or [],
+                )
+                if repaired is None:
+                    validation = dict(validation)
+                    validation["verdict"] = "needs_review"
+                    validation["reasons"] = [
+                        *(validation.get("reasons") or []),
+                        "Верификатор вернул неполную исправленную задачу",
+                    ]
+                else:
+                    task.statement = repaired.statement
+                    task.reference_solution = repaired.reference_solution
+                    task.answer = repaired.answer
+                    task.images = repaired.images
+                    task.rubric = repaired.rubric
+                    task.max_score = repaired.max_score
+                    task.difficulty = repaired.difficulty
+                    task.topic = repaired.topic
+                    task.grounding = repaired.grounding
+                    validation = dict(validation)
+                    validation["content_fingerprint"] = task_content_fingerprint(
+                        task, validation.get("validation_config") or {}
+                    )
             if not evidence_matches_task(validation, task):
                 # Преподаватель успел изменить содержимое во время LLM-проверки.
                 # Старое evidence не записываем и пользовательские изменения не затираем.
@@ -785,6 +907,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     assistant = (await db.execute(select(Assistant).where(Assistant.id == batch.assistant_id))).scalar_one_or_none()
     if assistant is None:
         raise GenerationError("Дисциплина не найдена")
+    physical = is_physical_chemistry(assistant)
     provider, model = await _resolve_batch_model(db, str(params.get("model_entry_id") or ""))
 
     template: TaskTemplate | None = None
@@ -838,7 +961,9 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     # Лимит рассчитывается один раз на всю партию. Иначе каждая новая волна добора
     # заново получает MAX_REFILL_ATTEMPTS и число оплачиваемых запросов растёт без
     # связи с общим бюджетом кандидатов.
-    candidate_budget = min(count * 2, count + 5)
+    # Physical chemistry uses exactly one generator call per requested task.
+    # A failed verifier repairs that same row; it never opens a refill wave.
+    candidate_budget = count if physical else min(count * 2, count + 5)
     call_budget = _GenerationCallBudget(limit=_generation_call_limit(candidate_budget))
     grounding_meta = await build_grounding_meta(
         db,
@@ -896,7 +1021,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     if not created:
         raise GenerationError("Модель не вернула ни одной валидной задачи")
 
-    validation_enabled = bool(params.get("validate_tasks", True))
+    validation_enabled = True if physical else bool(params.get("validate_tasks", True))
     solver_provider, solver_model = provider, model
     if params.get("solver_model_entry_id"):
         solver_provider, solver_model = await _resolve_batch_model(db, str(params["solver_model_entry_id"]))
@@ -913,17 +1038,124 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             build_assistant_profile(assistant),
         )
 
+    if physical:
+        needs_review = [task for task in created if task.status == "needs_review"]
+        batch.params = {
+            **(batch.params or {}),
+            "quality_summary": {
+                "pipeline": "physchem-qwen-generator-deepseek-verifier-v1",
+                "candidate_count": batch.generated_count,
+                "ready_count": batch.validated_count,
+                "discarded_count": 0,
+                "needs_review_count": len(needs_review),
+                "discarded_by_reason": {},
+                "candidate_budget": candidate_budget,
+                "generation_calls_used": call_budget.used,
+                "generation_call_limit": call_budget.limit,
+                "repair_attempts": 0,
+                "replacement_generations": 0,
+            },
+        }
+        # The verifier's unresolved candidates remain visible for review; they
+        # are not silently discarded and do not trigger paid replacements.
+        _mark_batch_finished(
+            batch,
+            requested_count=count,
+            generated_count=batch.generated_count,
+            generation_errors=gen_errors,
+        )
+        await db.commit()
+        return
+
+    repair_attempts = 0
+    repaired_task_ids: set[str] = set()
+
+    def repairable_task(task: GeneratedTask) -> bool:
+        if task.id in repaired_task_ids or task.status == "validated":
+            return False
+        validation = task.validation or {}
+        if any(
+            (validation.get(role) or {}).get("status") == "error"
+            for role in ("solver", "verifier", "critic")
+        ):
+            return False
+        return bool(validation)
+
+    # First repair the rejected candidate in place.  Only if the repaired
+    # candidate still fails do we spend a call on a genuinely new task.
+    repair_candidates = [task for task in created if repairable_task(task)]
+    for task in repair_candidates:
+        repaired_task_ids.add(task.id)
+        repair_attempts += 1
+        await _set_progress(
+            db,
+            batch,
+            f"Исправление кандидата {repair_attempts}/{len(repair_candidates)}",
+            batch.validated_count,
+            count,
+        )
+        repaired_item = await repair_generated_task(
+            provider,
+            model,
+            assistant,
+            system_prompt,
+            task,
+            task.validation or {},
+        )
+        if repaired_item is None:
+            continue
+        repaired = task_from_item(
+            repaired_item,
+            assistant_id=batch.assistant_id,
+            template_id=batch.template_id,
+            batch_id=batch.id,
+            topic=merged["topic"],
+            difficulty=merged["difficulty"],
+            model_used=f"{provider.name}/{model.model_id}",
+            grounding_meta=grounding_meta,
+            validation_contract=validation_contract,
+            template_rubric=merged.get("rubric", []),
+        )
+        if repaired is None:
+            continue
+        task.statement = repaired.statement
+        task.reference_solution = repaired.reference_solution
+        task.answer = repaired.answer
+        task.images = repaired.images
+        task.rubric = repaired.rubric
+        task.max_score = repaired.max_score
+        task.difficulty = repaired.difficulty
+        task.topic = repaired.topic
+        task.grounding = repaired.grounding
+        task.validation = {}
+        task.status = "draft"
+        task.approved = False
+        await db.commit()
+        await _validate_batch(
+            db,
+            batch,
+            [task],
+            merged,
+            solver_provider,
+            solver_model,
+            grounding_text,
+            sheets_to_text(sheets),
+            build_assistant_profile(assistant),
+        )
+
     # Пользователь заказывает готовые задачи, а не число сырых ответов модели.
     # Непрошедший кандидат сохраняется для разбора и автоматически
     # заменяется новым в пределах ограниченного бюджета.
     def retryable_content_failure(task: GeneratedTask) -> bool:
         v = task.validation or {}
-        return bool(
-            (v.get("dedup") or {}).get("duplicate")
-            or (v.get("sanity") or {}).get("issues")
-            or (v.get("critic") or {}).get("status") == "fail"
-            or any(result.get("state") == "fail" for result in (v.get("chemistry") or {}).get("results", []))
-        )
+        if not v or v.get("verdict") == "validated":
+            return False
+        if any(
+            (v.get(role) or {}).get("status") == "error"
+            for role in ("solver", "verifier", "critic")
+        ):
+            return False
+        return True
     while (validation_enabled and batch.validated_count < count and batch.generated_count < candidate_budget
            and any(retryable_content_failure(task) for task in created)
            and not any((task.validation or {}).get("solver", {}).get("status") == "error" for task in created)):
@@ -994,6 +1226,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             "candidate_budget": candidate_budget,
             "generation_calls_used": call_budget.used,
             "generation_call_limit": call_budget.limit,
+            "repair_attempts": repair_attempts,
         },
     }
     if batch.validated_count < count:

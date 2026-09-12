@@ -109,7 +109,7 @@ def chemistry_admission_evidence(
     unsafe = [result for result in results if result["state"] in unsafe_states]
     required_not_passed = sorted(check_id for check_id in required if states.get(check_id) != CheckState.PASS.value)
     passed = [result for result in results if result["state"] == CheckState.PASS.value]
-    if unsafe or required_not_passed:
+    if (unsafe or required_not_passed) and explicit_core_check:
         admission_effect = "block"
     elif explicit_core_check and required and passed:
         admission_effect = "pass"
@@ -119,6 +119,9 @@ def chemistry_admission_evidence(
         # ``auto`` contract are deliberately not promoted to core evidence: an
         # irrelevant but internally consistent block must never make a numeric
         # task releasable. A frozen template must name its deterministic check.
+        # For auto contracts the report is advisory only: a heuristic parser
+        # must not stop a task before the independent model review, because
+        # physical-chemistry notation is not a stoichiometric equation.
         admission_effect = "limited"
     return {
         **report,

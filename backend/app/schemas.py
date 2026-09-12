@@ -285,7 +285,7 @@ class TaskTemplateCreate(BaseModel):
     validation_data_check: bool = True
     chemistry_check: str = Field(
         default="auto",
-        pattern="^(auto|chemistry\\.stoichiometry|chemistry\\.dilution|analytical\\.titration|analytical\\.gravimetry|analytical\\.conductometry|analytical\\.faraday|analytical\\.calibration|colloid\\.bet|colloid\\.smoluchowski|colloid\\.dlvo)$",
+        pattern="^(off|auto|chemistry\\.stoichiometry|chemistry\\.dilution|analytical\\.titration|analytical\\.gravimetry|analytical\\.conductometry|analytical\\.faraday|analytical\\.calibration|colloid\\.bet|colloid\\.smoluchowski|colloid\\.dlvo)$",
     )
 
     @field_validator("rubric")
@@ -311,7 +311,7 @@ class TaskTemplateUpdate(BaseModel):
     validation_data_check: bool | None = None
     chemistry_check: str | None = Field(
         default=None,
-        pattern="^(auto|chemistry\\.stoichiometry|chemistry\\.dilution|analytical\\.titration|analytical\\.gravimetry|analytical\\.conductometry|analytical\\.faraday|analytical\\.calibration|colloid\\.bet|colloid\\.smoluchowski|colloid\\.dlvo)$",
+        pattern="^(off|auto|chemistry\\.stoichiometry|chemistry\\.dilution|analytical\\.titration|analytical\\.gravimetry|analytical\\.conductometry|analytical\\.faraday|analytical\\.calibration|colloid\\.bet|colloid\\.smoluchowski|colloid\\.dlvo)$",
     )
 
     @field_validator("rubric")

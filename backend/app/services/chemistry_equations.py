@@ -54,6 +54,12 @@ class ReactionBalance:
 
 _ARROW_RE = re.compile(r"(?:<=>|<->|=>|->|⇌|↔|→|⟶)")
 _EQUALS_RE = re.compile(r"(?<![<>=])=(?!=)")
+# Formal-kinetics statements use A, B, C (and sometimes X, Y, Z) as abstract
+# species labels.  They are not chemical formulas and therefore must not be
+# sent to the atom/charge balance checker.  ``A`` is intentionally included
+# as the decisive marker: it is not an element symbol, while B and C can also
+# be legitimate boron/carbon symbols in real equations.
+_SYMBOLIC_SPECIES_RE = re.compile(r"(?<![A-Za-z])(?:A|X|Y|Z)(?![a-z])")
 _PHASE_RE = re.compile(r"\((?:aq|s|l|g|г|газ|ж|тв|бел|графит|граф|алмаз|ромб|монокл|крист|р-?р)\)\s*$", re.IGNORECASE)
 _ELEMENT_RE = re.compile(r"[A-Z][a-z]?")
 _SUBSCRIPTS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
@@ -296,6 +302,28 @@ def _is_oxidation_state_transition(fragment: str, arrow: re.Match[str]) -> bool:
     return left_state is not None and right_state is not None
 
 
+def _is_numeric_transition(fragment: str, arrow: re.Match[str]) -> bool:
+    """Return true for calculation steps such as ``0.10 → 0.20``.
+
+    These arrows occur frequently in worked kinetics solutions, where they
+    describe a changed concentration rather than a chemical equation. They
+    must not be sent to the reaction-balance parser.
+    """
+
+    left = fragment[: arrow.start()].replace("$", "").rstrip()
+    right = fragment[arrow.end() :].replace("$", "").lstrip()
+    number = r"[-+−]?\d+(?:[\.,]\d+)?(?:\s*[×x]\s*10\s*(?:\^|\u207b)?[-+]?\d+)?"
+    return re.search(rf"(?:^|[\s(]){number}\s*$", left) is not None and re.match(
+        rf"{number}(?=\s*(?:[),.;:]|$))", right
+    ) is not None
+
+
+def _is_symbolic_reaction(fragment: str) -> bool:
+    """Return true for abstract reaction schemes such as ``2 A + B → C``."""
+
+    return bool(_SYMBOLIC_SPECIES_RE.search(fragment))
+
+
 def _parseable_reaction_spans(
     fragment: str,
     separator_re: re.Pattern[str] = _ARROW_RE,
@@ -312,7 +340,11 @@ def _parseable_reaction_spans(
     whitespace = list(re.finditer(r"\s+", fragment))
     spans: list[str] = []
     for arrow in separator_re.finditer(fragment):
-        if _is_oxidation_state_transition(fragment, arrow):
+        if (
+            _is_oxidation_state_transition(fragment, arrow)
+            or _is_numeric_transition(fragment, arrow)
+            or _is_symbolic_reaction(fragment)
+        ):
             continue
         starts = sorted({0, *(match.end() for match in whitespace if match.end() <= arrow.start()),
                          *(match.end() for match in re.finditer(r"\(", fragment[:arrow.start()]))})
@@ -366,7 +398,11 @@ def reaction_candidates(text: str) -> list[str]:
     candidates: list[str] = []
     for fragment in re.split(r"[\n;]+", text or ""):
         arrows = [
-            arrow for arrow in _ARROW_RE.finditer(fragment) if not _is_oxidation_state_transition(fragment, arrow)
+            arrow
+            for arrow in _ARROW_RE.finditer(fragment)
+            if not _is_oxidation_state_transition(fragment, arrow)
+            and not _is_numeric_transition(fragment, arrow)
+            and not _is_symbolic_reaction(fragment)
         ]
         if not arrows:
             equals = list(_EQUALS_RE.finditer(fragment))

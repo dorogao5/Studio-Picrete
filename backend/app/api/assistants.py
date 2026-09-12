@@ -383,6 +383,7 @@ async def generate_prompt(
 async def activate_prompt(
     assistant_id: str, prompt_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
 ) -> PromptVersion:
+    assistant = await get_assistant_or_404(assistant_id, db)
     prompt = (
         await db.execute(
             select(PromptVersion).where(PromptVersion.id == prompt_id, PromptVersion.assistant_id == assistant_id)
@@ -390,10 +391,16 @@ async def activate_prompt(
     ).scalar_one_or_none()
     if prompt is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Версия промпта не найдена")
-    if prompt.target_family.strip().casefold() != "deepseek":
+    family = prompt.target_family.strip().casefold()
+    if prompt.role == "grader" and family != "deepseek":
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Активным промптом рабочего ассистента может быть только версия для DeepSeek",
+            "Активный промпт проверки должен быть версией для DeepSeek",
+        )
+    if prompt.role in {"generator", "tutor"} and family not in {"deepseek", "qwen"}:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Промпт генерации и разбора должен быть версией для DeepSeek или Qwen",
         )
     siblings = (
         await db.execute(

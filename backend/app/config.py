@@ -41,8 +41,12 @@ class Settings(BaseSettings):
     # validated tasks or student-facing tutor replies. Unlisted models are safe
     # by default: they remain available only for an explicit preview.
     model_use_policy_version: str = "model-use-v1"
-    decision_model_ids: str = "deepseek-flash,deepseek-v4-pro"
-    advisory_model_ids: str = "deepseek-v4-flash,deepseek-v4.1-flash-expires-on-0910"
+    decision_model_ids: str = (
+        "deepseek-flash,deepseek-v4-pro,gpt://b1g0ibcval4b15nf4jcj/deepseek-v4-flash"
+    )
+    advisory_model_ids: str = (
+        "deepseek-v4-flash,deepseek-v4.1-flash-expires-on-0910,gpt://b1g0ibcval4b15nf4jcj/qwen3.6-35b-a3b"
+    )
 
     # Server-to-server publication into the stable Picrete runtime.
     picrete_api_url: str = ""

@@ -163,10 +163,10 @@ def test_generation_call_limit_is_based_on_whole_candidate_budget() -> None:
     assert taskgen._generation_call_limit(40) == 43
 
 
-def test_hard_generation_reserves_room_for_reasoning_and_complete_json() -> None:
-    assert taskgen._generation_max_tokens("hard") == 24000
-    assert taskgen._generation_max_tokens(" HARD ") == 24000
-    assert taskgen._generation_max_tokens("medium") == 16000
+def test_generation_has_no_fixed_output_token_cap() -> None:
+    # The provider decides the available completion budget so reasoning models
+    # are not truncated before they finish the JSON contract.
+    assert not hasattr(taskgen, "_generation_max_tokens")
 
 
 def test_successful_chunk_is_saved_before_later_generation_is_cancelled(monkeypatch):

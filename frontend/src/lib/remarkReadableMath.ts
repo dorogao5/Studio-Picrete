@@ -1,6 +1,83 @@
 import type { Root, PhrasingContent, Paragraph, RootContent } from 'mdast';
 import type { InlineMath } from 'mdast-util-math';
 
+// Some model responses contain escaped line breaks as the two characters `\\n`
+// instead of actual newlines. Normalize them only in prose: a blind replacement
+// would corrupt TeX commands such as `\\neq`, and code spans/fences must remain
+// byte-for-byte intact.
+export function normalizeEscapedLineBreaks(value: string): string {
+  let result = '';
+  let mathDelimiter = '';
+  let codeDelimiter = '';
+
+  for (let index = 0; index < value.length;) {
+    if (codeDelimiter) {
+      if (value.startsWith(codeDelimiter, index)) {
+        result += codeDelimiter;
+        index += codeDelimiter.length;
+        codeDelimiter = '';
+      } else {
+        result += value[index];
+        index += 1;
+      }
+      continue;
+    }
+
+    if (mathDelimiter) {
+      if (value.startsWith(mathDelimiter, index)) {
+        result += mathDelimiter;
+        index += mathDelimiter.length;
+        mathDelimiter = '';
+      } else {
+        result += value[index];
+        index += 1;
+      }
+      continue;
+    }
+
+    if (value[index] === '`') {
+      let end = index + 1;
+      while (value[end] === '`') end += 1;
+      codeDelimiter = value.slice(index, end);
+      result += codeDelimiter;
+      index = end;
+      continue;
+    }
+
+    if (value.startsWith('\\(', index)) {
+      mathDelimiter = '\\)';
+      result += '\\(';
+      index += 2;
+      continue;
+    }
+    if (value.startsWith('\\[', index)) {
+      mathDelimiter = '\\]';
+      result += '\\[';
+      index += 2;
+      continue;
+    }
+    if (value[index] === '$') {
+      let end = index + 1;
+      while (value[end] === '$') end += 1;
+      mathDelimiter = value.slice(index, end);
+      result += mathDelimiter;
+      index = end;
+      continue;
+    }
+
+    if (value[index] === '\\' && value[index + 1] === 'n') {
+      result += '\n';
+      index += 2;
+      continue;
+    }
+
+    result += value[index];
+    index += 1;
+  }
+
+  return result;
+}
+
 // Prose embedded in a top-level \text{} must participate in normal text
 // wrapping. Nested labels (fractions, indices, arrays) remain mathematical.
 export function splitImportedMath(value: string): PhrasingContent[] {

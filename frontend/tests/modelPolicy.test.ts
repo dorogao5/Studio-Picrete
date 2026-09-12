@@ -9,6 +9,10 @@ test("recognizes explicitly advisory control models from stable metadata", () =>
     true,
   );
   assert.equal(
+    isKnownAdvisoryModel({ modelId: "gpt://folder/qwen3.6-35b-a3b", displayName: "Qwen 3.6 35B", notes: "" }),
+    true,
+  );
+  assert.equal(
     isKnownAdvisoryModel({ modelId: "custom-preview", displayName: "Экспериментальная", notes: "advisory only" }),
     true,
   );

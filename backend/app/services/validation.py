@@ -1592,7 +1592,6 @@ async def extract_chemistry_facts(
             json.dumps(payload, ensure_ascii=False),
             temperature=0.0,
             json_mode=True,
-            max_tokens=3000,
         )
         parsed = llm.extract_json(result.text)
     except llm.LlmError as err:
@@ -1739,6 +1738,7 @@ async def run_validation(
     elif (
         normalized_facts is None
         and extract_chemistry_facts_if_missing
+        and chemistry_check != "auto"
         and not preliminary_hard_fail
         and solver_provider is not None
         and solver_model is not None
@@ -1808,7 +1808,7 @@ async def run_validation(
             "admission_effect": "limited",
         }
     chemistry["facts_extraction"] = facts_extraction
-    if chemistry_facts is not None and facts_source == "invalid":
+    if chemistry_facts is not None and facts_source == "invalid" and chemistry_check != "auto":
         chemistry["admission_effect"] = "block"
         chemistry.setdefault("blocking_codes", []).append("chemistry.facts_schema")
     # Missing specialist coverage is not evidence of an incorrect answer. Auto

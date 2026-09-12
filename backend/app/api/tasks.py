@@ -619,11 +619,36 @@ async def update_task(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Статусы автопроверки меняются только после запуска проверки",
         )
-    if changes_content and requested_status == "approved":
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Сначала сохраните изменения и запустите автопроверку, затем одобрите задачу",
-        )
+    # A teacher may correct a saved candidate by hand and approve that exact
+    # edited version without spending another model call.  Keep this path
+    # explicit and auditable: the reason is mandatory and the approval stores
+    # a fresh content fingerprint after all manual edits have been applied.
+    if requested_status == "approved" and approval_reason and (changes_content or task.status != "needs_review"):
+        if len(approval_reason) < 10:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Ручное принятие — укажите причину (не менее 10 символов)",
+            )
+        for field, value in data.items():
+            if field not in {"status", "approved", "approval_reason", "validation"}:
+                setattr(task, field, value)
+        validation = dict(task.validation) if isinstance(task.validation, dict) else {}
+        approval_config = validation.get("validation_config")
+        validation["approval"] = {
+            "basis": "teacher_override",
+            "schema_version": APPROVAL_SCHEMA_VERSION,
+            "reviewed_by": user.id,
+            "reviewed_at": utcnow().isoformat(),
+            "reason": approval_reason,
+            "validation_config": approval_config,
+            "content_fingerprint": task_content_fingerprint(task, approval_config),
+        }
+        task.validation = validation
+        task.status = "approved"
+        task.approved = True
+        await db.commit()
+        await db.refresh(task)
+        return task
 
     if changes_content:
         data["validation"] = {}
