@@ -107,11 +107,14 @@ async def _revalidate_task(
     grounding_query = contract["kb_query"] or task.topic
     sheet_ids = contract["sheet_ids"] or None
     sheets = await load_reference_sheets(db, batch.assistant_id, sheet_ids)
+    assistant = await db.get(Assistant, batch.assistant_id)
     grounding_text = await build_generation_grounding(
         db,
         batch.assistant_id,
         sheet_ids=sheet_ids,
         query=grounding_query,
+        include_kb=not (assistant and getattr(assistant, "generation_policy", "legacy") == "single_verifier"
+                        and (task.grounding or {}).get("blueprint")),
     )
     grounding_meta = await build_grounding_meta(
         db,
@@ -120,7 +123,6 @@ async def _revalidate_task(
         grounding_query,
         assistant_id=batch.assistant_id,
     )
-    assistant = await db.get(Assistant, batch.assistant_id)
     if assistant is not None and uses_single_verifier(assistant):
         await _validate_batch(db, batch, [task], merged, solver_provider, solver_model,
                               grounding_text, sheets_to_text(sheets), discipline_context)

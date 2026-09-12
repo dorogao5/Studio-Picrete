@@ -236,7 +236,7 @@ export interface TaskValidation {
     discipline?: "general_inorganic" | "analytical" | "colloid" | "unknown";
     deterministic_pass?: boolean;
     applicable_count?: number;
-    admission_effect?: "pass" | "reviewed" | "limited" | "block";
+    admission_effect?: "pass" | "reviewed" | "limited" | "block" | "not_applicable";
     admission_reason?: string;
     coverage_before_admission?: "limited";
     required_check_ids?: string[];

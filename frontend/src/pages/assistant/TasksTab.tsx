@@ -587,10 +587,9 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
         </div>
 
         <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          Задача становится готовой без ручного подтверждения, только если два независимых решения выбранной контрольной модели,
-          предметный критик, сверка ответа и единиц, источники, рубрика и проверка на дубликаты дали согласованный результат.
-          Задачи с расхождениями сохраняются с конкретной причиной и требуют внимания.
-          Очередь внимания содержит только сохранённые задачи, которым нужна повторная проверка или решение об исключении.
+          {assistant.generation_policy === "single_verifier"
+            ? "Генератор создаёт вариант по опорному примеру. Один независимый верификатор проверяет условие, расчёт и полный эталон, при необходимости исправляя эту же задачу. Нерешённые расхождения сохраняются для разбора; автоматической генерации замены нет."
+            : "Задача становится готовой, когда независимые решения, предметная проверка, источники и рубрика дали согласованный результат. Расхождения сохраняются с конкретной причиной и требуют внимания."}
         </p>
 
         <div role="search" className="w-full sm:max-w-sm">
@@ -1085,7 +1084,7 @@ function TaskCard({ task, assistantId, onChanged }: { task: GeneratedTask; assis
           <MathText>{task.statement}</MathText>
         </span>
       </button>
-      {task.validation?.chemistry && (
+      {task.validation?.chemistry && task.validation.chemistry.admission_effect !== "not_applicable" && (
         <div className="ml-6 flex items-start gap-1.5 text-xs text-muted-foreground">
           <EvidenceMark state={chemistryEvidenceState(task.validation.chemistry.admission_effect)} />
           <span>
@@ -1795,17 +1794,16 @@ function BatchLaunchModal({
             </Select>
           </Field>
         </div>
-        <Field label="Сколько готовых задач нужно (1–20)">
+        <Field label={assistant.generation_policy === "single_verifier" ? "Сколько вариантов создать (1–20)" : "Сколько готовых задач нужно (1–20)"}>
           <Input type="number" min={1} max={20} value={count} onChange={(e) => setCount(Number(e.target.value))} />
         </Field>
         <Field label="Доп. инструкции">
           <Textarea rows={2} value={instructions} onChange={(e) => setInstructions(e.target.value)} />
         </Field>
         <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          Платформа сама проверит каждый кандидат: два независимых решения, предметную критику,
-          решаемость без скрытых данных, полный ответ и единицы, источники, рубрику и дубликаты.
-          Готовые задачи попадут в банк без ручного подтверждения.
-          Задачи с расхождениями сохранятся для разбора; система попробует создать замену в пределах лимита партии.
+          {assistant.generation_policy === "single_verifier"
+            ? "На каждый вариант — одна генерация и одна независимая проверка с исправлением той же задачи. Готовые варианты сохранятся в банке Studio; исключения — для разбора. Если часть вариантов не готова, скрытого пополнения за дополнительные токены не будет."
+            : "Платформа проверит каждый кандидат: независимые решения, предметную корректность, полноту ответа, источники и рубрику. Готовые задачи попадут в банк; при расхождениях возможна замена в пределах лимита партии."}
         </p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">

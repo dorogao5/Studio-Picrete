@@ -471,7 +471,10 @@ async def revalidate_task(
     grounding_query = contract["kb_query"] or task.topic
     sheet_ids = contract["sheet_ids"] or None
     sheets = await load_reference_sheets(db, assistant_id, sheet_ids)
-    grounding_text = await build_generation_grounding(db, assistant_id, sheet_ids=sheet_ids, query=grounding_query)
+    grounding_text = await build_generation_grounding(
+        db, assistant_id, sheet_ids=sheet_ids, query=grounding_query,
+        include_kb=not (getattr(assistant, "generation_policy", "legacy") == "single_verifier" and (task.grounding or {}).get("blueprint")),
+    )
     if uses_single_verifier(assistant):
         # Reuse the same verifier and repair persistence path; this transient
         # progress object is never added as a new generation batch.
