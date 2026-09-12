@@ -1,9 +1,10 @@
 import hashlib
 import json
+import secrets
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
 from sqlalchemy.orm import selectinload
@@ -12,15 +13,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Assistant, Course, GeneratedTask, ModelEntry, PromptVersion, Provider, ReferenceSheet, User, PlaygroundRun, PlaygroundResult
+from app.api.assistants import get_assistant_or_404, resolve_model
+from app.models import (
+    Assistant,
+    Course,
+    GeneratedTask,
+    GenerationBatch,
+    ModelEntry,
+    PlaygroundResult,
+    PlaygroundRun,
+    PromptVersion,
+    Provider,
+    ReferenceSheet,
+    TaskTemplate,
+    User,
+)
 from app.schemas import PublishReviewRequest
 from app.security import get_current_user
 from app.services.content_preflight import create_review_token, verify_review_token
 from app.services.model_policy import current_model_use_policy
 from app.services.export import build_bank_export
+from app.services.model_policy import ModelUsePolicyError, require_decision_model
+from app.services.physical_chemistry import is_physical_chemistry
+from app.services.taskgen import GenerationError, resolve_generator_prompt_version, run_batch
 from app.services.task_approval import task_is_export_ready
 
 router = APIRouter(tags=["integration"])
+
+
+class StudentTrainerGenerationRequest(BaseModel):
+    assistant_id: str = Field(min_length=1, max_length=64)
+    topic: str = Field(min_length=1, max_length=256)
+    difficulty: str = Field(default="easy", pattern="^(easy|medium|hard)$")
+    count: int = Field(default=5, ge=1, le=10)
+
+
+def _authenticate_picrete_generation(authorization: str) -> None:
+    expected = get_settings().picrete_integration_token.strip()
+    actual = authorization.removeprefix("Bearer ").strip()
+    if not expected or not actual or not secrets.compare_digest(actual, expected):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Недействительный внутренний токен")
 
 
 def _picrete_headers() -> dict[str, str]:
@@ -34,6 +66,117 @@ def _ensure_configured() -> None:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Связь с Picrete ещё не настроена администратором платформы.",
         )
+
+
+@router.post("/internal/trainer/generate")
+async def generate_student_trainer_tasks(
+    body: StudentTrainerGenerationRequest,
+    authorization: str = Header(default=""),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Generate one fresh physical-chemistry set for the student trainer.
+
+    This is deliberately a narrow server-to-server endpoint. It reuses the
+    canonical Studio generation batch, so physical chemistry still has exactly
+    one Qwen generation call and one DeepSeek verification call per requested
+    task; a failed verifier repairs that same candidate in place and never
+    opens a replacement wave.
+    """
+    _authenticate_picrete_generation(authorization)
+    assistant = await get_assistant_or_404(body.assistant_id, db)
+    if not is_physical_chemistry(assistant):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Генерация через студенческий тренажёр включена только для физической химии",
+        )
+
+    topic = body.topic.strip()
+    template = (
+        await db.execute(
+            select(TaskTemplate)
+            .where(TaskTemplate.assistant_id == assistant.id, TaskTemplate.topic == topic)
+            .order_by(TaskTemplate.created_at)
+        )
+    ).scalars().first()
+    if template is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для выбранной подтемы нет канонического шаблона")
+
+    generator_id = getattr(assistant, "default_generator_model_id", None)
+    grader_id = getattr(assistant, "default_grader_model_id", None)
+    if not generator_id or not grader_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для ассистента не выбраны модели генерации и проверки")
+    generator_provider, generator_model = await resolve_model(db, generator_id)
+    _, grader_model = await resolve_model(db, grader_id)
+    try:
+        require_decision_model(generator_model, allow_advisory=True)
+        require_decision_model(grader_model)
+    except ModelUsePolicyError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
+    try:
+        prompt_version = await resolve_generator_prompt_version(db, assistant.id, None)
+    except GenerationError as err:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
+
+    batch = GenerationBatch(
+        assistant_id=assistant.id,
+        template_id=template.id,
+        status="running",
+        params={
+            "model_entry_id": generator_model.id,
+            "solver_model_entry_id": grader_model.id,
+            "topic": topic,
+            "difficulty": body.difficulty,
+            "count": body.count,
+            "instructions": "",
+            "temperature": 0.7,
+            "validate_tasks": True,
+            "prompt_version_id": prompt_version.id if prompt_version else None,
+        },
+        model_used=f"{generator_provider.name}/{generator_model.model_id}",
+        requested_count=body.count,
+        progress={"stage": "В очереди", "done": 0, "total": body.count},
+        created_by="student-trainer",
+    )
+    db.add(batch)
+    await db.commit()
+    await db.refresh(batch)
+
+    await run_batch(batch.id)
+    await db.refresh(batch)
+    if batch.status != "completed":
+        detail = batch.error[:500] if batch.error else "Проверка не сформировала готовый набор"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail)
+
+    tasks = list(
+        (
+            await db.execute(
+                select(GeneratedTask)
+                .where(
+                    GeneratedTask.batch_id == batch.id,
+                    GeneratedTask.status == "validated",
+                )
+                .order_by(GeneratedTask.created_at)
+            )
+        ).scalars()
+    )
+    ready = [task for task in tasks if task_is_export_ready(task)]
+    if len(ready) != body.count:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Независимая проверка подготовила {len(ready)} из {body.count} корректных задач; неполный набор студенту не выдан",
+        )
+
+    export = build_bank_export(
+        ready,
+        source_code="studio_fizicheskaya_himiya_dynamic",
+        source_title="Физическая химия · задачи, сгенерированные для тренажёра",
+        version=f"student-{batch.id}",
+    )
+    for paragraph in export["paragraphs"]:
+        for position, task in enumerate(paragraph["tasks"], start=1):
+            task["number"] = f"student-{batch.id[:12]}-{paragraph['paragraph']}-{position}"
+    export["student_batch_id"] = batch.id
+    return export
 
 
 @router.get("/integration/picrete/courses")
