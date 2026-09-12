@@ -277,6 +277,9 @@ async def generate_tasks(
            if (use_tools and physical) or physical_json_schema_enabled(assistant, provider, model) else {}),
         **({"essential_tools": True, "initial_tool_choice": "required"}
            if use_tools else {}),
+        **({"reasoning_effort": "low"}
+           if getattr(assistant, "generation_policy", "legacy") == "single_verifier"
+           and getattr(provider, "kind", "") == "deepseek" else {}),
     )
     parsed = llm.extract_json(result.text)
     tasks = _coerce_tasks(parsed)
@@ -454,9 +457,10 @@ def sheets_to_text(sheets: list[ReferenceSheet]) -> str:
 
 
 async def build_generation_grounding(
-    db: AsyncSession, assistant_id: str, *, sheet_ids: list[str] | None = None, query: str = ""
+    db: AsyncSession, assistant_id: str, *, sheet_ids: list[str] | None = None, query: str = "",
+    include_kb: bool = True,
 ) -> str:
-    return await build_grounding_block(db, assistant_id, sheet_ids=sheet_ids, query=query)
+    return await build_grounding_block(db, assistant_id, sheet_ids=sheet_ids, query=query, include_kb=include_kb)
 
 
 async def build_grounding_meta(
@@ -1043,7 +1047,9 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     sheets = await load_reference_sheets(db, batch.assistant_id, merged["sheet_ids"])
     grounding_query = merged["kb_query"] or merged["topic"]
     grounding_text = await build_generation_grounding(
-        db, batch.assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query
+        db, batch.assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query,
+        include_kb=not (getattr(assistant, "generation_policy", "legacy") == "single_verifier"
+                        and bool(merged["example_tasks"])),
     )
 
     existing = (

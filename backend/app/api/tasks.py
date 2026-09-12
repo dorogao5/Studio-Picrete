@@ -178,7 +178,9 @@ async def generate(
     grounding_query = merged["kb_query"] or merged["topic"]
     sheets = await load_reference_sheets(db, assistant_id, merged["sheet_ids"])
     grounding_text = await build_generation_grounding(
-        db, assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query
+        db, assistant_id, sheet_ids=merged["sheet_ids"], query=grounding_query,
+        include_kb=not (getattr(assistant, "generation_policy", "legacy") == "single_verifier"
+                        and bool(merged["example_tasks"])),
     )
 
     existing = (
