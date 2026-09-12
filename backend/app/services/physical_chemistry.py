@@ -223,6 +223,7 @@ async def run_physical_validation(
     prompt_context = {
         "discipline_profile": discipline_context,
         "canonical_grounding": grounding,
+        "blueprint_contract": (task.grounding or {}).get("blueprint", {}),
         "task": original,
     }
     reasons: list[str] = []

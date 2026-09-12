@@ -249,6 +249,10 @@ async def generate_tasks(
         import secrets
         candidates = [e for e in example_tasks if isinstance(e, dict) and e.get("statement")]
         example_tasks = [secrets.choice(candidates)] if candidates else []
+    if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
+        # Recent tasks are not exemplars. Their full text made the model copy the
+        # preceding blueprint instead of the selected one, and defeated prefix caching.
+        existing_statements = []
     user_message = build_generation_user_message(
         topic=topic,
         difficulty=difficulty,
@@ -290,6 +294,9 @@ async def generate_tasks(
             if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
                 # Server-owned metadata and empty optional fields are not chemistry verdicts.
                 item["topic"], item["difficulty"] = topic, difficulty
+                item["_blueprint"] = {"instructions": instructions,
+                    "source_number": (example_tasks or [{}])[0].get("source_number"),
+                    "example_statement": (example_tasks or [{}])[0].get("statement", "")}
                 for key, default in (("images", []), ("data_used", []), ("chemistry_facts", {}),
                                      ("rubric", rubric or []), ("max_score", 10)):
                     if item.get(key) is None:
@@ -669,6 +676,7 @@ def task_from_item(
             "chemistry_facts": chemistry_facts,
             "chemistry_facts_source": "generator",
             "validation_contract": contract,
+            **({"blueprint": item["_blueprint"]} if "_blueprint" in item else {}),
             **({"calculation_audit": item["_calculation_audit"]} if "_calculation_audit" in item else {}),
         },
     )
