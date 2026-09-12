@@ -185,6 +185,28 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                         raise LlmError("Empty final tool-dialogue answer")
                     if response_schema is not None and getattr(provider, "kind", "") == "deepseek":
                         try:
+                            json.loads(message["content"])
+                        except ValueError:
+                            if not audit.get("finalization_continuations"):
+                                # Formatting-only continuation of this same verifier/generator
+                                # dialogue. Preserve all evidence; no tool reruns or replacement.
+                                audit["finalization_continuations"] = 1
+                                audit["finalization_reason"] = "invalid_json_syntax"
+                                payload["messages"].append(message)
+                                payload["messages"].append({"role":"user", "content":
+                                    "Итог не является JSON. Оформите результат этой же задачи в JSON "
+                                    "по заданной схеме, сохранив вычисления и выводы. Не создавайте новую "
+                                    "задачу и не повторяйте проверки. Если вывод не установлен, верните fail; "
+                                    "не выдумывайте pass. Нужен только полный JSON, без комментария снаружи."})
+                                payload["tool_choice"] = "none"
+                                payload["reasoning_effort"] = "low"
+                                audit["model_calls"] += 1
+                                message, usage = await completion(client,
+                                    provider.base_url.rstrip("/") + "/chat/completions", headers, payload)
+                                audit["usage_by_call"].append(usage)
+                                if message.get("tool_calls"):
+                                    raise LlmError("Unexpected tool call during JSON finalization; not executed")
+                        try:
                             jsonschema.validate(json.loads(message["content"]), response_schema)
                         except (ValueError, jsonschema.ValidationError) as err:
                             # A generator returns candidates, never admitted tasks. Preserve a usable

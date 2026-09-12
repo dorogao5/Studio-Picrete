@@ -107,3 +107,25 @@ def test_native_verifier_metadata_repair_never_invents_core(monkeypatch, missing
         assert fixed["topic"]==original.topic and fixed["difficulty"]==original.difficulty
         assert validation["calculation_audit"]["verifier_schema_warning"]["disposition"]=="normalize_metadata_then_validate"
     assert validation["calculation_audit"]["model_calls"]==1
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+def test_malformed_json_gets_one_same_dialogue_format_continuation(monkeypatch, recovers):
+    from app.llm import essential_tools as et
+    mock_dialogue(monkeypatch)
+    calls=[]
+    async def completion(client_,url,headers,payload):
+        calls.append(json.loads(json.dumps(payload)))
+        return {"role":"assistant", "content":'{"value":4}' if recovers and len(calls)==2 else "Result is four"}, {}
+    monkeypatch.setattr(et,"completion",completion)
+    def run():
+        return asyncio.run(client.chat(Provider(kind="deepseek",base_url="https://model.invalid",extra_headers={}),
+            ModelEntry(model_id="deepseek-flash",family="deepseek",supports_json=True),"JSON","same task",
+            essential_tools=True,response_schema={"type":"object","required":["value"]}))
+    if recovers:
+        result=run();assert result.raw["finalization_reason"]=="invalid_json_syntax"
+    else:
+        with pytest.raises(client.LlmError,match="JSON schema"):run()
+    assert len(calls)==2
+    assert calls[1]["tool_choice"]=="none"
+    assert calls[1]["messages"][-2]["content"]=="Result is four"

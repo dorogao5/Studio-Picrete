@@ -168,6 +168,11 @@ async def update_assistant(
     if payload.get("verifier_model_id"):
         await require_operational_model(db, payload["verifier_model_id"], allow_advisory=False)
     profile_fields = {"discipline", "description", "audience", "language", "topics", "criteria", "nuances"}
+    if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
+        # Existing variants carry their own statement and rubric. Changes to
+        # course navigation/description or the default grading rubric affect
+        # future work, not the stored chemistry proof of an unchanged task.
+        profile_fields = {"discipline", "language", "nuances"}
     profile_changed = any(field in payload and getattr(assistant, field) != payload[field] for field in profile_fields)
     for field, value in payload.items():
         setattr(assistant, field, value)

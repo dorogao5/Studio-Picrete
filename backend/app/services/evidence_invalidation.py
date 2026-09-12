@@ -12,6 +12,7 @@ async def invalidate_task_evidence(
     *,
     reason: str,
     template_id: str | None = None,
+    knowledge_change: bool = False,
 ) -> int:
     """Mark stored decisions stale after an input to their evidence changes.
 
@@ -28,7 +29,18 @@ async def invalidate_task_evidence(
         statement = statement.where(GeneratedTask.template_id == template_id)
     tasks = list((await db.execute(statement)).scalars())
     invalidated_at = datetime.now(UTC).isoformat()
+    count = 0
     for task in tasks:
+        grounding = getattr(task, "grounding", None)
+        grounding = grounding if isinstance(grounding, dict) else {}
+        previous_validation = task.validation if isinstance(task.validation, dict) else {}
+        if (knowledge_change and previous_validation.get("policy_version") == "single-verifier-v1"
+                and grounding.get("blueprint") and grounding.get("kb_chunks") == 0
+                and grounding.get("sheets") == [] and grounding.get("data_used") == []):
+            # A new/unrelated KB item cannot change a self-contained candidate
+            # whose verifier used no KB chunks or reference sheets.
+            continue
+        count += 1
         previous = task.validation if isinstance(task.validation, dict) else {}
         validation = dict(previous)
         validation.pop("approval", None)
@@ -45,4 +57,4 @@ async def invalidate_task_evidence(
         task.validation = validation
         task.status = "needs_review"
         task.approved = False
-    return len(tasks)
+    return count

@@ -219,6 +219,7 @@ async def update_document(
         db,
         assistant_id,
         reason="Изменилась версия или область действия источника — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.commit()
     await db.refresh(document)
@@ -252,6 +253,7 @@ async def reparse_document(
         db,
         assistant_id,
         reason="Источник курса переразобран — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.commit()
     await db.refresh(document)
@@ -275,6 +277,7 @@ async def delete_document(assistant_id: str, document_id: str, db: AsyncSession 
         db,
         assistant_id,
         reason="Источник курса удалён — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.delete(document)
     await db.commit()
@@ -401,6 +404,7 @@ async def create_sheet(
             db,
             assistant_id,
             reason="Изменилась справочная карточка — автоматические доказательства нужно пересобрать",
+            knowledge_change=True,
         )
         await db.commit()
         await db.refresh(existing)
@@ -421,6 +425,7 @@ async def create_sheet(
         db,
         assistant_id,
         reason="Добавлена справочная карточка — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.commit()
     await db.refresh(sheet)
@@ -461,6 +466,7 @@ async def create_sheet_from_chunks(
         db,
         assistant_id,
         reason="Добавлена справочная карточка — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.commit()
     await db.refresh(sheet)
@@ -484,6 +490,7 @@ async def update_sheet(
         db,
         assistant_id,
         reason="Изменилась справочная карточка — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.commit()
     await db.refresh(sheet)
@@ -497,6 +504,7 @@ async def delete_sheet(assistant_id: str, sheet_id: str, db: AsyncSession = Depe
         db,
         assistant_id,
         reason="Справочная карточка удалена — автоматические доказательства нужно пересобрать",
+        knowledge_change=True,
     )
     await db.delete(sheet)
     await db.commit()

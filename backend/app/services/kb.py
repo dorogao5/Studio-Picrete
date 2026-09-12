@@ -628,6 +628,7 @@ async def ingest_document(document_id: str, analyze: bool = True) -> None:
                     db,
                     document.assistant_id,
                     reason="Источник курса обновлён — автоматические доказательства нужно пересобрать",
+                    knowledge_change=True,
                 )
             try:
                 await _offload_original(document)
