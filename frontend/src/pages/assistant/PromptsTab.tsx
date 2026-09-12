@@ -39,10 +39,11 @@ const ROLE_LABELS: Record<string, string> = {
   grader: "Проверка решений",
   generator: "Генерация заданий",
   tutor: "Разбор со студентом",
+  verifier: "Верификация задач",
 };
-const ROLE_BADGES: Record<string, string> = { grader: "Проверка", generator: "Генерация", tutor: "Разбор" };
+const ROLE_BADGES: Record<string, string> = { grader: "Проверка", generator: "Генерация", tutor: "Разбор", verifier: "Верификация" };
 
-const ALL_ROLES = ["generator", "grader", "tutor"] as const;
+const ALL_ROLES = ["generator", "grader", "tutor", "verifier"] as const;
 
 export default function PromptsTab({ assistant, providers }: { assistant: Assistant; providers: Provider[] }) {
   const [prompts, setPrompts] = useState<PromptVersion[] | null>(null);
@@ -65,8 +66,9 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
 
   const missingRoles = useMemo(() => {
     const active = new Set((prompts ?? []).filter((p) => p.status === "active").map((p) => p.role));
-    return ALL_ROLES.filter((r) => !active.has(r));
-  }, [prompts]);
+    const physical = /физичес/i.test(`${assistant.name} ${assistant.discipline}`) && /хим/i.test(`${assistant.name} ${assistant.discipline}`);
+    return ALL_ROLES.filter((r) => (r !== "verifier" || physical) && !active.has(r));
+  }, [prompts, assistant.name, assistant.discipline]);
 
   const bulkGenerate = async () => {
     const target = preferredDeepSeekV4(deepSeekV4Options(providers));
@@ -77,10 +79,13 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
     setError("");
     try {
       for (const role of missingRoles) {
+        const configuredId = role === "verifier" ? assistant.verifier_model_id
+          : role === "grader" ? assistant.default_grader_model_id : assistant.default_generator_model_id;
+        const roleTarget = modelOptions(providers, true).find((model) => model.id === configuredId) ?? target;
         setBulkState(`Архитектор пишет промпт «${ROLE_LABELS[role]}»… (до минуты)`);
         const p = await promptsApi.generate(assistant.id, {
           role,
-          target_model_entry_id: target.id,
+          target_model_entry_id: roleTarget.id,
           extra_instructions: "",
         });
         await promptsApi.activate(assistant.id, p.id);
@@ -110,7 +115,7 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
         {bulkState && <span className="text-xs text-muted-foreground">{bulkState}</span>}
       </div>
       <p className="text-xs text-muted-foreground">
-        Три роли ассистента — генерация заданий, проверка решений и разбор со студентом. Промпты для них пишет
+        Роли ассистента — генерация заданий, верификация задач, проверка решений студентов и разбор со студентом. Промпты для них пишет
         фоновая модель-архитектор из профиля дисциплины, критериев и нюансов; активная версия используется везде.
       </p>
 
@@ -120,10 +125,10 @@ export default function PromptsTab({ assistant, providers }: { assistant: Assist
       ) : prompts.length === 0 ? (
         <EmptyState
           title="Промптов пока нет"
-          hint="Нажмите «Собрать промпты автоматически» — архитектор напишет все три роли из профиля дисциплины"
+          hint="Нажмите «Собрать промпты автоматически» — архитектор напишет промпты из профиля дисциплины"
         />
       ) : (
-        (["grader", "generator", "tutor"] as const).map((role) => {
+        ALL_ROLES.map((role) => {
           const rolePrompts = prompts.filter((p) => p.role === role);
           if (rolePrompts.length === 0) return null;
           return (
@@ -343,11 +348,12 @@ function GenerateModal({
             <option value="grader">Проверка решений</option>
             <option value="generator">Генерация заданий</option>
             <option value="tutor">Разбор со студентом</option>
+            <option value="verifier">Верификация задач</option>
           </Select>
         </Field>
         <Field
           label="Целевая модель (кто будет работать по промпту)"
-          hint="Рабочие промпты ассистентов адаптируются под DeepSeek V4.1 Flash"
+          hint="Выберите модель, для которой предназначен промпт этой роли"
         >
           <Select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
             {production.length === 0 && <option value="">— подключите DeepSeek V4 —</option>}
@@ -396,6 +402,7 @@ function ManualModal({
   onCreated: () => void;
 }) {
   const [role, setRole] = useState("grader");
+  const [family, setFamily] = useState("deepseek");
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
@@ -405,7 +412,7 @@ function ManualModal({
     setLoading(true);
     setError("");
     try {
-      await promptsApi.create(assistant.id, { role, system_prompt: text, notes, target_family: "deepseek" });
+      await promptsApi.create(assistant.id, { role, system_prompt: text, notes, target_family: family });
       onCreated();
       onClose();
       setText("");
@@ -424,6 +431,13 @@ function ManualModal({
             <option value="grader">Проверка решений</option>
             <option value="generator">Генерация заданий</option>
             <option value="tutor">Разбор со студентом</option>
+            <option value="verifier">Верификация задач</option>
+          </Select>
+        </Field>
+        <Field label="Семейство модели">
+          <Select value={family} onChange={(e) => setFamily(e.target.value)}>
+            <option value="deepseek">DeepSeek</option>
+            <option value="qwen">Qwen</option>
           </Select>
         </Field>
         <Field label="Системный промпт">

@@ -123,6 +123,7 @@ class AssistantOut(ORMModel):
     nuances: list
     default_grader_model_id: str | None
     default_generator_model_id: str | None
+    verifier_model_id: str | None = None
     created_by: str = ""
     created_by_name: str = ""
     updated_by_name: str = ""
@@ -183,6 +184,7 @@ class AssistantUpdate(BaseModel):
     nuances: list[str] | None = None
     default_grader_model_id: str | None = None
     default_generator_model_id: str | None = None
+    verifier_model_id: str | None = None
 
 
 class PromptVersionOut(ORMModel):
@@ -200,14 +202,14 @@ class PromptVersionOut(ORMModel):
 
 
 class PromptVersionCreate(BaseModel):
-    role: str = Field(pattern="^(grader|generator|tutor)$")
+    role: str = Field(pattern="^(grader|generator|tutor|verifier)$")
     system_prompt: str
     notes: str = ""
     target_family: str = "generic"
 
 
 class PromptGenerateRequest(BaseModel):
-    role: str = Field(pattern="^(grader|generator|tutor)$")
+    role: str = Field(pattern="^(grader|generator|tutor|verifier)$")
     target_model_entry_id: str
     extra_instructions: str = ""
 
@@ -603,7 +605,7 @@ class TutorFeedbackRequest(BaseModel):
 
 
 class PromptPreviewRequest(BaseModel):
-    role: str = Field(pattern="^(grader|generator|tutor)$")
+    role: str = Field(pattern="^(grader|generator|tutor|verifier)$")
     prompt_version_id: str | None = None
     task_id: str | None = None
     template_id: str | None = None

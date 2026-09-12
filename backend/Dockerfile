@@ -11,10 +11,12 @@ WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --from=uv /uv /usr/local/bin/uv
-COPY pyproject.toml uv.lock ./
-COPY app ./app
-COPY scripts ./scripts
+COPY backend/pyproject.toml backend/uv.lock ./
+COPY backend/app ./app
+COPY backend/scripts ./scripts
 RUN uv sync --frozen --no-dev --no-editable --no-cache
+COPY ops/release_physical_chemistry.py ./ops/release_physical_chemistry.py
+COPY ops/content/physical_chemistry ./ops/content/physical_chemistry
 
 EXPOSE 8100
 CMD ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8100"]

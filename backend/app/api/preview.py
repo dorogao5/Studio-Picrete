@@ -1,4 +1,6 @@
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,8 @@ from app.models import Assistant, GeneratedTask, PromptVersion, TaskTemplate, Us
 from app.schemas import PromptPreviewRequest, PromptPreviewResponse
 from app.security import get_current_user
 from app.services import taskgen
+from app.services.physical_chemistry import physical_verifier_prompt, _task_payload
+from app.services.assistant_profile import build_assistant_profile
 from app.services.assistant_profile import with_assistant_profile
 from app.services.contracts import GENERATION_JSON_CONTRACT
 from app.services.grading import build_grading_user_message
@@ -56,6 +60,8 @@ async def _resolve_system_prompt(
         )
     if role == "tutor":
         return FALLBACK_TUTOR_PROMPT.format(discipline=assistant.discipline)
+    if role == "verifier":
+        return ""
     return GRADER_NO_PROMPT_PLACEHOLDER
 
 
@@ -84,7 +90,8 @@ async def prompt_preview(
 ) -> PromptPreviewResponse:
     assistant = await get_assistant_or_404(assistant_id, db)
     system_prompt = await _resolve_system_prompt(db, assistant, body.role, body.prompt_version_id)
-    system_prompt = with_assistant_profile(system_prompt, assistant)
+    if body.role != "verifier":
+        system_prompt = with_assistant_profile(system_prompt, assistant)
 
     task = None
     if body.task_id:
@@ -125,6 +132,11 @@ async def prompt_preview(
             ).scalars()
         )
         user_message = _build_generation_message(template, grounding, existing_statements)
+    elif body.role == "verifier":
+        grounding = await build_grounding_block(db, assistant.id, query=task.topic if task else "")
+        system_prompt = physical_verifier_prompt(system_prompt)
+        user_message = json.dumps({"discipline_profile": build_assistant_profile(assistant),
+            "canonical_grounding": grounding, "task": _task_payload(task) if task else {}}, ensure_ascii=False)
     elif body.role == "tutor":
         query_source = task.statement if task else (body.student_work or SAMPLE_STUDENT_MESSAGE)
         grounding = await build_grounding_block(

@@ -845,7 +845,9 @@ def run(argv: list[str] | None = None, *, api: Api | None = None, content_root: 
     authorization = load_authorization(args.auth_header_file)
     api = api or StudioApi(args.base_url, authorization, args.timeout, args.ca_file)
     mappings = _parse_overrides(args.assistant_map, DEFAULT_ASSISTANT_IDS)
-    selected = list(dict.fromkeys(args.packages or DEFAULT_ASSISTANT_IDS))
+    selected = list(dict.fromkeys(args.packages or [p for p in DEFAULT_ASSISTANT_IDS if p != "physical_chemistry"]))
+    if "physical_chemistry" in selected:
+        raise ReleaseError("Physical chemistry R2 uses ops/release_physical_chemistry.py (no document uploads; separate verifier and student grader)")
     root = content_root or Path(__file__).resolve().parent / "content"
 
     providers = api.get("providers")

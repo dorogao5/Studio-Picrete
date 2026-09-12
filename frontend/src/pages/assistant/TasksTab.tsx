@@ -1680,8 +1680,9 @@ function BatchLaunchModal({
     (production.some((model) => model.id === assistant.default_generator_model_id)
       ? assistant.default_generator_model_id!
       : (production.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-flash")?.id ?? production[0]?.id ?? ""));
-  const preferredSolverId = controlModels.some((model) => model.id === assistant.default_grader_model_id)
-    ? assistant.default_grader_model_id!
+  const verifierId = assistant.verifier_model_id || assistant.default_grader_model_id;
+  const preferredSolverId = controlModels.some((model) => model.id === verifierId)
+    ? verifierId!
     : (controlModels.find((model) => model.modelId.toLocaleLowerCase() === "deepseek-flash")?.id ??
       controlModels.find((model) => model.id !== preferredGeneratorId)?.id ??
       controlModels[0]?.id ??

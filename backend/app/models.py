@@ -76,6 +76,7 @@ class Assistant(Base):
     nuances: Mapped[list] = mapped_column(JSON, default=list)
     default_grader_model_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     default_generator_model_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verifier_model_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(32), default="")
     updated_by: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

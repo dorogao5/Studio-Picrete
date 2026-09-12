@@ -443,6 +443,6 @@ def test_exact_prompt_with_wrong_family_fails_instead_of_duplicating(tmp_path: P
             "status": "active",
         }
     ]
-    with pytest.raises(release.ReleaseError, match="not marked for the DeepSeek"):
+    with pytest.raises(release.ReleaseError, match="not marked for the deepseek family"):
         release.preflight_package(api, tmp_path / "general_inorganic_lab", ASSISTANT_ID, MODEL_ID)
     assert api.writes == []

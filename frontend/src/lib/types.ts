@@ -73,6 +73,7 @@ export interface Assistant {
   nuances: string[];
   default_grader_model_id: string | null;
   default_generator_model_id: string | null;
+  verifier_model_id?: string | null;
   created_by: string;
   created_by_name: string;
   updated_by_name: string;
@@ -135,7 +136,7 @@ export interface CoursePublishPreflight {
   };
 }
 
-export type PromptRole = "grader" | "generator" | "tutor";
+export type PromptRole = "grader" | "generator" | "tutor" | "verifier";
 
 export interface PromptVersion {
   id: string;

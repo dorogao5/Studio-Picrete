@@ -293,7 +293,7 @@ export const previewApi = {
   preview: (
     assistantId: string,
     body: {
-      role: "grader" | "generator" | "tutor";
+      role: "grader" | "generator" | "tutor" | "verifier";
       prompt_version_id?: string | null;
       task_id?: string | null;
       template_id?: string | null;

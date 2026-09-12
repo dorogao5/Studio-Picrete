@@ -154,7 +154,12 @@ async def update_assistant(
     if payload.get("default_generator_model_id"):
         await require_operational_model(db, payload["default_generator_model_id"], allow_advisory=True)
     if payload.get("default_grader_model_id"):
-        await require_operational_model(db, payload["default_grader_model_id"], allow_advisory=False)
+        from app.services.physical_chemistry import student_grading_model_use
+        _, grader = await require_operational_model(db, payload["default_grader_model_id"], allow_advisory=True)
+        if not student_grading_model_use(assistant, grader).decision_capable:
+            raise HTTPException(422, "Модель не разрешена для проверки работ студентов")
+    if payload.get("verifier_model_id"):
+        await require_operational_model(db, payload["verifier_model_id"], allow_advisory=False)
     profile_fields = {"discipline", "description", "audience", "language", "topics", "criteria", "nuances"}
     profile_changed = any(field in payload and getattr(assistant, field) != payload[field] for field in profile_fields)
     for field, value in payload.items():
@@ -392,10 +397,12 @@ async def activate_prompt(
     if prompt is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Версия промпта не найдена")
     family = prompt.target_family.strip().casefold()
-    if prompt.role == "grader" and family != "deepseek":
+    from app.services.physical_chemistry import is_physical_chemistry
+    grader_families = {"deepseek", "qwen"} if is_physical_chemistry(assistant) else {"deepseek"}
+    if prompt.role == "grader" and family not in grader_families:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Активный промпт проверки должен быть версией для DeepSeek",
+            "Семейство промпта не разрешено для проверки решений этой дисциплины",
         )
     if prompt.role in {"generator", "tutor"} and family not in {"deepseek", "qwen"}:
         raise HTTPException(

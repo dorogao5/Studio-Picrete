@@ -1,0 +1,17 @@
+**
+!backend/
+!backend/Dockerfile
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/app/
+!backend/app/**
+!backend/scripts/
+!backend/scripts/**
+!ops/
+!ops/release_physical_chemistry.py
+!ops/content/
+!ops/content/physical_chemistry/
+!ops/content/physical_chemistry/**
+**/__pycache__
+**/*.pyc
+**/.env*

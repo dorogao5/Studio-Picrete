@@ -7,7 +7,6 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
-from sqlalchemy.orm import selectinload
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +33,7 @@ from app.services.content_preflight import create_review_token, verify_review_to
 from app.services.model_policy import current_model_use_policy
 from app.services.export import build_bank_export
 from app.services.model_policy import ModelUsePolicyError, require_decision_model
-from app.services.physical_chemistry import is_physical_chemistry
+from app.services.physical_chemistry import is_physical_chemistry, student_grading_model_use, task_verifier_model_id
 from app.services.taskgen import GenerationError, resolve_generator_prompt_version, run_batch
 from app.services.task_approval import task_is_export_ready
 
@@ -94,17 +93,19 @@ async def generate_student_trainer_tasks(
     template = (
         await db.execute(
             select(TaskTemplate)
-            .where(TaskTemplate.assistant_id == assistant.id, TaskTemplate.topic == topic)
-            .order_by(TaskTemplate.created_at)
+            .where(TaskTemplate.assistant_id == assistant.id, TaskTemplate.topic == topic,
+                   TaskTemplate.difficulty == body.difficulty)
+            .order_by(TaskTemplate.created_at, TaskTemplate.id)
         )
     ).scalars().first()
     if template is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для выбранной подтемы нет канонического шаблона")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Для выбранной подтемы и сложности нет канонического шаблона")
 
     generator_id = getattr(assistant, "default_generator_model_id", None)
-    grader_id = getattr(assistant, "default_grader_model_id", None)
+    grader_id = task_verifier_model_id(assistant)
     if not generator_id or not grader_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для ассистента не выбраны модели генерации и проверки")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для ассистента не выбраны модели генерации и верификации задач")
     generator_provider, generator_model = await resolve_model(db, generator_id)
     _, grader_model = await resolve_model(db, grader_id)
     try:
@@ -143,9 +144,6 @@ async def generate_student_trainer_tasks(
 
     await run_batch(batch.id)
     await db.refresh(batch)
-    if batch.status != "completed":
-        detail = batch.error[:500] if batch.error else "Проверка не сформировала готовый набор"
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail)
 
     tasks = list(
         (
@@ -160,10 +158,10 @@ async def generate_student_trainer_tasks(
         ).scalars()
     )
     ready = [task for task in tasks if task_is_export_ready(task)]
-    if len(ready) != body.count:
+    if not ready:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
-            f"Независимая проверка подготовила {len(ready)} из {body.count} корректных задач; неполный набор студенту не выдан",
+            batch.error[:500] if batch.error else "Независимая проверка не подготовила ни одной корректной задачи",
         )
 
     export = build_bank_export(
@@ -176,6 +174,11 @@ async def generate_student_trainer_tasks(
         for position, task in enumerate(paragraph["tasks"], start=1):
             task["number"] = f"student-{batch.id[:12]}-{paragraph['paragraph']}-{position}"
     export["student_batch_id"] = batch.id
+    # A terminal batch can contain both ready tasks and candidates needing
+    # manual repair. Deliver existing evidence-backed tasks without a refill.
+    export["requested_count"] = body.count
+    export["ready_count"] = len(ready)
+    export["pending_count"] = max(0, body.count - len(ready))
     return export
 
 
@@ -222,7 +225,8 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Основная модель проверки не найдена или отключена.",
         )
-    grader_use = current_model_use_policy().classify(grader)
+    grader_use = (student_grading_model_use(assistant, grader) if is_physical_chemistry(assistant)
+                  else current_model_use_policy().classify(grader))
     if not grader_use.decision_capable:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -256,7 +260,8 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
         "decision_model_id": grader.model_id,
         "decision_provider_kind": getattr(grader_provider, "kind", ""),
         "tier": grader_use.tier,
-        "allowed_uses": ["student_tutor", "task_validation", "grading"],
+        "allowed_uses": (["student_tutor", "grading"] if is_physical_chemistry(assistant)
+                         else ["student_tutor", "task_validation", "grading"]),
     }
     # Compatibility for lightweight callers/tests that provide model objects
     # without provider metadata. Real persisted model entries always carry it.

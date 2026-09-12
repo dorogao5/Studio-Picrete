@@ -10,6 +10,9 @@ import { isKnownAdvisoryModel } from "../../lib/modelPolicy";
 export default function ProfileTab({ assistant, providers, onSaved }: { assistant: Assistant; providers: Provider[]; onSaved: () => void }) {
   const models = modelOptions(providers, true);
   const decisionModels = models.filter((model) => !isKnownAdvisoryModel(model));
+  const physical = /физичес/i.test(`${assistant.name} ${assistant.discipline}`) && /хим/i.test(`${assistant.name} ${assistant.discipline}`);
+  const gradingModels = models.filter((model) => !isKnownAdvisoryModel(model) || (physical && model.family === "qwen"));
+  const [verifierModel, setVerifierModel] = useState(assistant.verifier_model_id ?? "");
   const [graderModel, setGraderModel] = useState(assistant.default_grader_model_id ?? "");
   const [generatorModel, setGeneratorModel] = useState(assistant.default_generator_model_id ?? "");
   const [gradingEnabled, setGradingEnabled] = useState(assistant.grading_enabled ?? false);
@@ -32,6 +35,7 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
         name,
         default_grader_model_id: graderModel || null,
         default_generator_model_id: generatorModel || null,
+        verifier_model_id: verifierModel || null,
         grading_enabled: gradingEnabled,        description,
         audience,
         topics: topics.split("\n").map((t) => t.trim().replace(/^[•\-–]\s*/, "")).filter(Boolean),
@@ -51,18 +55,25 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
     <div className="space-y-5">
       <Card className="p-5 space-y-4">
         <h2 className="font-semibold text-sm">Модели курса</h2>
-        <Field label="Ассистент курса и проверка" hint="Эта модель отвечает студентам и проверяет решения в Picrete после публикации обновления курса. Модели отдельных шагов Studio выбираются на вкладке «Проверка».">
-          <Select aria-label="Ассистент курса и проверка" value={graderModel} onChange={(e) => setGraderModel(e.target.value)}>
+        <Field label="Проверка решений студентов" hint="Модель оценивает работы студентов в Picrete по промпту «Проверка решений» после публикации курса.">
+          <Select aria-label="Проверка решений студентов" value={graderModel} onChange={(e) => setGraderModel(e.target.value)}>
             <option value="">— выберите модель —</option>
-            {graderModel && !decisionModels.some((m) => m.id === graderModel) && <option value={graderModel} disabled>Текущая модель недоступна — выберите другую</option>}
-            {decisionModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            {graderModel && !gradingModels.some((m) => m.id === graderModel) && <option value={graderModel} disabled>Текущая модель недоступна — выберите другую</option>}
+            {gradingModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
           </Select>
         </Field>
-        <Field label="Генерация заданий" hint="Модель по умолчанию для новых партий заданий. Независимое решение и аудит настраиваются при запуске партии.">
+        <Field label="Генерация заданий и разбор со студентом" hint="Модель создаёт задачи и отвечает студентам в Picrete по промпту «Разбор со студентом».">
           <Select aria-label="Генерация заданий" value={generatorModel} onChange={(e) => setGeneratorModel(e.target.value)}>
             <option value="">— выберите модель —</option>
             {generatorModel && !models.some((m) => m.id === generatorModel) && <option value={generatorModel} disabled>Текущая модель недоступна — выберите другую</option>}
             {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Верификация задач" hint="Независимая модель проверяет и исправляет задачи до выдачи студентам. Для физической химии выберите отдельную модель; у других дисциплин по умолчанию используется модель проверки решений.">
+          <Select aria-label="Верификация задач" value={verifierModel} onChange={(e) => setVerifierModel(e.target.value)}>
+            <option value="">{physical ? "— выберите верификатор —" : "Модель проверки решений"}</option>
+            {verifierModel && !decisionModels.some((m) => m.id === verifierModel) && <option value={verifierModel} disabled>Текущая модель недоступна</option>}
+            {decisionModels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
           </Select>
         </Field>
       </Card>

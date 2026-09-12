@@ -3,6 +3,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from copy import deepcopy
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,10 +29,12 @@ from app.services.grounding import AUTHORITY_LABELS, KB_HEADER, build_grounding_
 from app.services.physical_chemistry import (
     is_physical_chemistry,
     run_physical_validation,
+    task_verifier_model_id,
 )
 from app.services.task_approval import task_is_export_ready
 from app.services.task_evidence import evidence_matches_task, normalize_validation_config, task_content_fingerprint
 from app.services.validation import run_validation
+from app.services.model_policy import require_decision_model
 
 FALLBACK_GENERATOR_PROMPT = """Вы — опытный преподаватель и методист высшей школы по дисциплине «{discipline}».
 Вы составляете типовые учебные задания: условие, подробное эталонное решение, краткий финальный ответ (answer)
@@ -770,6 +773,27 @@ async def _validate_batch(
         # never physical-chemistry, by default.
         assistant = None
     physical = assistant is not None and is_physical_chemistry(assistant)
+    verifier_prompt = None
+    if physical:
+        verifier_prompt = (
+            await db.execute(select(PromptVersion).where(
+                PromptVersion.assistant_id == batch.assistant_id,
+                PromptVersion.role == "verifier",
+                PromptVersion.status == "active",
+            ))
+        ).scalar_one_or_none()
+        if verifier_prompt and verifier_prompt.target_family and (
+            verifier_prompt.target_family.casefold() != solver_model.family.casefold()
+        ):
+            raise GenerationError("Активный промпт проверки не соответствует семейству модели")
+    # Include metadata absent from the shared evidence fingerprint: repairs can
+    # change these fields too, so teacher edits to them must also win.
+    repair_fields = ("statement", "reference_solution", "answer", "images", "rubric",
+                     "max_score", "difficulty", "topic", "grounding")
+    original_content = {
+        task.id: deepcopy({key: getattr(task, key, None) for key in repair_fields})
+        for task in created
+    } if physical else {}
     prior = (
         (
             await db.execute(
@@ -801,6 +825,7 @@ async def _validate_batch(
                     discipline_context=discipline_context,
                     answer_format=contract["answer_format"],
                     tolerance_pct=contract["tolerance_pct"],
+                    system_prompt=verifier_prompt.system_prompt if verifier_prompt else None,
                 )
                 return task, validation, correction
             validation = await run_validation(
@@ -837,7 +862,15 @@ async def _validate_batch(
         pending = [group.create_task(validate_one(task)) for task in created]
         for index, completed in enumerate(asyncio.as_completed(pending), start=1):
             task, validation, correction = await completed
-            await db.refresh(task)
+            if physical:
+                # Lock only after the remote check, through the following commit.
+                await db.refresh(task, with_for_update=True)
+                if (original_content[task.id] != {key: getattr(task, key, None) for key in repair_fields}
+                        or not evidence_matches_task(validation, task)):
+                    await _set_progress(db, batch, f"{stage_name}: готово {index}/{total}", index, total)
+                    continue
+            else:
+                await db.refresh(task)
             if physical and correction is not None:
                 repaired = task_from_item(
                     correction,
@@ -849,7 +882,6 @@ async def _validate_batch(
                     model_used=task.model_used,
                     grounding_meta=task.grounding or {},
                     validation_contract=validation.get("validation_config"),
-                    template_rubric=task.rubric or [],
                 )
                 if repaired is None:
                     validation = dict(validation)
@@ -862,13 +894,13 @@ async def _validate_batch(
                     task.statement = repaired.statement
                     task.reference_solution = repaired.reference_solution
                     task.answer = repaired.answer
-                    task.images = repaired.images
                     task.rubric = repaired.rubric
                     task.max_score = repaired.max_score
                     task.difficulty = repaired.difficulty
                     task.topic = repaired.topic
                     task.grounding = repaired.grounding
                     validation = dict(validation)
+                    validation["correction"] = {**validation.get("correction", {}), "applied": True}
                     validation["content_fingerprint"] = task_content_fingerprint(
                         task, validation.get("validation_config") or {}
                     )
@@ -909,6 +941,15 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         raise GenerationError("Дисциплина не найдена")
     physical = is_physical_chemistry(assistant)
     provider, model = await _resolve_batch_model(db, str(params.get("model_entry_id") or ""))
+    physical_verifier = None
+    if physical:
+        verifier_id = params.get("solver_model_entry_id") or task_verifier_model_id(assistant)
+        if not verifier_id:
+            raise GenerationError("Выберите отдельную модель верификации задач по физической химии")
+        physical_verifier = await _resolve_batch_model(db, str(verifier_id))
+        if not physical_verifier[1].enabled:
+            raise GenerationError("Модель верификации отключена")
+        require_decision_model(physical_verifier[1])
 
     template: TaskTemplate | None = None
     if batch.template_id:
@@ -964,7 +1005,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
     # Physical chemistry uses exactly one generator call per requested task.
     # A failed verifier repairs that same row; it never opens a refill wave.
     candidate_budget = count if physical else min(count * 2, count + 5)
-    call_budget = _GenerationCallBudget(limit=_generation_call_limit(candidate_budget))
+    call_budget = _GenerationCallBudget(limit=count if physical else _generation_call_limit(candidate_budget))
     grounding_meta = await build_grounding_meta(
         db,
         sheets,
@@ -1023,8 +1064,11 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
 
     validation_enabled = True if physical else bool(params.get("validate_tasks", True))
     solver_provider, solver_model = provider, model
-    if params.get("solver_model_entry_id"):
-        solver_provider, solver_model = await _resolve_batch_model(db, str(params["solver_model_entry_id"]))
+    solver_entry_id = params.get("solver_model_entry_id") or (task_verifier_model_id(assistant) if physical else None)
+    if physical_verifier is not None:
+        solver_provider, solver_model = physical_verifier
+    elif solver_entry_id:
+        solver_provider, solver_model = await _resolve_batch_model(db, str(solver_entry_id))
     if validation_enabled:
         await _validate_batch(
             db,

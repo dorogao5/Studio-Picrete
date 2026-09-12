@@ -9,6 +9,7 @@ from app.services.assistant_profile import build_assistant_profile
 from app.services.task_approval import task_is_export_ready
 from app.services.task_evidence import evidence_matches_task
 from app.services.taskgen import (
+    _validate_batch,
     _resolve_batch_model,
     build_generation_grounding,
     build_grounding_meta,
@@ -18,6 +19,7 @@ from app.services.taskgen import (
     validation_contract_for_task,
 )
 from app.services.validation import run_validation
+from app.services.physical_chemistry import is_physical_chemistry
 
 
 async def _set_progress(
@@ -118,6 +120,12 @@ async def _revalidate_task(
         grounding_query,
         assistant_id=batch.assistant_id,
     )
+    assistant = await db.get(Assistant, batch.assistant_id)
+    if assistant is not None and is_physical_chemistry(assistant):
+        await _validate_batch(db, batch, [task], merged, solver_provider, solver_model,
+                              grounding_text, sheets_to_text(sheets), discipline_context)
+        await sync_generation_batch(db, task)
+        return "ready" if task_is_export_ready(task) else "attention"
     existing = (
         (
             await db.execute(

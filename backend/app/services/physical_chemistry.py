@@ -10,6 +10,7 @@ instead of buying a replacement generation.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from app.llm import client as llm
@@ -58,9 +59,29 @@ max_score, difficulty, topic, data_used и chemistry_facts (для физхим�
 
 
 def is_physical_chemistry(assistant: Assistant) -> bool:
-    values = (assistant.discipline, assistant.name)
+    values = (getattr(assistant, "discipline", ""), getattr(assistant, "name", ""))
     normalized = " ".join(str(value or "").casefold() for value in values)
     return "физичес" in normalized and "хим" in normalized
+
+
+def physical_verifier_prompt(system_prompt: str | None) -> str:
+    """Use the editable prompt verbatim; domain rules are fallback content only."""
+    return system_prompt if system_prompt and system_prompt.strip() else PHYSICAL_CHEMISTRY_VERIFIER_PROMPT
+
+
+def task_verifier_model_id(assistant: Assistant) -> str | None:
+    if is_physical_chemistry(assistant):
+        return getattr(assistant, "verifier_model_id", None)
+    return getattr(assistant, "verifier_model_id", None) or getattr(assistant, "default_grader_model_id", None)
+
+
+def student_grading_model_use(assistant: Assistant, model: ModelEntry):
+    use = current_model_use_policy().classify(model)
+    if (is_physical_chemistry(assistant) and model.family == "qwen" and use.explicitly_configured):
+        # Permission applies to student grading only, never task admission.
+        return replace(use, tier="decision", decision_capable=True,
+                       reason="Qwen разрешён для проверки работ студентов по физической химии")
+    return use
 
 
 def _task_payload(task: GeneratedTask) -> dict[str, Any]:
@@ -87,7 +108,8 @@ def _normalized_correction(candidate: object, original: dict[str, Any]) -> dict[
     for key in ("rubric", "max_score", "difficulty", "topic", "data_used", "chemistry_facts"):
         if key not in result:
             result[key] = original[key]
-    if not all(str(result.get(key) or "").strip() for key in ("statement", "reference_solution", "answer")):
+    if not all(isinstance(result.get(key), str) and result[key].strip()
+               for key in ("statement", "reference_solution", "answer")):
         return None
     if not isinstance(result.get("rubric"), list) or not isinstance(result.get("data_used"), list):
         return None
@@ -104,6 +126,7 @@ async def run_physical_validation(
     discipline_context: str,
     answer_format: str = "numeric",
     tolerance_pct: float = 2.0,
+    system_prompt: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     config = normalize_validation_config(
         {
@@ -116,6 +139,7 @@ async def run_physical_validation(
         }
     )
     original = _task_payload(task)
+    fingerprint = task_content_fingerprint(task, config)
     prompt_context = {
         "discipline_profile": discipline_context,
         "canonical_grounding": grounding,
@@ -129,7 +153,7 @@ async def run_physical_validation(
         result = await llm.chat(
             provider,
             model,
-            PHYSICAL_CHEMISTRY_VERIFIER_PROMPT,
+            physical_verifier_prompt(system_prompt),
             json.dumps(prompt_context, ensure_ascii=False),
             temperature=0.1,
             json_mode=True,
@@ -144,22 +168,20 @@ async def run_physical_validation(
         issues = [str(issue).strip() for issue in response.get("issues") or [] if str(issue).strip()]
         verdict = str(response.get("verdict") or "fail").strip().casefold()
         correction = _normalized_correction(response.get("corrected_task"), original)
-        if verdict == "pass":
-            if issues:
-                reasons.extend(issues)
-            else:
-                verifier_report = {
-                    "status": "match",
-                    "comparison": {"verdict": "match", "basis": "single_independent_verifier"},
-                    "issues": [],
-                    "solution": str((response.get("verification") or {}).get("solution") or ""),
-                    "answer": str((response.get("verification") or {}).get("answer") or ""),
-                    "solution_truncated": False,
-                }
-        elif correction is not None:
+        if correction is not None and verdict in {"pass", "fail"}:
             verifier_report = {
                 "status": "match",
                 "comparison": {"verdict": "match", "basis": "single_independent_verifier_repair"},
+                "issues": issues,
+                "solution": str((response.get("verification") or {}).get("solution") or ""),
+                "answer": str((response.get("verification") or {}).get("answer") or ""),
+                "solution_truncated": False,
+            }
+        elif verdict == "pass" and response.get("corrected_task") is None:
+            # The verdict is semantic; issues may contain harmless notes.
+            verifier_report = {
+                "status": "match",
+                "comparison": {"verdict": "match", "basis": "single_independent_verifier"},
                 "issues": issues,
                 "solution": str((response.get("verification") or {}).get("solution") or ""),
                 "answer": str((response.get("verification") or {}).get("answer") or ""),
@@ -176,12 +198,12 @@ async def run_physical_validation(
         reasons.append("Верификатор вернул ответ не по JSON-контракту")
 
     validated = verifier_report.get("status") == "match" and not reasons
-    if correction is not None and verifier_report.get("status") == "match":
-        validated = True
+    if not validated:
+        correction = None
     validation: dict[str, Any] = {
         "policy_version": PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION,
         "validation_config": config,
-        "content_fingerprint": task_content_fingerprint(task, config),
+        "content_fingerprint": fingerprint,
         "model_policy": model_use.as_dict(),
         "solver": {"status": "skipped", "reason": "Физхимия: используется один независимый verifier"},
         "verifier": verifier_report,
@@ -199,7 +221,7 @@ async def run_physical_validation(
         "verdict": "validated" if validated else "needs_review",
         "reasons": reasons,
         "correction": {
-            "applied": correction is not None,
+            "applied": False,
             "issues": (verifier_report.get("issues") or []) if correction is not None else [],
         },
     }

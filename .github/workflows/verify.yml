@@ -16,6 +16,9 @@ jobs:
           python-version: '3.12'
       - run: uv sync --locked
       - run: uv run --locked python -m pytest -q tests ../ops/tests
+      - name: Build backend image with release content
+        working-directory: .
+        run: docker build --file backend/Dockerfile --tag picrete-studio:ci .
   frontend:
     runs-on: ubuntu-latest
     defaults:

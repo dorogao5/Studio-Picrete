@@ -415,7 +415,9 @@ def run(
             release.StudioApi(args.base_url, authorization, timeout=args.timeout, ca_file=args.ca_file)
         )
     mappings = release._parse_overrides(args.assistant_map, release.DEFAULT_ASSISTANT_IDS)
-    selected = list(dict.fromkeys(args.packages or release.DEFAULT_ASSISTANT_IDS))
+    selected = list(dict.fromkeys(args.packages or [p for p in release.DEFAULT_ASSISTANT_IDS if p != "physical_chemistry"]))
+    if "physical_chemistry" in selected:
+        raise release.ReleaseError("Physical chemistry R2 uses ops/release_physical_chemistry.py; source documents must not be uploaded")
     root = content_root or Path(__file__).resolve().parent / "content"
 
     # Validate every local file and declared digest before any remote call or write.
