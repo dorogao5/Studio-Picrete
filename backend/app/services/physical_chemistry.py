@@ -178,7 +178,8 @@ async def run_physical_validation(
             temperature=0.1,
             json_mode=True,
             thinking="enabled",
-            **({"essential_tools": True, "response_schema": PHYSICAL_VERIFIER_RESPONSE_SCHEMA}
+            **({"essential_tools": True, "initial_tool_choice": "required",
+                "response_schema": PHYSICAL_VERIFIER_RESPONSE_SCHEMA}
                if essential_tools else {}),
             **({"reasoning_effort": "high"}
                if getattr(provider, "kind", "") == "yandex" and getattr(model, "family", "") == "deepseek" else {}),

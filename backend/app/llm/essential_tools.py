@@ -101,9 +101,12 @@ async def completion(client, url, headers, payload):
 
 
 async def chat_with_tools(provider, model, system_prompt, user_content, *, response_schema,
-                          reasoning_effort, timeout, temperature, thinking, json_mode, max_tokens):
+                          reasoning_effort, timeout, temperature, thinking, json_mode, max_tokens,
+                          initial_tool_choice="auto"):
     # client.chat owns the total asyncio.timeout across model AND gateway continuations.
     settings = get_settings()
+    if initial_tool_choice not in {"auto", "required"}:
+        raise LlmError("Invalid initial tool choice")
     if not settings.essential_tools_gateway_url or not settings.essential_tools_gateway_token:
         raise LlmError("Private essential tools gateway URL/token not configured")
     if (len(settings.essential_tools_gateway_token) < 32 or not settings.essential_tools_gateway_token.isascii()
@@ -139,6 +142,7 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
     try:
         async with httpx.AsyncClient(timeout=timeout or settings.llm_request_timeout) as client:
             for round_index in range(rounds + 1):
+                payload["tool_choice"] = initial_tool_choice if round_index == 0 else "auto"
                 if round_index == rounds or len(audit["tool_traces"]) >= max_calls:
                     payload["tool_choice"] = "none"
                     payload["messages"][0]["content"] += (

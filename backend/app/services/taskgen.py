@@ -269,7 +269,7 @@ async def generate_tasks(
         json_mode=True,
         **({"response_schema": PHYSICAL_GENERATION_RESPONSE_SCHEMA}
            if (use_tools and physical) or physical_json_schema_enabled(assistant, provider, model) else {}),
-        **({"essential_tools": True}
+        **({"essential_tools": True, "initial_tool_choice": "required"}
            if use_tools else {}),
     )
     parsed = llm.extract_json(result.text)

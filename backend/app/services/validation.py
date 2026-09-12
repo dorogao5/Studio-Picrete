@@ -1227,7 +1227,7 @@ async def solver_check(
         result = await llm.chat(provider, model,
             system_prompt + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else ""),
             "\n\n".join(parts), temperature=0.0, json_mode=True,
-            **({"essential_tools": True} if essential_tools else {}))
+            **({"essential_tools": True, "initial_tool_choice": "required"} if essential_tools else {}))
         parsed = llm.extract_json(result.text)
     except llm.LlmError as err:
         return {

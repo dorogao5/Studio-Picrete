@@ -119,6 +119,7 @@ async def _chat(
     response_schema: dict | None = None,
     reasoning_effort: str | None = None,
     essential_tools: bool = False,
+    initial_tool_choice: str = "auto",
 ) -> LlmResult:
     if essential_tools:
         from app.llm.essential_tools import chat_with_tools
@@ -126,6 +127,7 @@ async def _chat(
             provider, model, system_prompt, user_content, response_schema=response_schema,
             reasoning_effort=reasoning_effort, timeout=timeout,
             temperature=temperature, thinking=thinking, json_mode=json_mode, max_tokens=max_tokens,
+            initial_tool_choice=initial_tool_choice,
         )
     payload: dict = {
         "model": model.model_id,

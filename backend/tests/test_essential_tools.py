@@ -65,6 +65,31 @@ def test_tool_result_final_usage_auth_reasoning(monkeypatch):
     assert result.raw["tool_traces"][0]["trace_id"] == "trace"
 
 
+@pytest.mark.parametrize("initial", ["auto", "required"])
+def test_initial_tool_choice_only_first_completion(monkeypatch, initial):
+    _, calls = mock_dialogue(monkeypatch, gateway_error=True, repair=True)
+    run(initial_tool_choice=initial)
+    assert [call["tool_choice"] for call in calls] == [initial, "auto", "auto"]
+
+
+def test_default_tool_choice_stays_auto(monkeypatch):
+    _, calls = mock_dialogue(monkeypatch)
+    run()
+    assert [call["tool_choice"] for call in calls] == ["auto", "auto"]
+
+
+def test_initial_choice_ignored_without_tools(monkeypatch):
+    _, calls = mock_dialogue(monkeypatch)
+    async def stream(client_, url, payload, headers, provider_name):
+        assert "tool_choice" not in payload and "tools" not in payload
+        return "ok", {}, "stop"
+    monkeypatch.setattr(client, "_stream_completion", stream)
+    monkeypatch.setattr(client, "decrypt_secret", lambda _: "test")
+    result = asyncio.run(client.chat(Provider(base_url="https://model.invalid", extra_headers={}),
+        ModelEntry(model_id="model", family="generic"), "system", "user", initial_tool_choice="required"))
+    assert result.text == "ok" and not calls
+
+
 @pytest.mark.parametrize("family,retain_reasoning", [("qwen", False), ("deepseek", True)])
 def test_continuation_reasoning_is_family_specific(monkeypatch, family, retain_reasoning):
     _, calls = mock_dialogue(monkeypatch)
@@ -170,6 +195,7 @@ def test_nonphysical_generator_opt_in_does_not_get_physical_schema(monkeypatch):
     asyncio.run(taskgen.generate_tasks(Provider(kind="custom"), ModelEntry(), assistant, "configured",
                                       topic="test", difficulty="easy", count=1))
     assert calls[0]["essential_tools"] is True and "response_schema" not in calls[0]
+    assert calls[0]["initial_tool_choice"] == "required"
 
 
 def test_generic_solver_tools_opt_in(monkeypatch):
@@ -182,6 +208,7 @@ def test_generic_solver_tools_opt_in(monkeypatch):
     monkeypatch.setattr(client, "chat", chat)
     solved = asyncio.run(solver_check(Provider(kind="custom"), ModelEntry(), "2+2", "", "numeric", essential_tools=True))
     assert calls[0]["essential_tools"] is True
+    assert calls[0]["initial_tool_choice"] == "required"
     assert solved["calculation_audit"]["tool_traces"][0]["trace_id"] == "proof"
 
 
@@ -212,6 +239,7 @@ def test_generator_and_verifier_audit_same_candidate(monkeypatch):
     assert validation["verdict"] == "needs_review" and correction is None and candidate.id == "task"
     assert validation["calculation_audit"]["transport"] == "essential_tools"
     assert all(call["essential_tools"] for call in calls)
+    assert all(call["initial_tool_choice"] == "required" for call in calls)
 
 
 def test_fragmented_tool_call_stream():
@@ -245,13 +273,15 @@ def test_refusal_or_error_rejects_even_with_final_content(location, field):
     asyncio.run(check())
 
 
-def test_budget_forces_final_without_fabricated_proof(monkeypatch):
+@pytest.mark.parametrize("initial", ["auto", "required"])
+def test_budget_forces_final_without_fabricated_proof(monkeypatch, initial):
     requests, calls = mock_dialogue(monkeypatch, repair=True)
     monkeypatch.setattr(et, "get_settings", lambda: Settings(_env_file=None,
         essential_tools_gateway_url="https://gateway.invalid", essential_tools_gateway_token="x" * 32,
         essential_tools_max_rounds=1))
     with pytest.raises(client.LlmError, match="budget exhausted"):
-        run()
+        run(initial_tool_choice=initial)
+    assert calls[0]["tool_choice"] == initial
     assert len(calls) == 2 and calls[1]["tool_choice"] == "none"
     assert "Do not claim unperformed" in calls[1]["messages"][0]["content"]
     assert all(message["role"] != "system" for message in calls[1]["messages"][1:])
