@@ -241,7 +241,7 @@ class Picrete:
         self.bridge = f"/api/v1/internal/studio/courses/{PICRETE_COURSE_ID}/task-bank/import"
         self.snapshot = f"/api/v1/internal/studio/course-assistants/{PICRETE_COURSE_ID}"
         self.reads = {f"{self.course}/task-bank/items", f"{self.course}/task-bank/sources",
-                      f"{self.course}/assistant/", self.trainer}
+                      f"{self.course}/assistant", self.trainer}
         self.writes = {("POST", self.bridge), ("PUT", self.snapshot),
                        ("PUT", self.trainer), ("POST", self.trainer + "/publish")}
 
@@ -506,7 +506,7 @@ async def run(args, content, release_digest):
             desired = merge_trainer(published['definition'], content['tasks'])
             require(draft['definition'] in (published['definition'], desired),
                     'Unpublished trainer edits detected; refusing to overwrite them')
-            status = await api.request('GET', f'{api.course}/assistant/')
+            status = await api.request('GET', f'{api.course}/assistant')
             snapshot_changed = status.get('snapshot_version') != snapshot['version']
             trainer_changed = published['definition'] != desired
             plan = {'script_version': SCRIPT_VERSION, 'content_version': content['version'],
@@ -555,7 +555,7 @@ async def run(args, content, release_digest):
                             and actual['topic'] == paragraph['topic'], 'Bank read-back mismatch')
             final_trainer = await api.request('GET', api.trainer)
             require(final_trainer['definition'] == desired, 'Published trainer read-back mismatch')
-            final_status = await api.request('GET', f'{api.course}/assistant/')
+            final_status = await api.request('GET', f'{api.course}/assistant')
             require(final_status.get('snapshot_version') == snapshot['version'], 'Snapshot read-back mismatch')
             print(json.dumps({'status': 'applied-and-read-back', 'digest': release_digest,
                               'model_calls': 0, 'uploads': 0}))
