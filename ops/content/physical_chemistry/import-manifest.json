@@ -49,7 +49,7 @@
     "visibility": "student",
     "course_scope": "Физическая химия",
     "effective_version": "PHYS-CHEM-KINETICS-2026-09-R2",
-    "content_sha256": "d9ce96c6c34800b2152d5117c780792990b663398cff3c6e23ca402709da4b07",
+    "content_sha256": "d7cd1f05c4802b939bf44b51b86ae01b3ecd187651b5d508ac171fbf067ff8ef",
     "analyze": false
   },
   "assistant_profile_patch": {
@@ -99,7 +99,7 @@
       "release_binding": {
         "normalization": "picrete-markdown-nfc-lf-v1",
         "content_file": "sheets/phys-01-formal.md",
-        "content_sha256": "4b11b05036bc666ab0646133f7c0ba24f9273af8af315c13759c2186ebb02431",
+        "content_sha256": "e2290b4b76ed37ba479eb99574dc27f777a5ef5327011cca58527bfcc910b3f5",
         "source_document_title": "Физическая химия · каноническая кинетика · R2",
         "source_effective_version": "PHYS-CHEM-KINETICS-2026-09-R2",
         "source_course_scope": "Физическая химия"
@@ -135,7 +135,7 @@
       "release_binding": {
         "normalization": "picrete-markdown-nfc-lf-v1",
         "content_file": "sheets/phys-03-sequential.md",
-        "content_sha256": "b66ef0bdfe1c525fa1f617b1d4aa34f03077700ead078fc0786a8b95a2949960",
+        "content_sha256": "8976be378a71d4b4471ebe2713b0988d8eb3968bf4c22ac7b9281fbe7ea72f83",
         "source_document_title": "Физическая химия · каноническая кинетика · R2",
         "source_effective_version": "PHYS-CHEM-KINETICS-2026-09-R2",
         "source_course_scope": "Физическая химия"
@@ -171,7 +171,7 @@
       "release_binding": {
         "normalization": "picrete-markdown-nfc-lf-v1",
         "content_file": "sheets/phys-05-mm.md",
-        "content_sha256": "899bdf10d9322c9f860163c9575e934f14f66318fa358b9b0b0cfe410a69503e",
+        "content_sha256": "5c72af1067e377b458a0bb602ff9a92991fc38e6a51c659da1a8ada8d1c36aa7",
         "source_document_title": "Физическая химия · каноническая кинетика · R2",
         "source_effective_version": "PHYS-CHEM-KINETICS-2026-09-R2",
         "source_course_scope": "Физическая химия"
