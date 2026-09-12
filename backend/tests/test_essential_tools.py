@@ -65,6 +65,21 @@ def test_tool_result_final_usage_auth_reasoning(monkeypatch):
     assert result.raw["tool_traces"][0]["trace_id"] == "trace"
 
 
+@pytest.mark.parametrize("family,retain_reasoning", [("qwen", False), ("deepseek", True)])
+def test_continuation_reasoning_is_family_specific(monkeypatch, family, retain_reasoning):
+    _, calls = mock_dialogue(monkeypatch)
+    result = asyncio.run(client.chat(Provider(base_url="https://model.invalid", extra_headers={}),
+        ModelEntry(model_id="model", family=family, supports_json=True), "system", "user",
+        essential_tools=True, json_mode=True))
+    message = calls[1]["messages"][2]
+    assert ("reasoning_content" in message) is retain_reasoning
+    assert message["role"] == "assistant" and message["content"] == ""
+    assert message["tool_calls"][0]["id"] == "call1"
+    assert calls[1]["messages"][3]["tool_call_id"] == "call1"
+    assert "enable_thinking" not in calls[0]  # no request to disable model thinking
+    assert result.text == '{"value":4}'
+
+
 @pytest.mark.parametrize("options,expected", [
     ({"name": "shell"}, 1), ({"http_error": True}, 2), ({"missing_finish": True}, 1),
 ])

@@ -180,6 +180,8 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                             "error": "Invalid JSON or tool arguments; correct the same request."}
                     prepared.append((call, name, arguments, argument_error))
                 # Preserve DeepSeek reasoning_content only in the in-memory continuation, never in audit.
+                if model.family == "qwen":
+                    message = {key: value for key, value in message.items() if key != "reasoning_content"}
                 payload["messages"].append(message)
                 for call, name, arguments, argument_error in prepared:
                     if argument_error:
