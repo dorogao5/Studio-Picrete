@@ -105,6 +105,10 @@ backend/ops-тест и 23 frontend-теста; Rust: 30 тестов транс
 
 ## Qwen continuation: измерения 2026-09-12
 
+**Историческая правка strip ниже superseded:** текущий transport снова сохраняет
+reasoning текущего tool-диалога; см. раздел «Native current-turn reasoning» ниже.
+Приведённые измерения остаются фактическими результатами прежней версии.
+
 Узкая правка транспорта удаляет `reasoning_content` только из возвращаемого
 Qwen assistant-сообщения в следующем запросе. Thinking модели не выключается;
 `role`, `content`, `tool_calls` и их ID сохраняются. DeepSeek продолжает получать
@@ -237,3 +241,24 @@ verifier prompt SHA256: `4e8428a707356049a3c73bcc60b9137c580f9974ab938a92a3c233e
 Финальный gateway использует calculator v3 из-за изменения семантики единиц;
 старые traces не переименовываются. Клиент не ограничивает версии whitelist.
 Текущий полный прогон Main: 584 backend/ops tests passed, 42 deprecation warnings.
+
+## Native current-turn reasoning: 2026-09-12
+
+Официальный [Qwen3.6 chat template](https://huggingface.co/Qwen/Qwen3.6-35B-A3B/blob/main/chat_template.jinja)
+сохраняет reasoning assistant-сообщений после последнего user turn даже без
+`preserve_thinking=True` (строки 88–100). Флаг дополнительно сохраняет reasoning
+прошлых user turns — это отдельная возможность, описанная в
+[model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#preserve-thinking).
+
+Studio больше не удаляет `reasoning_content` Qwen из текущей цепочки tool calls;
+как у DeepSeek, оно остаётся только в памяти запросов, без записи в audit.
+Единственный bounded finisher дописывает инструкцию в существующий system,
+не создавая новый user turn; assistant tool calls, reasoning и результаты
+сохраняются. Reasoning пустого финального ответа в audit не записывается.
+Число допустимых continuations, модели, sampling и JSON Schema не изменены.
+
+Это устраняет конкретное расхождение с официальным template, но **не доказывает**,
+что именно оно вызвало live `length` или что исчерпания 81920 tokens устранены:
+server template Yandex не проверен, контролируемого сравнения нет. Прежние пробы
+strip не устанавливают причинность. Для этой правки выполнены только mocked
+регрессионные тесты; новых LLM-вызовов и деплоя не было.

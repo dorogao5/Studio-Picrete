@@ -160,12 +160,12 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                         # tool results. Never restart generation or repeat computations.
                         audit["finalization_continuations"] = 1
                         payload["tool_choice"] = "none"
-                        payload["messages"].append({"role": "user", "content": (
-                            "Предыдущий ответ завершился без итогового текста. Завершите ответ для этой же "
+                        payload["messages"][0]["content"] += (
+                            "\nПредыдущий ответ завершился без итогового текста. Завершите ответ для этой же "
                             "задачи в ранее заданном формате, используя уже полученные результаты инструментов. "
                             "Не меняйте выбранные исходные данные и вопросы, не создавайте другую задачу, "
                             "не повторяйте расчёты и не приписывайте невыполненных проверок. "
-                            "Сохраните учебный режим: для подсказки отвечайте только на текущий шаг.")})
+                            "Сохраните учебный режим: для подсказки отвечайте только на текущий шаг.")
                         audit["model_calls"] += 1
                         message, usage = await completion(
                             client, provider.base_url.rstrip("/") + "/chat/completions", headers, payload)
@@ -202,9 +202,7 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                             "arguments": {}, "normalized_result": None, "status": "invalid_request",
                             "error": "Invalid JSON or tool arguments; correct the same request."}
                     prepared.append((call, name, arguments, argument_error))
-                # Preserve DeepSeek reasoning_content only in the in-memory continuation, never in audit.
-                if model.family == "qwen":
-                    message = {key: value for key, value in message.items() if key != "reasoning_content"}
+                # Preserve current-turn reasoning for native tool continuations, never in audit.
                 payload["messages"].append(message)
                 for call, name, arguments, argument_error in prepared:
                     if argument_error:

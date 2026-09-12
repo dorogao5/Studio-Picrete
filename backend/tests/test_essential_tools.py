@@ -43,9 +43,9 @@ def mock_dialogue(monkeypatch, *, arguments='{"expression":"sqrt(9)+exp(0)"}', n
     return requests, model_calls
 
 
-def run(**kwargs):
+def run(family="deepseek", **kwargs):
     return asyncio.run(client.chat(Provider(base_url="https://model.invalid", extra_headers={}),
-        ModelEntry(model_id="deepseek", family="deepseek", supports_json=True), "system", "user",
+        ModelEntry(model_id="deepseek", family=family, supports_json=True), "system", "user",
         essential_tools=True, json_mode=True, response_schema={"type": "object"}, **kwargs))
 
 
@@ -79,30 +79,38 @@ def test_default_tool_choice_stays_auto(monkeypatch):
 
 
 @pytest.mark.parametrize("still_empty", [False, True])
-def test_empty_final_finishes_same_context_once_without_recalculating(monkeypatch, still_empty):
+@pytest.mark.parametrize("family", ["qwen", "deepseek"])
+def test_empty_final_finishes_same_context_once_without_recalculating(monkeypatch, still_empty, family):
     requests, calls = mock_dialogue(monkeypatch)
     original = et.completion
     async def completion(*args):
         message, usage = await original(*args)
         if len(calls) == 2 or (still_empty and len(calls) == 3):
             message["content"] = "  "
+            message["reasoning_content"] = "empty-final-private-reasoning"
         return message, usage
     monkeypatch.setattr(et, "completion", completion)
     if still_empty:
         with pytest.raises(client.LlmError, match="Empty final") as caught:
-            run()
+            run(family=family)
         audit = caught.value.raw
     else:
-        result = run()
+        result = run(family=family)
         assert result.text == '{"value":4}' and result.tokens_total == 45
         audit = result.raw
     assert len(calls) == 3
     assert [call["tool_choice"] for call in calls] == ["auto", "auto", "none"]
-    assert calls[2]["messages"][:-1] == calls[1]["messages"]
+    assert calls[2]["messages"][1:] == calls[1]["messages"][1:]
+    assert len(calls[2]["messages"]) == len(calls[1]["messages"])
+    assert [m["role"] for m in calls[2]["messages"]] == ["system", "user", "assistant", "tool"]
+    assert calls[2]["messages"][0]["content"].startswith(calls[1]["messages"][0]["content"])
+    assert "Завершите ответ" in calls[2]["messages"][0]["content"]
+    assert calls[2]["messages"][2]["reasoning_content"] == "private-reasoning"
     assert calls[2]["model"] == calls[0]["model"]
     assert calls[2]["response_format"] == calls[0]["response_format"]
     assert len([r for r in requests if r[0].endswith("/invoke")]) == 1
     assert audit["finalization_continuations"] == 1 and audit["model_calls"] == 3
+    assert "private-reasoning" not in json.dumps(audit)
 
 
 def test_empty_initial_answer_does_not_start_replacement_generation(monkeypatch):
@@ -131,19 +139,20 @@ def test_initial_choice_ignored_without_tools(monkeypatch):
     assert result.text == "ok" and not calls
 
 
-@pytest.mark.parametrize("family,retain_reasoning", [("qwen", False), ("deepseek", True)])
-def test_continuation_reasoning_is_family_specific(monkeypatch, family, retain_reasoning):
+@pytest.mark.parametrize("family", ["qwen", "deepseek"])
+def test_current_continuation_reasoning_is_preserved(monkeypatch, family):
     _, calls = mock_dialogue(monkeypatch)
     result = asyncio.run(client.chat(Provider(base_url="https://model.invalid", extra_headers={}),
         ModelEntry(model_id="model", family=family, supports_json=True), "system", "user",
         essential_tools=True, json_mode=True))
     message = calls[1]["messages"][2]
-    assert ("reasoning_content" in message) is retain_reasoning
+    assert message["reasoning_content"] == "private-reasoning"
     assert message["role"] == "assistant" and message["content"] == ""
     assert message["tool_calls"][0]["id"] == "call1"
     assert calls[1]["messages"][3]["tool_call_id"] == "call1"
     assert "enable_thinking" not in calls[0]  # no request to disable model thinking
     assert result.text == '{"value":4}'
+    assert "private-reasoning" not in json.dumps(result.raw)
 
 
 @pytest.mark.parametrize("options,expected", [
