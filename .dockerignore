@@ -9,6 +9,7 @@
 !backend/scripts/**
 !ops/
 !ops/release_physical_chemistry.py
+!ops/apply_live_generation_corrections.py
 !ops/content/
 !ops/content/physical_chemistry/
 !ops/content/physical_chemistry/**

@@ -33,7 +33,9 @@ from app.services.content_preflight import create_review_token, verify_review_to
 from app.services.model_policy import current_model_use_policy
 from app.services.export import build_bank_export
 from app.services.model_policy import ModelUsePolicyError, require_decision_model
-from app.services.physical_chemistry import is_physical_chemistry, student_grading_model_use, task_verifier_model_id
+from app.services.physical_chemistry import (
+    is_physical_chemistry, student_grading_model_use, task_verifier_model_id, physical_json_schema_enabled,
+)
 from app.services.taskgen import GenerationError, resolve_generator_prompt_version, run_batch
 from app.services.task_approval import task_is_export_ready
 
@@ -263,6 +265,8 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
         "allowed_uses": (["student_tutor", "grading"] if is_physical_chemistry(assistant)
                          else ["student_tutor", "task_validation", "grading"]),
     }
+    if is_physical_chemistry(assistant):
+        runtime["decision_supports_json_schema"] = physical_json_schema_enabled(assistant, grader_provider, grader)
     # Compatibility for lightweight callers/tests that provide model objects
     # without provider metadata. Real persisted model entries always carry it.
     if generator_provider is None or grader_provider is None:

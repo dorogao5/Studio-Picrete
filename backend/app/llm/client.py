@@ -48,9 +48,12 @@ STREAM_USAGE_FAMILIES = {"deepseek", "qwen", "gpt", "generic"}
 RETRYABLE_ATTEMPTS = 3
 
 
-async def _stream_completion(client: httpx.AsyncClient, url: str, payload: dict, headers: dict, provider_name: str) -> tuple[str, dict]:
+async def _stream_completion(
+    client: httpx.AsyncClient, url: str, payload: dict, headers: dict, provider_name: str
+) -> tuple[str, dict, str | None]:
     text_parts: list[str] = []
     usage: dict = {}
+    finish_reason: str | None = None
     async with client.stream("POST", url, json=payload, headers=headers) as response:
         if response.status_code >= 400:
             body_bytes = await response.aread()
@@ -71,15 +74,25 @@ async def _stream_completion(client: httpx.AsyncClient, url: str, payload: dict,
                 event = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            if event.get("error"):
+                error = event["error"]
+                detail = error.get("message", error) if isinstance(error, dict) else error
+                raise LlmError(f"{provider_name} stream error: {str(detail)[:500]}")
             if event.get("usage"):
                 usage = event["usage"]
             choices = event.get("choices") or []
             if choices:
+                if choices[0].get("finish_reason") is not None:
+                    finish_reason = str(choices[0]["finish_reason"])
                 delta = choices[0].get("delta") or {}
                 piece = delta.get("content")
                 if piece:
                     text_parts.append(piece)
-    return "".join(text_parts), usage
+    if finish_reason is not None and finish_reason != "stop":
+        raise LlmError(f"{provider_name} завершил ответ неуспешно: finish_reason={finish_reason}")
+    if payload.get("response_format", {}).get("type") == "json_schema" and finish_reason is None:
+        raise LlmError(f"{provider_name}: поток JSON Schema завершился без finish_reason")
+    return "".join(text_parts), usage, finish_reason
 
 
 async def chat(*args, **kwargs) -> LlmResult:
@@ -101,6 +114,8 @@ async def _chat(
     json_mode: bool = False,
     thinking: str | None = None,
     timeout: float | None = None,
+    response_schema: dict | None = None,
+    reasoning_effort: str | None = None,
 ) -> LlmResult:
     payload: dict = {
         "model": model.model_id,
@@ -111,11 +126,20 @@ async def _chat(
         "stream": True,
     }
     _apply_family_params(payload, model, temperature, thinking)
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
     if model.family in STREAM_USAGE_FAMILIES:
         payload["stream_options"] = {"include_usage": True}
     if max_tokens:
         payload["max_tokens"] = max_tokens
-    if json_mode and model.supports_json:
+    if response_schema is not None:
+        if not model.supports_json:
+            raise LlmError("JSON Schema запрошена для модели без поддержки JSON")
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "picrete_response", "strict": True, "schema": response_schema},
+        }
+    elif json_mode and model.supports_json:
         payload["response_format"] = {"type": "json_object"}
 
     headers = {"Authorization": f"Bearer {decrypt_secret(provider.api_key_encrypted)}"}
@@ -132,7 +156,7 @@ async def _chat(
     async with httpx.AsyncClient(timeout=timeouts) as client:
         for attempt in range(RETRYABLE_ATTEMPTS):
             try:
-                text, usage = await _stream_completion(client, url, payload, headers, provider.name)
+                text, usage, finish_reason = await _stream_completion(client, url, payload, headers, provider.name)
                 break
             except httpx.HTTPError as err:
                 last_error = err
@@ -152,7 +176,7 @@ async def _chat(
         tokens_total=usage.get("total_tokens"),
         tokens_prompt=usage.get("prompt_tokens"),
         tokens_completion=usage.get("completion_tokens"),
-        raw={"usage": usage},
+        raw={"usage": usage, "finish_reason": finish_reason},
     )
 
 

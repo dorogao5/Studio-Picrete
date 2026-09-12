@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import Any
 
 from app.llm import client as llm
+from app.config import get_settings
 from app.models import Assistant, GeneratedTask, ModelEntry, Provider
 from app.services.model_policy import current_model_use_policy
 from app.services.task_evidence import normalize_validation_config, task_content_fingerprint
@@ -67,6 +68,18 @@ def is_physical_chemistry(assistant: Assistant) -> bool:
 def physical_verifier_prompt(system_prompt: str | None) -> str:
     """Use the editable prompt verbatim; domain rules are fallback content only."""
     return system_prompt if system_prompt and system_prompt.strip() else PHYSICAL_CHEMISTRY_VERIFIER_PROMPT
+
+
+def physical_json_schema_enabled(assistant: Assistant | None, provider: Provider | None, model: ModelEntry) -> bool:
+    return (
+        getattr(model, "model_id", None) in {
+            value.strip() for value in get_settings().json_schema_model_ids.split(",") if value.strip()
+        }
+        and assistant is not None and is_physical_chemistry(assistant)
+        and getattr(provider, "kind", "") == "yandex"
+        and getattr(model, "family", "") == "qwen"
+        and getattr(model, "supports_json", False) is True
+    )
 
 
 def task_verifier_model_id(assistant: Assistant) -> str | None:
@@ -158,6 +171,8 @@ async def run_physical_validation(
             temperature=0.1,
             json_mode=True,
             thinking="enabled",
+            **({"reasoning_effort": "high"}
+               if getattr(provider, "kind", "") == "yandex" and getattr(model, "family", "") == "deepseek" else {}),
         )
         response = llm.extract_json(result.text)
     except llm.LlmError as error:

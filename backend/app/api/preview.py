@@ -11,10 +11,10 @@ from app.models import Assistant, GeneratedTask, PromptVersion, TaskTemplate, Us
 from app.schemas import PromptPreviewRequest, PromptPreviewResponse
 from app.security import get_current_user
 from app.services import taskgen
-from app.services.physical_chemistry import physical_verifier_prompt, _task_payload
+from app.services.physical_chemistry import physical_verifier_prompt, _task_payload, is_physical_chemistry
 from app.services.assistant_profile import build_assistant_profile
 from app.services.assistant_profile import with_assistant_profile
-from app.services.contracts import GENERATION_JSON_CONTRACT
+from app.services.contracts import GENERATION_JSON_CONTRACT, PHYSICAL_GENERATION_JSON_EXAMPLE
 from app.services.grading import build_grading_user_message
 from app.services.grounding import build_grounding_block
 from app.services.tutor import FALLBACK_TUTOR_PROMPT, build_tutor_context, flatten_dialog
@@ -56,7 +56,8 @@ async def _resolve_system_prompt(
         return active.system_prompt
     if role == "generator":
         return taskgen.FALLBACK_GENERATOR_PROMPT.format(
-            discipline=assistant.discipline, contract=GENERATION_JSON_CONTRACT
+            discipline=assistant.discipline,
+            contract=PHYSICAL_GENERATION_JSON_EXAMPLE if is_physical_chemistry(assistant) else GENERATION_JSON_CONTRACT,
         )
     if role == "tutor":
         return FALLBACK_TUTOR_PROMPT.format(discipline=assistant.discipline)
@@ -65,7 +66,9 @@ async def _resolve_system_prompt(
     return GRADER_NO_PROMPT_PLACEHOLDER
 
 
-def _build_generation_message(template: TaskTemplate | None, grounding: str, existing_statements: list[str]) -> str:
+def _build_generation_message(
+    template: TaskTemplate | None, grounding: str, existing_statements: list[str], *, reuse_blueprint: bool = False
+) -> str:
     merged = taskgen.merge_template_params(template, topic="", difficulty="", instructions="")
     return taskgen.build_generation_user_message(
         topic=merged["topic"],
@@ -78,6 +81,8 @@ def _build_generation_message(template: TaskTemplate | None, grounding: str, exi
         rubric=merged["rubric"],
         example_tasks=merged["example_tasks"],
         existing_statements=existing_statements,
+        chemistry_check="off" if reuse_blueprint else merged["chemistry_check"],
+        reuse_blueprint=reuse_blueprint,
     )
 
 
@@ -131,7 +136,9 @@ async def prompt_preview(
                 )
             ).scalars()
         )
-        user_message = _build_generation_message(template, grounding, existing_statements)
+        user_message = _build_generation_message(
+            template, grounding, existing_statements, reuse_blueprint=is_physical_chemistry(assistant)
+        )
     elif body.role == "verifier":
         grounding = await build_grounding_block(db, assistant.id, query=task.topic if task else "")
         system_prompt = physical_verifier_prompt(system_prompt)

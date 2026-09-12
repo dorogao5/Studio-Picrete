@@ -1,0 +1,440 @@
+{
+  "version": "2026-09-12.live-corrections.r1",
+  "status": "prepared_not_applied",
+  "source": {
+    "transport": "SSH Studio SQLAlchemy ORM; transaction read-only; rollback",
+    "host_alias": "picrete",
+    "assistant_id": "dc0d7a2fa01749b98f7af520739c3364",
+    "snapshot_date": "2026-09-12",
+    "paid_calls": 0
+  },
+  "apply_contract": {
+    "mode": "manual_versioned_existing_row_update_only",
+    "match": [
+      "id",
+      "assistant_id",
+      "batch_id",
+      "original_content_fingerprint",
+      "original_fields_sha256"
+    ],
+    "native_fingerprint": "Recompute app.services.task_evidence.task_content_fingerprint(current_task, original_validation_config); compare to original_content_fingerprint. Do not only compare the stored validation digest.",
+    "fields_fingerprint": "SHA-256 of UTF-8 json.dumps(original_fields, ensure_ascii=False, sort_keys=True, separators=(',',':')); original_fields keys: statement, reference_solution, answer, difficulty, topic, rubric, max_score, images. Preserve numeric JSON values including max_score float (7.0/10.0) when reconstructing in Python.",
+    "write_fields": "Only fields in corrected: statement, reference_solution, answer, difficulty, topic, rubric, max_score, images. No task creation/deletion, no model or verifier calls. The answer/solution fields use Studio ORM names.",
+    "concurrency": "Abort on any missing target, fingerprint mismatch or score/rubric mismatch; do not silently overwrite a changed record.",
+    "evidence": "Old verifier reports are provenance for the original content only. Invalidate/supersede old validation evidence through the existing manual/versioned release mechanism; do not reuse original validated status as proof for corrected content or fabricate a model verdict. This artifact itself does not set approval/validation state.",
+    "scope": "Prepared locally only. Main agent owns any eventual live application. No changes to the reviewed 41-task bank or prompts in this turn."
+  },
+  "verifier_pipeline_audit": {
+    "deployed_source": "app/services/physical_chemistry.py",
+    "deployed_source_sha256": "fae371681b852e56b7cc9816eb05d05d1d58d46792a9b532e4771dea575b350c",
+    "policy_version": "physchem-single-verifier-v1",
+    "observations": [
+      "Read deployed source, not only local dirty checkout. Lines 171–179 map a normalized corrected_task with verdict pass or fail to match/repair. Lines 180–189 map pass without corrected_task to match. Line 200 derives validated from match and no reasons.",
+      "All three stored content fingerprints matched a fresh native fingerprint for the actual rows read. Thus the observed failures are present in the current validated content, not explained by stale evidence for a different task.",
+      "All three reports have solver and critic skipped; chemistry check is not_applicable. This is the configured single-verifier path, not evidence that another chemistry checker passed the task.",
+      "Reports show partial numerical recalculation or correction, but conceptual explanations were not reliably challenged. Internal model reasoning is unavailable; inference is limited to persisted reports and deployed admission code."
+    ]
+  },
+  "targeted_prompt_review_errors": [
+    {
+      "task_id": "0479e414ddce4079a850fe1ed9f245c1",
+      "exact_error": "ln(34.38)=3.53766; Ea=75000 described as 'без промежуточного округления'; k3=0.03275",
+      "correct": "ln(34.38)=3.53747499995; Ea=74996.9462315; k3=0.0327440578577, rounding to four significant figures gives 0.03274.",
+      "targeted_instruction": "Independently recalculate logarithms from statement data; distinguish arithmetic disagreement from harmless final rounding. Do not call an explicitly rounded intermediate value unrounded. Fix the reference itself when a displayed intermediate equality is false."
+    },
+    {
+      "task_id": "a39b70a976d749c4b1191cd6b0f4c850",
+      "exact_error": "RT/2 is kinetic energy along the line of centres 'которая также расходуется на преодоление барьера'.",
+      "correct": "RT/2 results from RT² d ln(sqrt(T))/dT; it measures the temperature dependence of the collision prefactor, not additional barrier energy consumption.",
+      "targeted_instruction": "Check every physical causal explanation independently of the algebra. Agreement with Ea=E0+RT/2 does not validate a story about where the energy is spent. Return a corrected_task when the explanation is wrong even if rounded numerical answers agree."
+    },
+    {
+      "task_id": "a39b70a976d749c4b1191cd6b0f4c850",
+      "exact_error": "k=P sigma sqrt(8RT/(pi M_red)) exp(-E0/RT) is given as the molar rate constant in L/(mol s), without N_A or ×1000.",
+      "correct": "The full formula for its numerical value with SI inputs needs 1000 P N_A sigma sqrt(8RT/(pi M_red)) exp(-E0/RT).",
+      "targeted_instruction": "Check dimensions of every displayed formula, not only the final number or an earlier correct conversion. Constants may be absorbed into C only after explicitly defining the complete prefactor."
+    },
+    {
+      "task_id": "a39b70a976d749c4b1191cd6b0f4c850",
+      "exact_error": "E0/(24738); 7.934e4 J/mol ≈80.0 kJ/mol; sum(rubric)=10 while max_score=7.",
+      "correct": "R/(1/500−1/600)=24942; E0=79996.9279771 J/mol. 79.34 cannot be rounded to 80.0 at stated precision. Rubric must sum to max_score.",
+      "targeted_instruction": "Reconcile independent intermediates with the supplied reference; do not silently skip inconsistent lines because the intended final answer is familiar. Check rubric total separately from scientific correctness."
+    },
+    {
+      "task_id": "39062b8bd3d9489184cafd09c76249fc",
+      "exact_error": "Changing k2=0.10 to k2'=3k1=0.75 called an increase 'в 3 раза' and said to accelerate accumulation/formation of B.",
+      "correct": "k2'/k2=7.5; k1[A](t) and initial formation slope are unchanged. Stronger removal reduces accumulation and advances the maximum.",
+      "targeted_instruction": "In every comparative claim identify the baseline explicitly. Distinguish faster removal, earlier maximum, and faster formation. After repairing one arithmetic error, re-read the complete returned solution and answer for remaining errors."
+    },
+    {
+      "task_id": "a39b70a976d749c4b1191cd6b0f4c850",
+      "exact_error": "Batch requested hard; resulting problem is a standard single-model parameter calculation plus elementary derivative.",
+      "correct": "Classify this existing task medium; sequential repeated standard calculation easy. Do not add content merely to satisfy a requested level during correction.",
+      "targeted_instruction": "Assess difficulty from the actual reasoning required, independently of requested difficulty and subpart count. Request-specific hard generation needs a genuinely nontrivial objective in its blueprint; correcting an existing task should preserve scope."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "0479e414ddce4079a850fe1ed9f245c1",
+      "batch_id": "5c22316923c9446eb58e609b5df855db",
+      "assistant_id": "dc0d7a2fa01749b98f7af520739c3364",
+      "original_content_fingerprint": "8fc6c29dc06e8ec11d893afac55a0bd781069e537383f1d4e10b189dd40a0519",
+      "original_fields_sha256": "46ddcc2673a526bf20d73e047d34f862084b242b8236decf90a9e2c732696124",
+      "original_validation_config": {
+        "answer_format": "numeric",
+        "tolerance_pct": 2,
+        "validation_solver": false,
+        "validation_data_check": false,
+        "sheet_ids": [],
+        "kb_query": "",
+        "task_kind": "calculation",
+        "chemistry_check": "off",
+        "source_digest": "",
+        "profile_digest": "",
+        "task_evidence_digest": "",
+        "chemistry_facts_digest": ""
+      },
+      "original": {
+        "statement": "Учебная реакция первого порядка. Константа скорости при $T_1 = 300$ К равна $k_1 = 5.00 \\cdot 10^{-3}$ с⁻¹. При нагревании до $T_2 = 340$ К константа скорости возрастает до $k_2 = 0.1719$ с⁻¹. Считая, что предэкспоненциальный множитель $A$ и энергия активации $E_a$ постоянны в этом температурном интервале, найдите значение энергии активации $E_a$ и константу скорости $k_3$ при температуре $T_3 = 320$ К. $R = 8.314$ Дж/(моль·К).",
+        "reference_solution": "1. Запишем уравнение Аррениуса для двух температур $T_1$ и $T_2$:\n$\\ln k_1 = \\ln A - \\frac{E_a}{RT_1}$,\n$\\ln k_2 = \\ln A - \\frac{E_a}{RT_2}$.\nВычитая первое уравнение из второго, исключаем $\\ln A$:\n$\\ln \\frac{k_2}{k_1} = \\frac{E_a}{R} \\left( \\frac{1}{T_1} - \\frac{1}{T_2} \\right)$.\nОтсюда выражаем энергию активации:\n$E_a = \\frac{R \\ln(k_2/k_1)}{1/T_1 - 1/T_2}$.\n\n2. Подставляем численные значения ($R=8.314$ Дж/(моль·К), $T_1=300$ К, $T_2=340$ К, $k_1=5.00 \\cdot 10^{-3}$ с⁻¹, $k_2=0.1719$ с⁻¹):\n$\\frac{1}{T_1} - \\frac{1}{T_2} = \\frac{1}{300} - \\frac{1}{340} = \\frac{40}{102000} \\approx 3.92157 \\cdot 10^{-4}$ К⁻¹.\n$\\ln \\frac{k_2}{k_1} = \\ln \\frac{0.1719}{0.00500} = \\ln 34.38 \\approx 3.53766$.\n$E_a = \\frac{8.314 \\cdot 3.53766}{3.92157 \\cdot 10^{-4}} \\approx 75001$ Дж/моль = $75.0$ кДж/моль.\nПоложительный знак согласуется с увеличением скорости при нагревании.\n\n3. Для нахождения $k_3$ при $T_3 = 320$ К используем соотношение между $T_1$ и $T_3$:\n$\\ln \\frac{k_3}{k_1} = \\frac{E_a}{R} \\left( \\frac{1}{T_1} - \\frac{1}{T_3} \\right)$.\nПодставляем $E_a = 75000$ Дж/моль (без промежуточного округления):\n$\\frac{1}{T_1} - \\frac{1}{T_3} = \\frac{1}{300} - \\frac{1}{320} = \\frac{20}{96000} \\approx 2.08333 \\cdot 10^{-4}$ К⁻¹.\n$\\ln \\frac{k_3}{k_1} = \\frac{75000}{8.314} \\cdot 2.08333 \\cdot 10^{-4} \\approx 9020.93 \\cdot 2.08333 \\cdot 10^{-4} \\approx 1.87936$.\n$\\frac{k_3}{k_1} = e^{1.87936} \\approx 6.5491$.\n$k_3 = k_1 \\cdot 6.5491 = 5.00 \\cdot 10^{-3} \\cdot 6.5491 \\approx 0.0327455$ с⁻¹.\nОкругляем до 4 значащих цифр: $k_3 \\approx 0.03275$ с⁻¹.\n\n4. Проверка: $1/T$ уменьшается, $\\ln k$ растёт, $k$ увеличивается, что физически корректно. Единицы измерения $E_a$ согласованы с $R$, $k$ имеет размерность с⁻¹, как и $k_1$.",
+        "answer": "E_a = 75,0 кДж/моль; k_3 = 0,03275 с⁻¹",
+        "difficulty": "easy",
+        "topic": "Уравнение Аррениуса и энергия активации",
+        "rubric": [
+          {
+            "criterion_name": "Физическая модель и условия применимости",
+            "max_score": 3,
+            "description": "Метод соответствует условию. Использовано уравнение Аррениуса с постоянными A и E_a, что обосновано заданием."
+          },
+          {
+            "criterion_name": "Уравнения и ход решения",
+            "max_score": 3,
+            "description": "Формулы и преобразования корректны. Проведено вычитание логарифмических уравнений для исключения A и вывода рабочих формул."
+          },
+          {
+            "criterion_name": "Расчёт, единицы и точность",
+            "max_score": 3,
+            "description": "Расчёт и единицы согласованы. Численные подстановки выполнены без промежуточного округления, округление до 4 значащих цифр выполнено корректно."
+          },
+          {
+            "criterion_name": "Полнота ответа",
+            "max_score": 1,
+            "description": "Получены ответы на все требуемые подпункты (E_a и k_3)."
+          }
+        ],
+        "max_score": 10,
+        "images": []
+      },
+      "corrected": {
+        "statement": "Учебная реакция первого порядка. Константа скорости при $T_1 = 300$ К равна $k_1 = 5.00 \\cdot 10^{-3}$ с⁻¹. При нагревании до $T_2 = 340$ К константа скорости возрастает до $k_2 = 0.1719$ с⁻¹. Считая, что предэкспоненциальный множитель $A$ и энергия активации $E_a$ постоянны в этом температурном интервале, найдите значение энергии активации $E_a$ и константу скорости $k_3$ при температуре $T_3 = 320$ К. $R = 8.314$ Дж/(моль·К).\n\nДанные учебные модельные. Вычисления выполняйте без промежуточного округления; в итоговом ответе укажите единицы и разумную точность.",
+        "reference_solution": "1. Используем заданную модель $k(T)=A\\exp[-E_a/(RT)]$ с постоянными $A$ и $E_a$. Деление уравнений для двух температур исключает A:\n$$\n\\ln(k_2/k_1)=\\frac{E_a}{R}\\left(\\frac1{T_1}-\\frac1{T_2}\\right),\\qquad\nE_a=\\frac{R\\ln(k_2/k_1)}{1/T_1-1/T_2}.\n$$\nТемпературы уже заданы в K. Для исходных данных $\\ln(0.1719/0.00500)=\\ln(34.38)=3.53747499995$, $1/300-1/340=1/2550\\,\\mathrm{K^{-1}}$. Поэтому\n$$\nE_a=8.314\\cdot2550\\cdot\\ln(34.38)=74996.9462315\\,\\mathrm{J\\,mol^{-1}}\\approx75.0\\,\\mathrm{kJ\\,mol^{-1}}.\n$$\nРазмерность $R/(1/T_1-1/T_2)$ — Дж/моль, знак положительный.\n\n2. Для прогноза используем неокруглённое значение либо непосредственно исходное отношение:\n$$\n\\ln(k_3/k_1)=\\ln(k_2/k_1)\\frac{1/T_1-1/T_3}{1/T_1-1/T_2}\n=\\frac{17}{32}\\ln(34.38).\n$$\nОтсюда\n$$\nk_3=0.00500\\,(34.38)^{17/32}\n=0.0327440578577\\,\\mathrm{s^{-1}}.\n$$\nДо четырёх значащих цифр это $0.03274\\,\\mathrm{s^{-1}}$; до трёх — $0.0327\\,\\mathrm{s^{-1}}$. Дополнительные контрольные цифры не означают такую же экспериментальную точность.\n\n3. Обратная проверка: $A=k_1\\exp[E_a/(RT_1)]=5.7222907336\\cdot10^{10}\\,\\mathrm{s^{-1}}$; при подстановке неокруглённых A и Ea получаются $k(300)=0.00500$ и $k(340)=0.1719\\,\\mathrm{s^{-1}}$. Прогноз удовлетворяет $k_1<k_3<k_2$. Это проверка согласованности вычислений в заданной модели.",
+        "answer": "$E_a\\approx75.0\\,\\mathrm{kJ\\,mol^{-1}}$; $k_3\\approx0.03274\\,\\mathrm{s^{-1}}$ (до четырёх значащих цифр; до трёх — $0.0327\\,\\mathrm{s^{-1}}$).",
+        "difficulty": "easy",
+        "topic": "Уравнение Аррениуса и энергия активации",
+        "rubric": [
+          {
+            "criterion_name": "Физическая модель и условия применимости",
+            "max_score": 3,
+            "description": "Метод соответствует условию. Использовано уравнение Аррениуса с постоянными A и E_a, что обосновано заданием."
+          },
+          {
+            "criterion_name": "Уравнения и ход решения",
+            "max_score": 3,
+            "description": "Формулы и преобразования корректны. Проведено вычитание логарифмических уравнений для исключения A и вывода рабочих формул."
+          },
+          {
+            "criterion_name": "Расчёт, единицы и точность",
+            "max_score": 3,
+            "description": "Вычислены Ea и k3 по исходным данным без преждевременного округления; температуры в K, единицы согласованы. Допустимы разумное округление и эквивалентный метод; k3=0.03274 с⁻¹ до четырёх значащих цифр или 0.0327 до трёх."
+          },
+          {
+            "criterion_name": "Полнота ответа",
+            "max_score": 1,
+            "description": "Получены ответы на все требуемые подпункты (E_a и k_3)."
+          }
+        ],
+        "max_score": 10,
+        "images": []
+      },
+      "review_notes": [
+        "Личная проверка исходного условия, решения, ответа и рубрики. Исходные k и температуры сохранены.",
+        "Исправлены ln(34.38): 3.53766 → 3.53747499995; Ea=74996.9462315 Дж/моль. Убрано утверждение, что 75000 — неокруглённое Ea.",
+        "k3=0.0327440578577 с⁻¹. Ошибка прежнего ответа 0.03275 относительно пересчёта 0.0181472%; это малая численная неточность, не ошибка модели.",
+        "Проверены обе исходные точки обратной подстановкой. Рубрика больше не требует неверного округления.",
+        "easy: стандартная двухточечная формула и интерполяция; нет дополнительной модели или нетривиального вывода."
+      ],
+      "verifier_audit": {
+        "requested_difficulty": "easy",
+        "policy_version": "physchem-single-verifier-v1",
+        "model_id": "gpt://b1g0ibcval4b15nf4jcj/deepseek-v4-flash",
+        "stored_content_fingerprint": "8fc6c29dc06e8ec11d893afac55a0bd781069e537383f1d4e10b189dd40a0519",
+        "fingerprint_matches_current": true,
+        "report": {
+          "status": "match",
+          "comparison": {
+            "verdict": "match",
+            "basis": "single_independent_verifier"
+          },
+          "issues": [],
+          "solution": "По уравнению Аррениуса: ln(k2/k1) = (E_a/R)(1/T1 - 1/T2). Подстановка: 1/T1-1/T2 = 1/300-1/340 = 3.92157e-4 К^-1; ln(0.1719/0.005) = ln(34.38) = 3.53766. E_a = 8.314*3.53766/3.92157e-4 ≈ 75001 Дж/моль = 75.0 кДж/моль. Для T3: ln(k3/k1) = (E_a/R)(1/T1-1/T3) = (75000/8.314)*(1/300-1/320) = 9020.93*2.08333e-4 = 1.87936; k3/k1 = e^1.87936 = 6.5491; k3 = 5.00e-3*6.5491 = 0.03275 с^-1. Единицы согласованы, знак E_a положительный, рост k с температурой физически корректен.",
+          "answer": "E_a = 75,0 кДж/моль; k_3 = 0,03275 с⁻¹",
+          "solution_truncated": false
+        },
+        "correction": {
+          "applied": false,
+          "issues": []
+        },
+        "analysis": [
+          "verifier.status=match, issues=[], correction.applied=false. Отчёт повторяет ошибочные ln(34.38)=3.53766 и k3=0.03275 из эталона.",
+          "Сохранённый текст демонстрирует совпадение ошибочных промежуточных значений, но не позволяет доказать внутренний процесс модели или утверждать, что она намеренно копировала эталон.",
+          "tolerance_pct=2.0 значительно больше итогового расхождения, однако код не использует этот процент как независимую численную проверку; точную причинную роль допуска установить по отчёту нельзя."
+        ]
+      }
+    },
+    {
+      "id": "a39b70a976d749c4b1191cd6b0f4c850",
+      "batch_id": "dd06f7b7d6764aa8a3cb063027af6369",
+      "assistant_id": "dc0d7a2fa01749b98f7af520739c3364",
+      "original_content_fingerprint": "42c52f5046dcff7fd3f557ddafa801058b69723c2932711c6faacb474557ebba",
+      "original_fields_sha256": "027a352621a71af548866886eaa2de76c5042a4ce17f2d0de151045f75479fd5",
+      "original_validation_config": {
+        "answer_format": "numeric",
+        "tolerance_pct": 2,
+        "validation_solver": false,
+        "validation_data_check": false,
+        "sheet_ids": [],
+        "kb_query": "",
+        "task_kind": "calculation",
+        "chemistry_check": "off",
+        "source_digest": "",
+        "profile_digest": "",
+        "task_evidence_digest": "",
+        "chemistry_facts_digest": ""
+      },
+      "original": {
+        "statement": "Учебные модельные экспериментальные данные для газовой реакции $A+B\\to P$ представлены константами скорости при двух температурах: $k(500\\,\\mathrm{K}) = 1.40\\cdot10^2\\,\\mathrm{л/(моль\\cdotс)}$, $k(600\\,\\mathrm{K}) = 3.79\\cdot10^3\\,\\mathrm{л/(моль\\cdotс)}$. Реакция описывается моделью жёстких сфер с пороговой энергией $E_0$. Параметры молекул: $M_A = 28.0\\,\\mathrm{г/моль}$, $M_B = 32.0\\,\\mathrm{г/моль}$, $d_A = 0.37\\,\\mathrm{нм}$, $d_B = 0.36\\,\\mathrm{нм}$. Используйте $N_A = 6.022\\cdot10^{23}\\,\\mathrm{моль}^{-1}$, $R = 8.314\\,\\mathrm{Дж/(моль\\cdotК)}$.\n\n1. Вычислите пороговую энергию $E_0$ (в кДж/моль) и стерический фактор $P$.\n2. Выведите аналитическое выражение для локальной энергии активации $E_a(T)$ в рамках данной модели. Рассчитайте $E_a$ при $500\\,\\mathrm{К}$ и $600\\,\\mathrm{К}$. Сравните полученные значения с $E_0$ и дайте физическое объяснение расхождения.",
+        "reference_solution": "1. Вычисление $E_0$ и $P$.\n\nОпределим приведённую молярную массу и диаметр столкновения:\n$M_{\\mathrm{red}} = \\frac{M_A M_B}{M_A + M_B} = \\frac{28.0 \\cdot 32.0}{28.0 + 32.0} = 14.933\\,\\mathrm{г/моль} = 0.014933\\,\\mathrm{кг/моль}$.\n$d_{AB} = \\frac{d_A + d_B}{2} = \\frac{0.37 + 0.36}{2} = 0.365\\,\\mathrm{нм} = 3.65\\cdot10^{-10}\\,\\mathrm{м}$.\nПлощадь сечения: $\\sigma_{AB} = \\pi d_{AB}^2 = \\pi (3.65\\cdot10^{-10})^2 = 4.1783\\cdot10^{-19}\\,\\mathrm{м}^2$.\n\nСредняя относительная скорость при $T_1 = 500\\,\\mathrm{К}$:\n$\\langle v_{\\mathrm{rel},1} \\rangle = \\sqrt{\\frac{8RT_1}{\\pi M_{\\mathrm{red}}}} = \\sqrt{\\frac{8 \\cdot 8.314 \\cdot 500}{\\pi \\cdot 0.014933}} = 841.66\\,\\mathrm{м/с}$.\n\nРасчёт коэффициента столкновений:\n$A_{\\mathrm{coll},1} = N_A \\sigma_{AB} \\langle v_{\\mathrm{rel},1} \\rangle = 6.022\\cdot10^{23} \\cdot 4.1783\\cdot10^{-19} \\cdot 841.66 = 2.116\\cdot10^8\\,\\mathrm{м^3/(моль\\cdotс)}$.\nПеревод в л/(моль·с) (умножение на $10^3$): $A_{\\mathrm{coll},1} = 2.116\\cdot10^{11}\\,\\mathrm{л/(моль\\cdotс)}$.\n\nДля определения $E_0$ используем отношение констант скорости, чтобы исключить $P$:\n$\\frac{k_2}{k_1} = \\frac{A_{\\mathrm{coll},2}}{A_{\\mathrm{coll},1}} e^{-E_0/R (1/T_2 - 1/T_1)} = \\sqrt{\\frac{T_2}{T_1}} e^{-E_0/R (1/T_2 - 1/T_1)}$.\nЛогарифмируем:\n$\\ln\\frac{k_2}{k_1} = \\frac{1}{2}\\ln\\frac{T_2}{T_1} - \\frac{E_0}{R}\\left(\\frac{1}{T_2} - \\frac{1}{T_1}\\right)$.\nПодставляем данные:\n$\\ln\\frac{3790}{140} = 3.2988$, $\\frac{1}{2}\\ln\\frac{600}{500} = 0.09116$, $\\left(\\frac{1}{600} - \\frac{1}{500}\\right) = -3.333\\cdot10^{-4}\\,\\mathrm{К}^{-1}$.\n$3.2988 = 0.09116 - \\frac{E_0}{8.314}(-3.333\\cdot10^{-4})$.\n$3.2076 = \\frac{E_0}{24738}$.\n$E_0 = 7.934\\cdot10^4\\,\\mathrm{Дж/моль} \\approx 80.0\\,\\mathrm{кДж/моль}$.\n\nТеперь найдём $P$ при $T_1$:\n$k_1 = P A_{\\mathrm{coll},1} e^{-E_0/(RT_1)} \\Rightarrow P = \\frac{k_1}{A_{\\mathrm{coll},1} e^{-E_0/(RT_1)}}$.\n$e^{-80000/(8.314\\cdot500)} = e^{-19.245} = 4.412\\cdot10^{-9}$.\n$P = \\frac{140}{2.116\\cdot10^{11} \\cdot 4.412\\cdot10^{-9}} = \\frac{140}{933.6} = 0.150$.\n\n2. Вывод $E_a(T)$ и сравнение.\n\nЗакон скорости в модели: $k(T) = P \\sigma_{AB} \\sqrt{\\frac{8RT}{\\pi M_{\\mathrm{red}}}} e^{-E_0/RT} = C \\cdot T^{1/2} e^{-E_0/RT}$.\nВозьмём натуральный логарифм:\n$\\ln k = \\ln C + \\frac{1}{2}\\ln T - \\frac{E_0}{RT}$.\nЛокальная энергия активации определяется как $E_a(T) = RT^2 \\frac{d\\ln k}{dT}$.\nДифференцируем:\n$\\frac{d\\ln k}{dT} = \\frac{1}{2T} + \\frac{E_0}{RT^2}$.\nУмножаем на $RT^2$:\n$E_a(T) = RT^2\\left(\\frac{1}{2T} + \\frac{E_0}{RT^2}\\right) = \\frac{1}{2}RT + E_0$.\n\nРасчёт значений:\nПри $T_1 = 500\\,\\mathrm{К}$: $E_a = 0.5 \\cdot 8.314 \\cdot 500 + 80000 = 2078.5 + 80000 = 82079\\,\\mathrm{Дж/моль} \\approx 82.1\\,\\mathrm{кДж/моль}$.\nПри $T_2 = 600\\,\\mathrm{К}$: $E_a = 0.5 \\cdot 8.314 \\cdot 600 + 80000 = 2494.2 + 80000 = 82494\\,\\mathrm{Дж/моль} \\approx 82.5\\,\\mathrm{кДж/моль}$.\n\nСравнение и физическая интерпретация:\n$E_a(T) > E_0$ на величину $RT/2$. Пороговая энергия $E_0$ — это минимальная потенциальная энергия взаимодействия, необходимая для реакции. Локальная энергия активации $E_a(T)$ включает в себя $E_0$ плюс среднюю кинетическую энергию относительного движения молекул вдоль линии центров ($RT/2$), которая также расходуется на преодоление барьера. Таким образом, $E_a$ не является константой в этой модели, а слабо растёт с температурой.",
+        "answer": "E_0 = 80.0 кДж/моль; P = 0.150; E_a(500 К) = 82.1 кДж/моль; E_a(600 К) = 82.5 кДж/моль. E_a(T) = E_0 + RT/2; превышение E_a над E_0 обусловлено вкладом средней кинетической энергии относительного движения молекул (RT/2).",
+        "difficulty": "hard",
+        "topic": "Теория столкновений и стерический фактор",
+        "rubric": [
+          {
+            "criterion_name": "Физическая модель и условия применимости",
+            "max_score": 3,
+            "description": "Корректно использована модель жёстких сфер с учётом зависимости A_coll от sqrt(T). Проверено соотношение между E0 и Ea."
+          },
+          {
+            "criterion_name": "Уравнения и ход решения",
+            "max_score": 3,
+            "description": "Проведён корректный логарифмический вывод для исключения P и нахождения E0. Выведена формула Ea(T)=E0+RT/2 через дифференцирование ln k."
+          },
+          {
+            "criterion_name": "Расчёт, единицы и точность",
+            "max_score": 3,
+            "description": "Численные значения E0, P, Ea(T) получены с учётом перевода м³ в л и сохранением точности. Единицы измерения согласованы."
+          },
+          {
+            "criterion_name": "Полнота ответа",
+            "max_score": 1,
+            "description": "Даны ответы на все подпункты: найдены E0, P, выведена и рассчитана Ea(T), приведено физическое сравнение."
+          }
+        ],
+        "max_score": 7,
+        "images": []
+      },
+      "corrected": {
+        "statement": "Учебные модельные данные для газофазной бимолекулярной реакции $A+B\\to C$:\n$k(500\\,\\mathrm K)=1.40\\cdot10^2\\,\\mathrm{L\\,mol^{-1}\\,s^{-1}}$,\n$k(600\\,\\mathrm K)=3.79\\cdot10^3\\,\\mathrm{L\\,mol^{-1}\\,s^{-1}}$.\nМолярные массы $M_A=28.0\\,\\mathrm{g\\,mol^{-1}}$, $M_B=32.0\\,\\mathrm{g\\,mol^{-1}}$; диаметры $d_A=0.37\\,\\mathrm{nm}$, $d_B=0.36\\,\\mathrm{nm}$.\nИспользуйте $N_A=6.022\\cdot10^{23}\\,\\mathrm{mol^{-1}}$, $R=8.314\\,\\mathrm{J\\,mol^{-1}\\,K^{-1}}$.\n\nПримите модель жёстких сфер $k(T)=P A_{\\mathrm{coll}}(T)\\exp[-E_0/(RT)]$ при постоянных P, E₀ и диаметрах на интервале 500–600 K. Здесь P — безразмерный стерический фактор; продукт обозначен C, чтобы не смешивать эти обозначения. Молярная приведённая масса $M_{\\mathrm{red}}=M_AM_B/(M_A+M_B)$ измеряется в кг/моль, масса пары молекул $\\mu=M_{\\mathrm{red}}/N_A$ — в кг. $d_{AB}=(d_A+d_B)/2$ — диаметр контакта; $\\sigma_{AB}=\\pi d_{AB}^2$ — сечение. При скоростях Максвелла–Больцмана $\\langle v_{\\mathrm{rel}}\\rangle=\\sqrt{8RT/(\\pi M_{\\mathrm{red}})}$.\n\n1. Найдите порог E₀ в кДж/моль и стерический фактор P; коэффициент столкновений приведите в единицах заданных k.\n2. Выведите локальную энергию активации $E_a(T)=RT^2d\\ln k/dT$, вычислите её при 500 и 600 K. Объясните причину отличия от E₀.\n\nПренебрегайте существенными дальнодействующими силами. Запись реакции не является установлением механизма реального вещества; данные относятся к указанной учебной модели.",
+        "reference_solution": "1. Геометрия и коэффициент столкновений. Переводим молярные массы в кг/моль:\n$$\nM_{\\mathrm{red}}=\\frac{0.0280\\cdot0.0320}{0.0280+0.0320}\n=0.0149333333333\\,\\mathrm{kg\\,mol^{-1}}.\n$$\n$$\nd_{AB}=3.65\\cdot10^{-10}\\,\\mathrm m,\\qquad\n\\sigma_{AB}=\\pi d_{AB}^2=4.18538681275\\cdot10^{-19}\\,\\mathrm{m^2}.\n$$\nПри 500 K:\n$$\n\\langle v_{\\mathrm{rel},1}\\rangle\n=\\sqrt{\\frac{8\\cdot8.314\\cdot500}{\\pi M_{\\mathrm{red}}}}\n=841.941059885\\,\\mathrm{m\\,s^{-1}}.\n$$\nПроизведение $N_A\\sigma_{AB}\\langle v_{\\mathrm{rel},1}\\rangle$ равно\n$2.12206187331\\cdot10^8\\,\\mathrm{m^3\\,mol^{-1}\\,s^{-1}}$.\nПоскольку $1\\,\\mathrm{m^3}=10^3\\,\\mathrm L$, коэффициент в единицах заданных k:\n$$\nA_{\\mathrm{coll},1}=2.12206187331\\cdot10^{11}\\,\\mathrm{L\\,mol^{-1}\\,s^{-1}}.\n$$\n\n2. Определение порога. При постоянных P и диаметрах $A_{\\mathrm{coll}}\\propto\\sqrt T$. Поэтому\n$$\n\\ln(k_2/k_1)=\\frac12\\ln(T_2/T_1)\n+\\frac{E_0}{R}\\left(\\frac1{T_1}-\\frac1{T_2}\\right).\n$$\n$$\nE_0=\n\\frac{R[\\ln(3790/140)-\\tfrac12\\ln(600/500)]}{1/500-1/600}.\n$$\nЗдесь $\\ln(3790/140)=3.29847887547$,\n$\\tfrac12\\ln(600/500)=0.0911607783970$,\n$R/(1/500-1/600)=24942\\,\\mathrm{J\\,mol^{-1}}$.\nОтсюда $E_0=79996.9279771\\,\\mathrm{J\\,mol^{-1}}\\approx80.0\\,\\mathrm{kJ\\,mol^{-1}}$.\n\n3. Стерический фактор. Используя неокруглённый порог:\n$$\nf_1=\\exp[-E_0/(R\\cdot500)]=4.39012304218\\cdot10^{-9},\n$$\n$$\nP=\\frac{140}{A_{\\mathrm{coll},1}f_1}\n=0.150277271329\\approx0.150.\n$$\nP безразмерен. Обратная подстановка в обе точки с $A_{\\mathrm{coll},2}=A_{\\mathrm{coll},1}\\sqrt{600/500}$ возвращает 140 и 3790 л/(моль·с).\n\n4. Локальная энергия. Для численного значения k в л/(моль·с), при вводе величин в СИ, полная формула имеет вид\n$$\nk(T)=10^3P N_A\\sigma_{AB}\n\\sqrt{\\frac{8RT}{\\pi M_{\\mathrm{red}}}}\\exp[-E_0/(RT)]\n=C_0 T^{1/2}\\exp[-E_0/(RT)].\n$$\nМножитель $10^3$ отвечает за перевод м³ в л. Постоянная $C_0$ включает P, Nₐ, сечение и остальные постоянные множители.\n$$\n\\frac{d\\ln k}{dT}=\\frac1{2T}+\\frac{E_0}{RT^2},\n\\qquad E_a(T)=E_0+\\frac{RT}{2}.\n$$\nТаким образом,\n$E_a(500)=82.0754279771\\approx82.1\\,\\mathrm{kJ\\,mol^{-1}}$,\n$E_a(600)=82.4911279771\\approx82.5\\,\\mathrm{kJ\\,mol^{-1}}$.\n\nE₀ — постоянный энергетический порог принятой модели, а Ea — характеристика температурной чувствительности k. Добавка RT/2 возникает при дифференцировании множителя $\\sqrt T$, то есть из роста коэффициента столкновений с температурой. Она не означает дополнительную энергию, расходуемую каждой парой молекул на преодоление барьера. При постоянном E₀ локальная Ea всё же растёт с T. Контрольные цифры приведены для проверки арифметики, а не как заявленная точность измерений.",
+        "answer": "$E_0\\approx80.0\\,\\mathrm{kJ\\,mol^{-1}}$, $P\\approx0.150$; $E_a(T)=E_0+RT/2$. $E_a(500)\\approx82.1\\,\\mathrm{kJ\\,mol^{-1}}$, $E_a(600)\\approx82.5\\,\\mathrm{kJ\\,mol^{-1}}$. Добавка RT/2 обусловлена температурной зависимостью коэффициента столкновений $\\sqrt T$, а не дополнительным расходом энергии на барьер.",
+        "difficulty": "medium",
+        "topic": "Теория столкновений и стерический фактор",
+        "rubric": [
+          {
+            "criterion_name": "Физическая модель и условия применимости",
+            "max_score": 2,
+            "description": "Постоянные P,E0 и диаметры, коэффициент столкновений пропорционален sqrt(T). Ea отличается от порога из-за температурной предэкспоненты; RT/2 не трактуется как дополнительный расход энергии."
+          },
+          {
+            "criterion_name": "Уравнения и ход решения",
+            "max_score": 2,
+            "description": "P исключён отношением k с поправкой sqrt(T); Ea(T) выведена через RT²d ln k/dT. Полная формула молярного k содержит N_A и корректный перевод единиц."
+          },
+          {
+            "criterion_name": "Расчёт, единицы и точность",
+            "max_score": 2,
+            "description": "Верно рассчитаны сечение, Acoll, E0 и P с обратной подстановкой обеих точек; м³ переводятся в л множителем 1000; промежуточное округление не подменяет исходный расчёт."
+          },
+          {
+            "criterion_name": "Полнота ответа",
+            "max_score": 1,
+            "description": "Приведены E0,P, оба значения Ea и физическое объяснение; допустима разумная точность округления."
+          }
+        ],
+        "max_score": 7,
+        "images": []
+      },
+      "review_notes": [
+        "Личная проверка всех вычислений и объяснений. Исходные массы, диаметры, температуры и k сохранены; продукт переобозначен P→C только для устранения конфликта со стерическим фактором.",
+        "Сечение исправлено 4.1783e-19 → 4.18538681275e-19 м²; vrel=841.941059885 м/с; Acoll=2.12206187331e11 л/(моль·с).",
+        "R/(1/500−1/600)=24942, не 24738; E0=79996.9279771 Дж/моль. Переход исходного эталона 79340 → 80000 не является округлением до заявленной точности.",
+        "P=0.150277271329; Ea500=82.0754279771 и Ea600=82.4911279771 кДж/моль. Проверены обе исходные константы обратной подстановкой.",
+        "В полной формуле k восстановлены N_A и перевод ×1000. Исправлена физическая трактовка RT/2: это температурная производная ln(sqrt(T)), не энергия, дополнительно расходуемая на барьер.",
+        "Постоянство P и E0 явно задано: без него исключение P из отношения двух скоростей не обосновано.",
+        "medium вместо hard: сочетание стандартных расчётов столкновений и модифицированного Аррениуса с элементарной производной. Задача не усложнялась искусственно до запроса hard; новые параметры или числа не добавлялись.",
+        "Выявлен отдельный дефект рубрики: исходная сумма 10 при max_score=7. Максимум 7 сохранён, веса согласованы как 2+2+2+1."
+      ],
+      "verifier_audit": {
+        "requested_difficulty": "hard",
+        "policy_version": "physchem-single-verifier-v1",
+        "model_id": "gpt://b1g0ibcval4b15nf4jcj/deepseek-v4-flash",
+        "stored_content_fingerprint": "42c52f5046dcff7fd3f557ddafa801058b69723c2932711c6faacb474557ebba",
+        "fingerprint_matches_current": true,
+        "report": {
+          "status": "match",
+          "comparison": {
+            "verdict": "match",
+            "basis": "single_independent_verifier"
+          },
+          "issues": [],
+          "solution": "Независимо проверены все вычислительные этапы: приведённая молярная масса M_red=14.933 г/моль, диаметр d_AB=0.365 нм, сечение σ_AB≈4.185e-19 м², средняя относительная скорость при 500 К ⟨v_rel⟩≈841.8 м/с, коэффициент столкновений A_coll≈2.121e11 л/(моль·с). Из отношения скоростей с учётом зависимости A_coll∝√T получено E_0=ln(k2/k1·√(T1/T2))·R·(1/T1-1/T2)^-1 ≈ 80.0 кДж/моль. Стерический фактор P=k1/(A_coll exp(-E0/(RT1)))≈0.150. Дифференцированием ln k = ln C + ½lnT - E0/(RT) получено E_a(T)=E0+RT/2, значения при 500 и 600 К: 82.08 и 82.49 кДж/моль, округлённые до 82.1 и 82.5. Все единицы согласованы (перевод м³→л выполнен умножением на 1000).",
+          "answer": "E0=80.0 кДж/моль, P=0.150, Ea(500 К)=82.1 кДж/моль, Ea(600 К)=82.5 кДж/моль. Формула Ea(T)=E0+RT/2 выведена корректно, превышение над E0 объяснено вкладом средней кинетической энергии относительного движения. Ответы по всем подпунктам получены.",
+          "solution_truncated": false
+        },
+        "correction": {
+          "applied": false,
+          "issues": []
+        },
+        "analysis": [
+          "verifier.status=match, issues=[], correction.applied=false. Сохранённый независимый расчёт приводит sigma≈4.185e-19, тогда как пропущенное им исходное решение содержит 4.1783e-19; расхождение не отмечено.",
+          "Отчёт подтверждает формулу Ea=E0+RT/2, но его answer повторяет неверную физическую трактовку через среднюю кинетическую энергию. Это прямое свидетельство пропуска смысловой ошибки, а не только допуска на числа.",
+          "В отчёте нет замечания о пропущенных N_A и переводе единиц в развёрнутой формуле k, ошибке 24738, ложном округлении 79.34→80.0 или сумме рубрики 10 при максимуме 7.",
+          "Вывод о внутренней причине ограничен: отчёт показывает принятие конечных округлённых ответов и неверного объяснения; скрытый ход рассуждений модели недоступен."
+        ]
+      }
+    },
+    {
+      "id": "39062b8bd3d9489184cafd09c76249fc",
+      "batch_id": "6ff939650b2a44238988fb177423833b",
+      "assistant_id": "dc0d7a2fa01749b98f7af520739c3364",
+      "original_content_fingerprint": "493cf1bdcca20ca4ae52ae71ec53276dfc6e18d61c98143ae93ca231caf908e9",
+      "original_fields_sha256": "856a8082f2aac1ae9d8432acf65f7607edf9fbb28d0f4630fb394bc1e81cedec",
+      "original_validation_config": {
+        "answer_format": "numeric",
+        "tolerance_pct": 2,
+        "validation_solver": false,
+        "validation_data_check": false,
+        "sheet_ids": [],
+        "kb_query": "",
+        "task_kind": "calculation",
+        "chemistry_check": "off",
+        "source_digest": "",
+        "profile_digest": "",
+        "task_evidence_digest": "",
+        "chemistry_facts_digest": ""
+      },
+      "original": {
+        "statement": "Реакция $A \\xrightarrow{k_1} B \\xrightarrow{k_2} P$ протекает при постоянных температуре и объёме. Начальная концентрация $[A]_0 = 0.40$ М, $[B]_0 = [P]_0 = 0$. Константы скоростей $k_1 = 0.25$ мин$^{-1}$, $k_2 = 0.10$ мин$^{-1}$.\n\n1) Выведите выражение для концентрации промежуточного продукта $[B](t)$ методом интегрирующего множителя.\n2) Найдите момент времени $t_{\\max}$, когда концентрация $B$ достигает максимума, и вычислите значение $[B]_{\\max}$.\n3) Сравните полученное $[B]_{\\max}$ с результатом для случая, когда вторая стадия идёт в 3 раза быстрее первой ($k_2' = 3k_1$). Укажите, как изменится максимальная концентрация и время её достижения.",
+        "reference_solution": "1) Уравнения массовых действий для последовательных реакций первого порядка:\n$$\\frac{d[A]}{dt} = -k_1[A], \\quad \\frac{d[B]}{dt} = k_1[A] - k_2[B], \\quad \\frac{d[P]}{dt} = k_2[B].$$\nИз первого уравнения при $[A](0)=[A]_0$:\n$$[A](t) = [A]_0 e^{-k_1 t}.$$\nПодставляем в уравнение для $B$:\n$$\\frac{d[B]}{dt} + k_2[B] = k_1[A]_0 e^{-k_1 t}.$$\nЭто линейное ОДУ первого порядка. Интегрирующий множитель: $\\mu(t) = e^{\\int k_2 dt} = e^{k_2 t}$. Умножаем обе части на $e^{k_2 t}$:\n$$\\frac{d}{dt}\\left([B]e^{k_2 t}\\right) = k_1[A]_0 e^{(k_2-k_1)t}.$$\nИнтегрируем по $t$:\n$$[B]e^{k_2 t} = \\frac{k_1[A]_0}{k_2-k_1} e^{(k_2-k_1)t} + C.$$\nИспользуем начальное условие $[B](0)=0$:\n$$0 = \\frac{k_1[A]_0}{k_2-k_1} + C \\Rightarrow C = -\\frac{k_1[A]_0}{k_2-k_1}.$$\nИсключая $C$ и деля на $e^{k_2 t}$, получаем каноническое выражение:\n$$[B](t) = \\frac{[A]_0 k_1}{k_2-k_1}\\left(e^{-k_1 t} - e^{-k_2 t}\\right).$$\n\n2) Максимум концентрации $B$ достигается при $d[B]/dt = 0$, что эквивалентно условию $k_1[A] = k_2[B]$. Подстановка в выражение для $[B](t)$ и решение относительно $t$ даёт:\n$$t_{\\max} = \\frac{\\ln(k_1/k_2)}{k_1-k_2}.$$\nПодставляем числовые значения ($k_1=0.25$ мин$^{-1}$, $k_2=0.10$ мин$^{-1}$):\n$$t_{\\max} = \\frac{\\ln(0.25/0.10)}{0.25-0.10} = \\frac{0.916291}{0.15} = 6.1086 \\text{ мин}.$$\nДля вычисления $[B]_{\\max}$ используем преобразованную формулу:\n$$[B]_{\\max} = [A]_0 \\left(\\frac{k_1}{k_2}\\right)^{\\frac{k_2}{k_2-k_1}}.$$\nПодставляем: $k_2/(k_2-k_1) = 0.10/(0.10-0.25) = -2/3$, $k_1/k_2 = 2.5$.\n$$[B]_{\\max} = 0.40 \\cdot 2.5^{-2/3} = 0.40 \\cdot 0.5429 = 0.21716 \\approx 0.217 \\text{ М}.$$\nФизическая проверка: $[B]_{\\max} < [A]_0$ (0.217 М < 0.40 М), что согласуется с сохранением вещества.\n\n3) Рассматриваем случай $k_2' = 3k_1 = 0.75$ мин$^{-1}$:\n$$t_{\\max}' = \\frac{\\ln(0.25/0.75)}{0.25-0.75} = \\frac{-1.098612}{-0.50} = 2.1972 \\text{ мин}.$$\n$$[B]_{\\max}' = 0.40 \\cdot \\left(\\frac{0.25}{0.75}\\right)^{\\frac{0.75}{0.75-0.25}} = 0.40 \\cdot \\left(\\frac{1}{3}\\right)^{1.5} = 0.40 \\cdot 0.19245 = 0.07698 \\text{ М}.$$\nСравнение: увеличение константы скорости второй стадии в 3 раза приводит к ускорению как накопления, так и расходования $B$. Время достижения максимума сокращается с $6.11$ мин до $2.20$ мин (в $6.1086/2.1972 \\approx 2.78$ раза). Максимальная концентрация $[B]_{\\max}$ уменьшается с $0.217$ М до $0.07698$ М, т.е. в $0.21716/0.07698 \\approx 2.82$ раза, так как продукт $P$ образуется быстрее, не давая $B$ накопиться в значительных количествах.",
+        "answer": "t_max = 6.11 мин, [B]_max = 0.217 М; при k2' = 0.75 мин^-1: t_max' = 2.20 мин, [B]_max' = 0.0769 М; максимальная концентрация уменьшилась в ~2.82 раза, время достижения максимума сократилось в ~2.78 раза.",
+        "difficulty": "medium",
+        "topic": "Последовательные реакции первого порядка",
+        "rubric": [
+          {
+            "criterion_name": "Физическая модель и условия применимости",
+            "max_score": 3,
+            "description": "Метод соответствует условию. Проверка допущений (постоянные T,V, необратимые стадии первого порядка, отсутствие начальных концентраций B и P)."
+          },
+          {
+            "criterion_name": "Уравнения и ход решения",
+            "max_score": 3,
+            "description": "Формулы и преобразования корректны. Необходимый вывод интегрирующим множителем выполнен, переход к производным и интегрирование проведены верно."
+          },
+          {
+            "criterion_name": "Расчёт, единицы и точность",
+            "max_score": 3,
+            "description": "Расчёт и единицы согласованы. Учёт точности данных (3 знака), корректное использование формул для t_max и [B]_max, физическая проверка результата."
+          },
+          {
+            "criterion_name": "Полнота ответа",
+            "max_score": 1,
+            "description": "Получены ответы на все требуемые подпункты (вывод, численные значения, сравнение случаев)."
+          }
+        ],
+        "max_score": 10,
+        "images": []
+      },
+      "corrected": {
+        "statement": "В закрытой системе постоянного объёма при постоянной температуре протекают две необратимые реакции первого порядка со стехиометрией 1:1:\n$A\\xrightarrow{k_1}B\\xrightarrow{k_2}P$.\nНачальная концентрация $[A]_0=0.40\\,\\mathrm M$, $[B]_0=[P]_0=0$.\nКонстанты $k_1=0.25\\,\\mathrm{min^{-1}}$, $k_2=0.10\\,\\mathrm{min^{-1}}$. Побочные реакции отсутствуют.\n\n1. Выведите выражение для [B](t) методом интегрирующего множителя.\n2. Найдите время максимума и максимальную концентрацию B.\n3. При неизменных k₁, начальных концентрациях и остальных условиях замените k₂ на $k'_2=3k_1=0.75\\,\\mathrm{min^{-1}}$. Найдите новые время и концентрацию максимума, сравните с исходным случаем и объясните изменение.\n\nУсловие $k'_2=3k_1$ сравнивает константы второй и первой стадий; оно не означает увеличения исходной k₂ в три раза. Данные учебные модельные.",
+        "reference_solution": "1. Кинетические уравнения:\n$$\n\\frac{d[A]}{dt}=-k_1[A],\\qquad\n\\frac{d[B]}{dt}=k_1[A]-k_2[B],\\qquad\n\\frac{d[P]}{dt}=k_2[B].\n$$\nИз первого уравнения $[A]=[A]_0e^{-k_1t}$. Подставляя во второе и умножая на интегрирующий множитель $e^{k_2t}$:\n$$\n\\frac{d([B]e^{k_2t})}{dt}=k_1[A]_0e^{(k_2-k_1)t}.\n$$\nИнтегрирование от 0 до t при [B]₀=0 даёт\n$$\n[B](t)=\\frac{k_1[A]_0}{k_2-k_1}(e^{-k_1t}-e^{-k_2t}).\n$$\nОтношение констант безразмерно; экспоненты безразмерны, если t выражено в минутах. [B] имеет размерность концентрации.\n\n2. В максимуме $d[B]/dt=0$, то есть $k_1[A]=k_2[B]$. После подстановки:\n$$\nk_1e^{-k_1t_{\\max}}=k_2e^{-k_2t_{\\max}},\\qquad\nt_{\\max}=\\frac{\\ln(k_1/k_2)}{k_1-k_2}.\n$$\n$$\nt_{\\max}=\\frac{\\ln2.5}{0.15}=6.10860487916\\,\\mathrm{min}.\n$$\n$$\n[B]_{\\max}=[A]_0\\left(\\frac{k_1}{k_2}\\right)^{k_2/(k_2-k_1)}\n=0.40\\cdot2.5^{-2/3}=0.217153409328\\,\\mathrm M.\n$$\nВ этот момент $[A]=0.0868613637310\\,\\mathrm M$, $[P]=0.0959852269414\\,\\mathrm M$. Сумма с [B] равна 0.40 М; скорости образования и расходования B равны $0.0217153409328\\,\\mathrm{M\\,min^{-1}}$.\n\n3. При $k'_2=0.75\\,\\mathrm{min^{-1}}$:\n$$\nt'_{\\max}=\\frac{\\ln(0.25/0.75)}{0.25-0.75}\n=2.19722457734\\,\\mathrm{min},\n$$\n$$\n[B]'_{\\max}=0.40(1/3)^{3/2}\n=0.0769800358920\\,\\mathrm M.\n$$\nВ новом максимуме $[A]=0.230940107676\\,\\mathrm M$,\n$[P]=0.0920798564322\\,\\mathrm M$; материальный баланс снова даёт 0.40 М. Отношения $t_{\\max}/t'_{\\max}=2.78014589049$ и $[B]_{\\max}/[B]'_{\\max}=2.82090553494$.\n\nКонстанта k₂ увеличилась в $0.75/0.10=7.5$ раза. При этом скорость образования B, $k_1[A]_0e^{-k_1t}$, как функция времени не изменилась. Возросла константа его расходования; поэтому B накапливается меньше, а максимум наступает раньше. Начальный наклон $d[B]/dt|_0=k_1[A]_0=0.10\\,\\mathrm{M\\,min^{-1}}$ одинаков в обоих случаях. Более ранний максимум не означает ускорения образования B. Контрольные цифры приведены для проверки, итоговые значения можно разумно округлять.",
+        "answer": "$t_{\\max}\\approx6.11\\,\\mathrm{min}$, $[B]_{\\max}\\approx0.217\\,\\mathrm M$; при $k'_2=0.75\\,\\mathrm{min^{-1}}$: $t'_{\\max}\\approx2.20\\,\\mathrm{min}$, $[B]'_{\\max}\\approx0.0770\\,\\mathrm M$ (неокруглённое 0.0769800358920 М). Время максимума уменьшилось примерно в 2.78 раза, концентрация — в 2.82 раза. k₂ выросла в 7.5 раза; скорость образования B при одинаковом t не изменилась.",
+        "difficulty": "easy",
+        "topic": "Последовательные реакции первого порядка",
+        "rubric": [
+          {
+            "criterion_name": "Физическая модель и условия применимости",
+            "max_score": 3,
+            "description": "Метод соответствует условию. Проверка допущений (постоянные T,V, необратимые стадии первого порядка, отсутствие начальных концентраций B и P)."
+          },
+          {
+            "criterion_name": "Уравнения и ход решения",
+            "max_score": 3,
+            "description": "Формулы и преобразования корректны. Необходимый вывод интегрирующим множителем выполнен, переход к производным и интегрирование проведены верно."
+          },
+          {
+            "criterion_name": "Расчёт, единицы и точность",
+            "max_score": 3,
+            "description": "Корректно вычислены tmax и Bmax для обоих наборов констант, соблюдены минуты и молярные концентрации; проверен баланс. Допустимо разумное округление, 0.076980… округляется до 0.0770 М при трёх значащих цифрах."
+          },
+          {
+            "criterion_name": "Полнота ответа",
+            "max_score": 1,
+            "description": "Есть вывод, оба численных максимума и сравнение: k2 увеличилась в 7.5 раза при фиксированной k1; скорость образования B не изменилась, изменилось его расходование."
+          }
+        ],
+        "max_score": 10,
+        "images": []
+      },
+      "review_notes": [
+        "Лично проверены весь вывод ОДУ, оба максимума, баланс и физическое объяснение. Численные исходные данные сохранены, допущения первого порядка и необратимости сделаны явными.",
+        "tmax=6.10860487916 мин, Bmax=0.217153409328 М; tmax'=2.19722457734 мин, Bmax'=0.0769800358920 М. В обоих максимумах проверены k1[A]=k2[B] и баланс 0.40 М.",
+        "Исправлено сравнение: k2'=3k1=0.75, но k2'/k2=7.5, не 3.",
+        "Убрано ложное ускорение накопления/образования B: функция образования k1[A](t) не меняется; начальный d[B]/dt=0.10 М/мин в обоих случаях.",
+        "Ответ 0.0769 исправлен на 0.0770 М при трёх значащих цифрах; допустимы и другие разумные округления.",
+        "easy вместо medium: один стандартный метод линейного ОДУ и стандартного максимума повторён для второго k2. Сравнение двух наборов чисел не является сравнением разных моделей.",
+        "Сохранена уже выполненная автоматическая коррекция исходного Bmax с ошибочных 0.194 М на правильные 0.217 М; её не откатываем. Рубрика уточнена, max_score=10 сохранён."
+      ],
+      "verifier_audit": {
+        "requested_difficulty": "medium",
+        "policy_version": "physchem-single-verifier-v1",
+        "model_id": "gpt://b1g0ibcval4b15nf4jcj/deepseek-v4-flash",
+        "stored_content_fingerprint": "493cf1bdcca20ca4ae52ae71ec53276dfc6e18d61c98143ae93ca231caf908e9",
+        "fingerprint_matches_current": true,
+        "report": {
+          "status": "match",
+          "comparison": {
+            "verdict": "match",
+            "basis": "single_independent_verifier_repair"
+          },
+          "issues": [
+            "В эталонном решении допущена арифметическая ошибка при вычислении [B]_max для исходных k1=0.25, k2=0.10: значение 2.5^(-2/3) принято равным 0.48507, тогда как правильно 0.5429. Из-за этого [B]_max = 0.217 М, а не 0.194 М, и отношение максимальных концентраций в пункте 3 равно ~2.82, а не 2.52. Остальные формулы и выводы корректны."
+          ],
+          "solution": "Независимая проверка: для k1=0.25, k2=0.10 получаем t_max = ln(2.5)/0.15 = 6.1086 мин. [B](t) = 0.4*0.25/(0.10-0.25)*(e^{-0.25t}-e^{-0.10t}) = -0.6667*(e^{-0.25t}-e^{-0.10t}). При t_max: e^{-1.527}=0.2172, e^{-0.6109}=0.5429, разность = -0.3257, произведение = 0.2171 М. Формула [B]_max = [A]_0*(k1/k2)^(k2/(k2-k1)) даёт 0.4*2.5^{-2/3} = 0.4*0.5429 = 0.2172 М. Для k2'=0.75: t_max' = ln(1/3)/(-0.5)=2.1972 мин, [B]_max' = 0.4*(1/3)^1.5 = 0.4*0.19245=0.07698 М. Отношение 0.2172/0.07698=2.82. Все единицы корректны, результат физически осмыслен.",
+          "answer": "Пункт 1: вывод [B](t) = [A]_0 k1/(k2-k1)(e^{-k1t}-e^{-k2t}). Пункт 2: t_max=6.11 мин, [B]_max=0.217 М. Пункт 3: t_max'=2.20 мин, [B]_max'=0.07698 М, уменьшение в ~2.82 раза по концентрации и в ~2.78 раза по времени.",
+          "solution_truncated": false
+        },
+        "correction": {
+          "applied": true,
+          "issues": [
+            "В эталонном решении допущена арифметическая ошибка при вычислении [B]_max для исходных k1=0.25, k2=0.10: значение 2.5^(-2/3) принято равным 0.48507, тогда как правильно 0.5429. Из-за этого [B]_max = 0.217 М, а не 0.194 М, и отношение максимальных концентраций в пункте 3 равно ~2.82, а не 2.52. Остальные формулы и выводы корректны."
+          ]
+        },
+        "analysis": [
+          "Отчёт имеет basis=single_independent_verifier_repair, correction.applied=true. Верификатор действительно обнаружил неверное 2.5^(-2/3)=0.48507 и исправил Bmax с 0.194 на 0.217 М и отношение максимумов.",
+          "В issues присутствует утверждение «Остальные формулы и выводы корректны», но в сохранённом исправленном эталоне осталось ошибочное «увеличение ... в 3 раза» и «ускорение ... накопления».",
+          "Число Bmax'=0.07698 в отчёте верно, однако итоговый answer сохранён как 0.0769, что не является правильным округлением до трёх значащих цифр.",
+          "Этот случай показывает частичную коррекцию и неполный контроль оставшегося объяснения. Повторный платный вызов не выполнялся."
+        ]
+      }
+    }
+  ]
+}

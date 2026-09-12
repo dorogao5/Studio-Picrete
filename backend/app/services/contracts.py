@@ -1,3 +1,6 @@
+import json
+
+
 GRADING_JSON_CONTRACT = """
 {
   "unreadable": false,
@@ -45,6 +48,74 @@ GENERATION_JSON_CONTRACT = """
   ]
 }
 """.strip()
+
+PHYSICAL_GENERATION_JSON_EXAMPLE = json.dumps(
+    {"tasks": [{
+        "statement": "Реакция A -> P имеет первый порядок: k = 0,2 мин^-1. "
+                     "Начальная концентрация A равна 1 моль/л. Найдите концентрацию A через 5 мин.",
+        "reference_solution": "Для реакции первого порядка [A](t) = [A]_0 exp(-kt). "
+                              "kt = 0,2 × 5 = 1; [A](5) = exp(-1) = 0,367879... моль/л.",
+        "answer": "[A](5 мин) ≈ 0,368 моль/л",
+        "images": [],
+        "rubric": [
+            {"criterion_name": "Закон кинетики", "max_score": 5, "description": "Верный закон первого порядка"},
+            {"criterion_name": "Расчёт", "max_score": 5, "description": "Подстановка, расчёт и единицы"},
+        ],
+        "max_score": 10,
+        "difficulty": "easy",
+        "topic": "Формальная кинетика",
+        "data_used": [],
+        "chemistry_facts": {},
+    }]},
+    ensure_ascii=False,
+    indent=2,
+)
+
+
+def _strict_object(properties: dict) -> dict:
+    return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
+
+
+PHYSICAL_GENERATION_RESPONSE_SCHEMA = _strict_object({
+    "tasks": {"type": "array", "minItems": 1, "items": _strict_object({
+        "statement": {"type": "string"},
+        "reference_solution": {"type": "string"},
+        "answer": {"type": "string"},
+        "images": {"type": "array", "items": {"type": "string"}},
+        "rubric": {"type": "array", "items": _strict_object({
+            "criterion_name": {"type": "string"}, "max_score": {"type": "number"},
+            "description": {"type": "string"},
+        })},
+        "max_score": {"type": "number"},
+        "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+        "topic": {"type": "string"},
+        "data_used": {"type": "array", "items": _strict_object({
+            "sheet_title": {"type": "string"}, "values": {"type": "array", "items": {"type": "string"}},
+        })},
+        "chemistry_facts": _strict_object({}),
+    })},
+})
+
+GRADING_RESPONSE_SCHEMA = _strict_object({
+    "unreadable": {"type": "boolean"},
+    "unreadable_reason": {"type": ["string", "null"]},
+    "total_score": {"type": "number"},
+    "max_score": {"type": "number"},
+    "criteria_scores": {"type": "array", "items": _strict_object({
+        "criterion_name": {"type": "string"}, "score": {"type": "number"},
+        "max_score": {"type": "number"}, "comment": {"type": "string"},
+    })},
+    "detailed_analysis": _strict_object({
+        "method_correctness": {"type": "string"}, "calculations": {"type": "string"},
+        "units_and_dimensions": {"type": "string"}, "chemical_rules": {"type": "string"},
+        "errors_found": {"type": "array", "items": {"type": "string"}},
+    }),
+    "feedback": {"type": "string"},
+    "recommendations": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"type": "number"},
+    "needs_teacher_review": {"type": "boolean"},
+})
+
 
 CHEMISTRY_FACTS_GUIDE = """
 Поле chemistry_facts — машиночитаемое доказательство расчёта, а не пересказ решения.

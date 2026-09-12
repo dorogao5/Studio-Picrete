@@ -5,6 +5,8 @@ from app.llm import client as llm
 from app.models import Assistant, ModelEntry, Provider
 from app.services.assistant_profile import with_assistant_profile
 from app.services.grading_contract import GradingContractError, validate_grading_output, validate_grading_request
+from app.services.contracts import GRADING_RESPONSE_SCHEMA
+from app.services.physical_chemistry import physical_json_schema_enabled
 
 
 @dataclass
@@ -77,6 +79,8 @@ async def run_grading(
             user_message,
             temperature=temperature,
             json_mode=True,
+            **({"response_schema": GRADING_RESPONSE_SCHEMA}
+               if physical_json_schema_enabled(assistant, provider, model) else {}),
         )
     except llm.LlmError as err:
         return GradeOutcome(output=None, raw_text="", duration_ms=0, tokens_total=None, error=str(err))

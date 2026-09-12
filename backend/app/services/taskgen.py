@@ -24,12 +24,17 @@ from app.models import (
 )
 from app.services.assistant_profile import build_assistant_profile, with_assistant_profile
 from app.services.chemistry_facts import FACT_BLOCK_BY_CHECK, normalize_chemistry_facts
-from app.services.contracts import CHEMISTRY_FACTS_GUIDE, GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE
+from app.services.contracts import (
+    CHEMISTRY_FACTS_GUIDE, GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE,
+    PHYSICAL_GENERATION_JSON_EXAMPLE,
+    PHYSICAL_GENERATION_RESPONSE_SCHEMA,
+)
 from app.services.grounding import AUTHORITY_LABELS, KB_HEADER, build_grounding_block
 from app.services.physical_chemistry import (
     is_physical_chemistry,
     run_physical_validation,
     task_verifier_model_id,
+    physical_json_schema_enabled,
 )
 from app.services.task_approval import task_is_export_ready
 from app.services.task_evidence import evidence_matches_task, normalize_validation_config, task_content_fingerprint
@@ -144,6 +149,7 @@ def build_generation_user_message(
     example_tasks: list[dict] | None = None,
     existing_statements: list[str] | None = None,
     chemistry_check: str = "auto",
+    reuse_blueprint: bool = False,
 ) -> str:
     examples = _render_example_tasks(list(example_tasks or []))
     existing = "\n---\n".join((existing_statements or [])[:8])
@@ -166,7 +172,24 @@ def build_generation_user_message(
         )
     sections.append(f"Инструкции преподавателя:\n{instructions or '(нет)'}")
     sections.append(f"Примеры задач в нужном стиле:\n{examples or '(нет)'}")
-    sections.append(f"Уже существующие задачи (НЕ повторяйте их сюжеты и числа):\n{existing or '(нет)'}")
+    existing_rule = (
+        "Повторное использование сюжета, физической модели и структуры выбранного blueprint разрешено. "
+        "Сохраняйте учебный замысел и меняйте числовые исходные данные в допустимых диапазонах blueprint. "
+        "Не повторяйте целиком набор числовых исходных данных существующей задачи; "
+        "совпадение отдельных констант допустимо. Пересчитайте решение и ответ."
+        if reuse_blueprint else "НЕ повторяйте их сюжеты и числа"
+    )
+    sections.append(f"Уже существующие задачи ({existing_rule}):\n{existing or '(нет)'}")
+    output_contract = (
+        "Корневой объект обязан содержать непустой массив tasks с запрошенным количеством задач. "
+        "Пустой объект {} и отдельная задача без tasks не являются ответом. "
+        "У каждой задачи обязательны все поля примера; chemistry_facts всегда {}.\n"
+        "Ниже полный валидный JSON-пример формата. Его сюжет, числа, сложность и рубрика показаны "
+        "только для иллюстрации формата: используйте выбранный blueprint, запрошенную сложность "
+        "и рубрику преподавателя.\n"
+        f"{PHYSICAL_GENERATION_JSON_EXAMPLE}"
+        if reuse_blueprint else GENERATION_JSON_CONTRACT
+    )
     evidence_line = (
         "Верните chemistry_facts: {}: физхимия проверяется отдельным независимым verifier и не использует "
         "общий chemistry-facts классификатор."
@@ -186,7 +209,7 @@ def build_generation_user_message(
         "с его точным заголовком. Самостоятельно заданные числа условия туда не входят; если справочник не "
         "использован, верните data_used: [].\n\n"
         "Ответ — строго JSON по схеме (эта схема главнее любых других форматов):\n"
-        f"{GENERATION_JSON_CONTRACT}\n{JSON_LATEX_ESCAPING_NOTE}"
+        f"{output_contract}\n{JSON_LATEX_ESCAPING_NOTE}"
     )
     return "\n\n".join(sections)
 
@@ -210,8 +233,12 @@ async def generate_tasks(
     temperature: float = 0.7,
     chemistry_check: str = "auto",
 ) -> list[dict]:
+    physical = is_physical_chemistry(assistant)
+    if physical:
+        chemistry_check = "off"
     prompt = system_prompt or FALLBACK_GENERATOR_PROMPT.format(
-        discipline=assistant.discipline, contract=GENERATION_JSON_CONTRACT
+        discipline=assistant.discipline,
+        contract=PHYSICAL_GENERATION_JSON_EXAMPLE if physical else GENERATION_JSON_CONTRACT,
     )
     prompt = with_assistant_profile(prompt, assistant)
     user_message = build_generation_user_message(
@@ -226,6 +253,7 @@ async def generate_tasks(
         example_tasks=example_tasks,
         existing_statements=existing_statements,
         chemistry_check=chemistry_check,
+        reuse_blueprint=physical,
     )
     result = await llm.chat(
         provider,
@@ -234,6 +262,8 @@ async def generate_tasks(
         user_message,
         temperature=temperature,
         json_mode=True,
+        **({"response_schema": PHYSICAL_GENERATION_RESPONSE_SCHEMA}
+           if physical_json_schema_enabled(assistant, provider, model) else {}),
     )
     parsed = llm.extract_json(result.text)
     tasks = _coerce_tasks(parsed)

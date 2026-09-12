@@ -25,6 +25,55 @@ def correction():
             "rubric": [{"criterion_name": "corrected", "max_score": 8}], "max_score": 8}
 
 
+@pytest.mark.parametrize("physical", [True, False])
+def test_generator_blueprint_and_json_contract_are_scoped(monkeypatch, physical):
+    from app.services.contracts import GENERATION_JSON_CONTRACT, PHYSICAL_GENERATION_JSON_EXAMPLE
+    discipline = "Физическая химия" if physical else "Аналитическая химия"
+    assistant = Assistant(name=discipline, discipline=discipline, criteria=[], topics=[], nuances=[])
+    calls = []
+    async def chat(*args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(text=PHYSICAL_GENERATION_JSON_EXAMPLE)
+    monkeypatch.setattr(pc.llm, "chat", chat)
+    asyncio.run(taskgen.generate_tasks(None, None, assistant, None, topic="Кинетика Михаэлиса–Ментен",
+        difficulty="medium", count=1, existing_statements=["existing numerical task"], chemistry_check="auto"))
+    assert len(calls) == 1
+    system, message = calls[0][0][2:4]
+    assert "existing numerical task" in message
+    if physical:
+        assert "Повторное использование сюжета" in message
+        assert "Не повторяйте целиком набор числовых исходных данных" in message
+        assert "НЕ повторяйте их сюжеты и числа" not in message
+        assert "непустой массив tasks" in message
+        assert PHYSICAL_GENERATION_JSON_EXAMPLE in system and PHYSICAL_GENERATION_JSON_EXAMPLE in message
+        assert "<тип проверяемого расчёта>" not in system + message
+        assert "chemistry_facts всегда {}" in message
+    else:
+        assert "НЕ повторяйте их сюжеты и числа" in message
+        assert GENERATION_JSON_CONTRACT in system and GENERATION_JSON_CONTRACT in message
+        assert "chemistry_facts для детерминированной перепроверки" in message
+
+
+def test_physical_json_example_is_complete_valid_json():
+    from app.services.contracts import PHYSICAL_GENERATION_JSON_EXAMPLE
+    example = json.loads(PHYSICAL_GENERATION_JSON_EXAMPLE)
+    assert set(example) == {"tasks"} and len(example["tasks"]) == 1
+    candidate = example["tasks"][0]
+    assert set(candidate) == {"statement", "reference_solution", "answer", "images", "rubric",
+                              "max_score", "difficulty", "topic", "data_used", "chemistry_facts"}
+    assert candidate["chemistry_facts"] == {} and candidate["data_used"] == []
+    assert sum(c["max_score"] for c in candidate["rubric"]) == candidate["max_score"]
+
+
+def test_physical_generation_preview_uses_matching_contract():
+    from app.api.preview import _build_generation_message
+    from app.services.contracts import PHYSICAL_GENERATION_JSON_EXAMPLE
+    message = _build_generation_message(None, "course context", ["old task"], reuse_blueprint=True)
+    assert PHYSICAL_GENERATION_JSON_EXAMPLE in message
+    assert "Повторное использование сюжета" in message
+    assert "<тип проверяемого расчёта>" not in message
+
+
 @pytest.mark.parametrize("verdict,issues,repair,expected", [
     ("pass", [], None, "validated"),
     ("pass", ["arithmetic"], correction(), "validated"),
@@ -150,7 +199,10 @@ def test_batch_same_row_and_concurrent_edit(monkeypatch, edit):
     asyncio.run(run())
 
 
-def test_runtime_separates_student_qwen_from_task_deepseek():
+@pytest.mark.parametrize("schema_enabled", [True, False])
+def test_runtime_separates_student_qwen_from_task_deepseek(monkeypatch, schema_enabled):
+    monkeypatch.setattr(pc, "get_settings", lambda: SimpleNamespace(
+        json_schema_model_ids="gpt://b1g0ibcval4b15nf4jcj/qwen3.6-35b-a3b" if schema_enabled else ""))
     async def run():
         engine, sessions = await setup_db()
         async with sessions() as db:
@@ -166,6 +218,7 @@ def test_runtime_separates_student_qwen_from_task_deepseek():
             policy = await integration._build_runtime_policy(db, assistant)
             assert policy["tutor_model_id"] == policy["decision_model_id"] == qwen.model_id
             assert policy["tier"] == "decision" and "task_validation" not in policy["allowed_uses"]
+            assert policy["decision_supports_json_schema"] is schema_enabled
             assert pc.task_verifier_model_id(assistant) == verifier.id
             assert not pc.current_model_use_policy().classify(qwen).decision_capable
             assistant.discipline = assistant.name = "Аналитическая химия"

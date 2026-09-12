@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     architect_family: str = "gpt"
 
     llm_request_timeout: float = 300.0
+    # Exact provider model URIs with verified structured-output support (comma-separated).
+    # Empty disables the capability; physical-chemistry/provider/family scope still applies.
+    json_schema_model_ids: str = ""
     data_dir: Path = Path("./data")
 
     # Only explicitly allowlisted models may make decisions that become grades,

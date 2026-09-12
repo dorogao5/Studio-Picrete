@@ -16,6 +16,7 @@ COPY backend/app ./app
 COPY backend/scripts ./scripts
 RUN uv sync --frozen --no-dev --no-editable --no-cache
 COPY ops/release_physical_chemistry.py ./ops/release_physical_chemistry.py
+COPY ops/apply_live_generation_corrections.py ./ops/apply_live_generation_corrections.py
 COPY ops/content/physical_chemistry ./ops/content/physical_chemistry
 
 EXPOSE 8100
