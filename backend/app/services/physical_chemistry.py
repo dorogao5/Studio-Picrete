@@ -10,6 +10,7 @@ instead of buying a replacement generation.
 from __future__ import annotations
 
 import json
+import jsonschema
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any
@@ -262,10 +263,22 @@ async def run_physical_validation(
         if essential_tools:
             candidate = response.get("verified_task")
             # Structural contract only: diagnostics never become a task patch.
-            required = set(original) | {"images"}
-            if (verdict == "pass" and isinstance(candidate, dict) and required <= candidate.keys()
-                    and isinstance(candidate.get("images"), list)):
-                correction = _normalized_correction(candidate, original)
+            if verdict == "pass":
+                normalized = _normalized_correction(candidate, original)
+                if normalized is not None:
+                    normalized.setdefault("images", original.get("images", []))
+                    # Grouping/optional bookkeeping must not discard a full verified solution.
+                    # Substantive fields remain model-supplied and must pass the complete schema.
+                    normalized["difficulty"] = original["difficulty"]
+                    normalized["rubric"] = [{**r,"description":r.get("description", "")}
+                                           if isinstance(r,dict) else r for r in normalized["rubric"]]
+                    schema = PHYSICAL_VERIFIER_RESPONSE_SCHEMA["properties"]["verified_task"]["anyOf"][1]
+                    normalized = {k:v for k,v in normalized.items() if k in schema["properties"]}
+                    try:
+                        jsonschema.validate(normalized, schema)
+                    except jsonschema.ValidationError:
+                        normalized = None
+                    correction = normalized
         else:
             correction = _normalized_correction(response.get("corrected_task"), original)
         if correction is not None and verdict in {"pass", "fail"}:

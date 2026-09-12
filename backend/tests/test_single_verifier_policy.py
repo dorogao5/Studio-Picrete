@@ -75,3 +75,33 @@ def test_generator_schema_warning_preserves_draft_for_verifier(monkeypatch):
             "items":{"type":"object","required":["statement","answer"]}}}}))
     assert result.raw["draft_schema_warning"]["disposition"]=="same_candidate_to_independent_verifier"
     assert json.loads(result.text)["tasks"][0]["statement"]=="A real draft"
+
+@pytest.mark.parametrize("missing_core", [False, True])
+def test_native_verifier_metadata_repair_never_invents_core(monkeypatch, missing_core):
+    from app.llm import essential_tools as et
+    from app.services import physical_chemistry as pc
+    from test_physical_pipeline import task
+    mock_dialogue(monkeypatch)
+    original = task()
+    verified = pc._task_payload(original)
+    for key in ("images", "difficulty", "topic", "data_used", "chemistry_facts"):
+        verified.pop(key, None)
+    if missing_core:
+        verified.pop("reference_solution")
+    async def completion(*args, **kwargs):
+        return {"role":"assistant", "content":json.dumps({"verdict":"pass","issues":[],
+            "verified_task":verified,"verification":{"solution":"checked", "answer":"2"}})}, {}
+    monkeypatch.setattr(et,"completion",completion)
+    validation, fixed = asyncio.run(pc.run_physical_validation(task=original,
+        provider=Provider(kind="deepseek",base_url="https://model.invalid",extra_headers={}),
+        model=ModelEntry(model_id="deepseek-flash",family="deepseek",supports_json=True),
+        grounding="",discipline_context="",essential_tools=True,generation_policy="single_verifier"))
+    if missing_core:
+        assert fixed is None and validation["verdict"]=="needs_review"
+        assert "unvalidated_final" in validation["calculation_audit"]
+    else:
+        assert validation["verdict"]=="validated"
+        assert fixed["reference_solution"]=="original"
+        assert fixed["topic"]==original.topic and fixed["difficulty"]==original.difficulty
+        assert validation["calculation_audit"]["verifier_schema_warning"]["disposition"]=="normalize_metadata_then_validate"
+    assert validation["calculation_audit"]["model_calls"]==1

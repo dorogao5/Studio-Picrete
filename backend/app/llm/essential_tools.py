@@ -204,7 +204,30 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                                     "validator": getattr(err, "validator", "json"),
                                     "disposition": "same_candidate_to_independent_verifier",
                                 }
+                            elif ("verified_task" in response_schema.get("properties", {})
+                                  and isinstance(draft, dict) and isinstance(draft.get("verdict"), str)
+                                  and draft["verdict"] in {"pass", "fail"}
+                                  and isinstance(draft.get("issues"), list)
+                                  and all(isinstance(x, str) for x in draft["issues"])
+                                  and isinstance(draft.get("verification"), dict)
+                                  and all(isinstance(draft["verification"].get(k), str)
+                                          for k in ("solution", "answer"))
+                                  and (draft.get("verified_task") is None or
+                                       (isinstance(draft.get("verified_task"), dict)
+                                        and all(isinstance(draft["verified_task"].get(k), str)
+                                                and draft["verified_task"][k].strip()
+                                                for k in ("statement", "reference_solution", "answer"))))):
+                                # Domain service restores only server-owned metadata, then validates
+                                # the full schema. Never infer a solution, answer or pass verdict.
+                                audit["verifier_schema_warning"] = {
+                                    "path": list(getattr(err, "absolute_path", [])),
+                                    "validator": getattr(err, "validator", "json"),
+                                    "disposition": "normalize_metadata_then_validate",
+                                }
                             else:
+                                audit["schema_failure"] = {"path":list(getattr(err,"absolute_path",[])),
+                                    "validator":getattr(err,"validator","json")}
+                                audit["unvalidated_final"] = message["content"]
                                 raise LlmError("Final answer does not match the requested JSON schema; no regeneration") from err
                     totals = aggregate_usage(audit["usage_by_call"])
                     audit["usage"] = totals

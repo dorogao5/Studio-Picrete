@@ -15,14 +15,14 @@ from app.api import integration
 def task():
     return GeneratedTask(id="task", assistant_id="assistant", batch_id="batch",
         statement="A -> B, k=2", reference_solution="original", answer="2",
-        rubric=[{"criterion_name": "old", "max_score": 10}], max_score=10,
+        rubric=[{"criterion_name": "old", "max_score": 10, "description": ""}], max_score=10,
         difficulty="easy", topic="kinetics", grounding={"data_used": [], "chemistry_facts": {}},
         images=[], status="draft", validation={}, approved=False, model_used="qwen")
 
 
 def correction():
     return {"statement": "A -> B, k=2", "reference_solution": "repaired", "answer": "4",
-            "rubric": [{"criterion_name": "corrected", "max_score": 8}], "max_score": 8}
+            "rubric": [{"criterion_name": "corrected", "max_score": 8, "description": ""}], "max_score": 8}
 
 
 @pytest.mark.parametrize("physical", [True, False])
