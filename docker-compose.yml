@@ -7,6 +7,8 @@ services:
       args:
         BUILD_REVISION: ${RELEASE_SHA:-unknown}
     network_mode: host
+    # Private .env passes unprefixed ESSENTIAL_TOOLS_* through validated aliases.
+    # Gateway URL after private-v2 deployment: http://172.30.80.2:8080.
     env_file: .env
     volumes:
       - ./data:/app/data

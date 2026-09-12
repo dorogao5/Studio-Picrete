@@ -1,5 +1,5 @@
 # Separate opt-in deployment; never started by the normal Studio compose command.
-# Clients using host networking call http://127.0.0.1:8180.
+# Host-network clients call http://172.30.80.2:8080 (private bridge, no publish).
 # Use a private --env-file with RELEASE_SHA and ESSENTIAL_TOOLS_GATEWAY_TOKEN.
 services:
   essential-tools:
@@ -9,8 +9,6 @@ services:
       labels:
         org.opencontainers.image.revision: ${RELEASE_SHA:?Exact Git release SHA required}
         org.opencontainers.image.source: https://github.com/dorogao5/Studio-Picrete
-    ports:
-      - "127.0.0.1:8180:8080"
     environment:
       ESSENTIAL_TOOLS_ENV: production
       ESSENTIAL_TOOLS_BIND: 0.0.0.0
@@ -37,12 +35,20 @@ services:
     mem_limit: 2304m
     cpus: 2.0
     restart: unless-stopped
-    networks: [tools-isolated]
+    networks:
+      tools-private-v2:
+        ipv4_address: 172.30.80.2
     logging:
       driver: json-file
       options:
         max-size: 5m
         max-file: "2"
 networks:
-  tools-isolated:
+  # New network name avoids attempting to mutate the existing bridge IPAM.
+  # Audited against host routes and Docker networks; recheck before deployment.
+  tools-private-v2:
     internal: true
+    ipam:
+      config:
+        - subnet: 172.30.80.0/28
+          gateway: 172.30.80.1
