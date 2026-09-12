@@ -20,6 +20,10 @@ from http_server import Server
 def calc(expression):
     out=gateway.invoke({'tool':'calculator','arguments':{'expression':expression}})
     assert out['status']=='success',out
+    assert out['normalized_result']['unit'] is None
+    assert out['normalized_result']['unit_inference']=='not_performed'
+    assert out['normalized_result']['precision']==34
+    assert out['tool_version']=='scientific-calculator-v3'
     return float(out['normalized_result']['value'])
 
 @pytest.mark.parametrize('expression,expected',[
@@ -36,6 +40,13 @@ def test_units_collision_prefactor():
     # pi given explicitly to Decimal, M in kg/mol; m^3->L factor is 1000.
     value=calc('1000*6.022e23*3.141592653589793238462643383279503*(3.65e-10)^2*sqrt(8*8.314*500/(3.141592653589793238462643383279503*(.028*.032/(.028+.032))))')
     assert value==pytest.approx(2.122061873312e11,rel=1e-12)
+    # Validate the real envelope, including JSON null, against the existing schema.
+    import jsonschema
+    out=gateway.invoke({'tool':'calculator','arguments':{'expression':'1/2'}})
+    schema=json.loads((Path(__file__).parents[1]/'schemas/tool-result.schema.json').read_text())
+    jsonschema.Draft202012Validator(schema).validate(json.loads(json.dumps(out)))
+    assert out['normalized_result']['value']=='0.5'
+    assert out['normalized_result']['unit'] is None
 
 def test_exact_literals_and_final_precision():
     with localcontext() as context:
@@ -89,9 +100,14 @@ def test_bound_error_envelope(monkeypatch):
     for out in (direct,normal,timeout):
         assert out['tool_name']=='calculator'
         assert out['arguments']==request['arguments']
-        assert out['tool_version']=='scientific-calculator-v2'
+        assert out['tool_version']=='scientific-calculator-v3'
         assert out['trace_id']==direct['trace_id']
         assert out['status']=='error'
+
+    old_payload=json.dumps({'tool':'calculator','version':'scientific-calculator-v2',
+                            'arguments':request['arguments']},sort_keys=True,ensure_ascii=False,separators=(',',':'))
+    old_trace='calculator:'+hashlib.sha256(old_payload.encode()).hexdigest()[:16]
+    assert direct['trace_id']!=old_trace
 
 def test_catalog_and_csv_exclusion():
     root=Path(__file__).parents[1]

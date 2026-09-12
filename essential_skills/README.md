@@ -57,8 +57,18 @@ entry point without `gateway.invoke` process isolation.
 Decimal: exact source literals (no float conversion), 34 significant digits,
 final rounding inside the context; + - * / ^, fractional powers, unary ln/log
 (natural), exp, sqrt. Exponent range +/-10000. Nonfinite/overflow/domain results
-are errors. Calculator is scalar: `unit:dimensionless` is not inferred physical
-units. Callers explicitly convert kg/mol vs g/mol and m3 vs L and check dimensions.
+are errors. Calculator accepts numeric literals and allowed operations/functions,
+not symbols, assignments or equations. Its result carries `unit:null` and
+`unit_inference:"not_performed"`: no physical dimension has been inferred, including
+for expressions whose result the caller knows is dimensionless. Callers explicitly
+convert kg/mol vs g/mol and m3 vs L and determine/check the resulting dimensions.
+The Decimal `value`, precision and bound envelope are unchanged. The result schema
+already permits this nested null; consumers must not interpret it as a missing
+calculation or replace it with "dimensionless". Reference-record units are unchanged.
+This unit-contract change is versioned as `scientific-calculator-v3` (previously
+`scientific-calculator-v2`). Since trace IDs include the tool version, identical
+arguments now have a different trace from old probes, including on error paths.
+SymPy and reference tool versions are unchanged; `manifest.json` lists each version.
 
 Symbolic AST allowlist builds SymPy objects, never sympify/parse_expr/eval strings.
 Allowed: decimal constants, declared real symbols, pi/E, arithmetic and listed
@@ -108,7 +118,8 @@ transfer are release-owner checks. This patch does not deploy or mutate live sta
 
 ## Verification
 
-Install requirements and pytest; run `python3 -m pytest -q essential_skills/tests`
+Install requirements plus test-only dependencies pytest and jsonschema; run
+`python3 -m pytest -q essential_skills/tests`
 from repo root. Tests cover five kinetics families, source/final Decimal precision,
 unit conversion/provenance, AST attacks, mathematical errors, HTTP framing/auth,
 timeouts, kill/reaping and concurrency. Optional preservation test uses explicit

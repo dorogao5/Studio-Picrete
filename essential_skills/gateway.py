@@ -13,7 +13,7 @@ MAX_RESPONSE_BYTES = 131072
 COMPUTE_TIMEOUT = 5.0
 SLOTS = threading.BoundedSemaphore(4)
 ROOT = Path(__file__).resolve().parent
-VERSIONS = {'calculator':'scientific-calculator-v2','sympy':'ast-sympy-v2','reference_db':'reference-db-private-v1'}
+VERSIONS = {'calculator':'scientific-calculator-v3','sympy':'ast-sympy-v2','reference_db':'reference-db-private-v1'}
 
 def bind(request, result):
     tool, args = request['tool'], request['arguments']

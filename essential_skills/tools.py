@@ -13,7 +13,7 @@ import sympy as sp
 
 ROOT = Path(__file__).resolve().parent
 MAX_EXPRESSION_LENGTH = 512
-CALCULATOR_VERSION = 'scientific-calculator-v2'
+CALCULATOR_VERSION = 'scientific-calculator-v3'
 SYMPY_VERSION = 'ast-sympy-v2'
 REFERENCE_VERSION = 'reference-db-private-v1'
 FUNCTIONS = {'ln': sp.log, 'log': sp.log, 'exp': sp.exp, 'sqrt': sp.sqrt,
@@ -81,7 +81,8 @@ def calculator(arguments):
         value = +decimal_node(root, source)
         if not value.is_finite(): raise ValueError('nonfinite result')
         result = str(value)
-    return trace('calculator', arguments, {'value': result, 'unit': 'dimensionless',
+    return trace('calculator', arguments, {'value': result, 'unit': None,
+                 'unit_inference': 'not_performed',
                  'unit_note': 'Scalar arithmetic only; caller must explicitly convert and verify units.',
                  'precision': 34}, CALCULATOR_VERSION)
 

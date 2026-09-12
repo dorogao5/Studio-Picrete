@@ -1,6 +1,11 @@
 {
   "package": "studio-essential-chemistry-gateway",
   "version": "2.0.0",
+  "tool_versions": {
+    "calculator": "scientific-calculator-v3",
+    "sympy": "ast-sympy-v2",
+    "reference_db": "reference-db-private-v1"
+  },
   "upstream_package": "qwen-chem-essential-skills 1.0.0",
   "tools": [
     "calculator",

@@ -1,6 +1,6 @@
 {
   "calculator": {
-    "description": "34-digit Decimal scalar arithmetic; + - * / ^ including fractional powers; unary ln/log (natural), exp, sqrt. Convert and verify physical units explicitly.",
+    "description": "34-digit Decimal arithmetic using numeric literals and allowed operations/functions only: + - * / ^ including fractional powers; unary ln/log (natural), exp, sqrt. No symbols, assignments or equations. Units are not inferred: result unit is null and unit_inference is not_performed. Convert and verify physical units explicitly.",
     "parameters": {
       "type": "object",
       "required": [
