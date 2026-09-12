@@ -95,7 +95,7 @@ async def generate_student_trainer_tasks(
     templates = (
         await db.execute(
             select(TaskTemplate)
-            .where(TaskTemplate.assistant_id == assistant.id, TaskTemplate.topic == topic,
+            .where(TaskTemplate.assistant_id == assistant.id, ((TaskTemplate.topic == topic) | (TaskTemplate.name == topic)),
                    TaskTemplate.difficulty == body.difficulty)
             .order_by(TaskTemplate.created_at, TaskTemplate.id)
         )
@@ -270,6 +270,11 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
     if is_physical_chemistry(assistant):
         runtime["decision_supports_json_schema"] = physical_json_schema_enabled(assistant, grader_provider, grader)
     runtime["generation_policy"] = getattr(assistant, "generation_policy", "legacy")
+    if runtime["generation_policy"] == "single_verifier":
+        templates = (await db.scalars(select(TaskTemplate).where(TaskTemplate.assistant_id == assistant.id)
+                                     .order_by(TaskTemplate.id))).all()
+        runtime["generation_blueprints"] = [{"topic": t.topic, "name": t.name, "difficulty": t.difficulty}
+                                             for t in templates]
     runtime["decision_tools_enabled"] = getattr(assistant, "decision_tools_enabled", False) is True
     runtime["tutor_tools_enabled"] = getattr(assistant, "tutor_tools_enabled", False) is True
     # Compatibility for lightweight callers/tests that provide model objects
