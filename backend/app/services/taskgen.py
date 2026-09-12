@@ -152,6 +152,7 @@ def build_generation_user_message(
     existing_statements: list[str] | None = None,
     chemistry_check: str = "auto",
     reuse_blueprint: bool = False,
+    strict_anchor: bool = False,
 ) -> str:
     examples = _render_example_tasks(list(example_tasks or []))
     existing = "\n---\n".join((existing_statements or [])[:8])
@@ -173,7 +174,7 @@ def build_generation_user_message(
             "Поле max_score задачи должно быть равно 10."
         )
     sections.append(f"Инструкции преподавателя:\n{instructions or '(нет)'}")
-    if not reuse_blueprint:
+    if not strict_anchor:
         sections.append(f"Примеры задач в нужном стиле:\n{examples or '(нет)'}")
     existing_rule = (
         "Повторное использование сюжета, физической модели и структуры выбранного blueprint разрешено. "
@@ -216,7 +217,7 @@ def build_generation_user_message(
         "Ответ — строго JSON по схеме (эта схема главнее любых других форматов):\n"
         f"{output_contract}\n{JSON_LATEX_ESCAPING_NOTE}"
     )
-    if reuse_blueprint and examples:
+    if strict_anchor and examples:
         sections.append(
             "ОБЯЗАТЕЛЬНЫЙ ОПОРНЫЙ ВАРИАНТ (это точная структура задания, а не пример стиля):\n"
             f"{examples}\n"
@@ -278,6 +279,7 @@ async def generate_tasks(
         existing_statements=existing_statements,
         chemistry_check=chemistry_check,
         reuse_blueprint=physical,
+        strict_anchor=getattr(assistant, "generation_policy", "legacy") == "single_verifier",
     )
     if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
         prompt += (
