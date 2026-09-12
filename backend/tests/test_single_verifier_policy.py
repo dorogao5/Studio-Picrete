@@ -56,8 +56,8 @@ def test_one_complete_example_and_socratic_override(monkeypatch):
     assert "КОНТРАКТ ТИПОВОГО ВАРИАНТА" in calls[0][0][2]
     msg=calls[0][0][3]
     assert sum(f"Условие: EXAMPLE-{i}\n" in msg for i in range(18)) == 1
-    assert "Условие: EXAMPLE-7\n" in msg
-    assert "COMPLETE-7" in msg
+    selected = next(i for i in range(18) if f"Условие: EXAMPLE-{i}\n" in msg)
+    assert f"COMPLETE-{selected}" in msg
     assert len(examples)==18
     assert "UNRELATED_PREVIOUS_TASK" not in msg
     assert "НЕ повторяйте их сюжеты" not in msg

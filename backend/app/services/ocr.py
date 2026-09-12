@@ -1,3 +1,4 @@
+import re
 import asyncio
 
 import httpx
@@ -51,3 +52,8 @@ async def run_datalab_ocr(filename: str, content: bytes, mime_type: str, max_pol
                 raise OcrError(f"DataLab OCR failed: {poll_body.get('error')}")
 
     raise OcrError("DataLab OCR: превышено время ожидания результата")
+
+
+def clean_ocr_markdown(text: str) -> str:
+    """Drop unresolved OCR crop markers, preserving descriptions and all mathematics."""
+    return re.sub(r"!\[\s*\]\((?!https?://|data:|/)[^)]*\)", "", text).strip()

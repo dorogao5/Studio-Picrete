@@ -45,7 +45,7 @@ async def run_ocr(
             markdown = await ocr.run_datalab_ocr(file.filename or image_id, content, mime)
         except ocr.OcrError as err:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(err))
-        pages.append(markdown)
+        pages.append(ocr.clean_ocr_markdown(markdown))
     return OcrResponse(ocr_text="\n\n---\n\n".join(pages), image_ids=image_ids)
 
 

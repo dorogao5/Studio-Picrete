@@ -7,7 +7,12 @@ export function MathViewport({ children }: { children: ReactNode }) {
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const measure = () => setOverflowing(element.scrollWidth > element.clientWidth + 4);
+    const measure = () => {
+      // Italic glyphs and mhchem arrows can overhang by a few pixels; measure
+      // the formula layout box rather than treating that ink as long content.
+      const width = element.firstElementChild?.getBoundingClientRect().width ?? element.scrollWidth;
+      setOverflowing(width > element.clientWidth + 4);
+    };
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     if (element.firstElementChild) observer.observe(element.firstElementChild);

@@ -10,6 +10,11 @@
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.4",
+    "@codemirror/view": "^6.43.11",
     "@fontsource/golos-text": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/stix-two-text": "^5.3.0",

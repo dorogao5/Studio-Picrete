@@ -588,7 +588,7 @@ export default function TasksTab({ assistant, providers }: { assistant: Assistan
 
         <p className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
           {assistant.generation_policy === "single_verifier"
-            ? "Генератор создаёт вариант по опорному примеру. Один независимый верификатор проверяет условие, расчёт и полный эталон, при необходимости исправляя эту же задачу. Нерешённые расхождения сохраняются для разбора; автоматической генерации замены нет."
+            ? "Генератор чередует образцы внутри блюпринта без повторов до обхода набора; каждый вариант сохраняет тип своего образца. Один независимый верификатор проверяет условие, расчёт и полный эталон, при необходимости исправляя эту же задачу. Нерешённые расхождения сохраняются для разбора; автоматической генерации замены нет."
             : "Задача становится готовой, когда независимые решения, предметная проверка, источники и рубрика дали согласованный результат. Расхождения сохраняются с конкретной причиной и требуют внимания."}
         </p>
 
@@ -1597,7 +1597,7 @@ function TemplateModal({
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   <input type="checkbox" checked={ex.generation_anchor === true}
                     onChange={(e) => updateExample(i, { generation_anchor: e.target.checked })} />
-                  Опорный пример для типовых вариантов
+                  Основной пример для просмотра (в генерации чередуются все образцы)
                 </label>
                 {ex.source_course_id && ex.source_task_id && ex.source_image_ids?.map((imageId) => (
                   <BankImage key={imageId} url={`/assistants/${encodeURIComponent(assistant.id)}/courses/${encodeURIComponent(ex.source_course_id!)}/task-bank/${encodeURIComponent(ex.source_task_id!)}/images/${encodeURIComponent(imageId)}`} />

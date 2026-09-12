@@ -230,6 +230,16 @@ def build_generation_user_message(
     return "\n\n".join(sections)
 
 
+def blueprint_examples(examples: list[dict]) -> list[dict]:
+    """Every distinct example is a subtype; the anchor flag is not an exclusion list."""
+    unique = {}
+    for example in examples:
+        if isinstance(example, dict) and str(example.get("statement") or "").strip():
+            key = example.get("source_number") or example["statement"]
+            unique.setdefault(key, example)
+    return list(unique.values())
+
+
 async def generate_tasks(
     provider: Provider,
     model: ModelEntry,
@@ -260,9 +270,8 @@ async def generate_tasks(
     prompt = with_assistant_profile(prompt, assistant)
     if getattr(assistant, "generation_policy", "legacy") == "single_verifier" and example_tasks:
         import secrets
-        candidates = [e for e in example_tasks if isinstance(e, dict) and e.get("statement")]
-        anchors = [e for e in candidates if e.get("generation_anchor") is True]
-        example_tasks = [secrets.choice(anchors or candidates)] if candidates else []
+        candidates = blueprint_examples(example_tasks)
+        example_tasks = [secrets.choice(candidates)] if candidates else []
     if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
         # Only variants from this request share the selected blueprint. Historical
         # course tasks may describe unrelated models and must not become exemplars.
@@ -301,6 +310,8 @@ async def generate_tasks(
             "Разрешено менять численные значения входных величин и пересчитать результат; "
             "запрещено вводить вместо заданной величины другую физическую/химическую величину. "
             "Для качественного вопроса сохраняйте форму и предмет сравнения. "
+            "Блюпринт объединяет несколько типов. Этот выбранный образец имеет приоритет над указаниями "
+            "для других номеров задач, в том числе прежнего опорного примера. "
             "Общие инструкции блюпринта применяйте только к выбранному образцу: "
             "не добавляйте не нужные ему этапы и искомые. Равенство из определения не требует "
             "искусственного обоснования малостью величин; проверяйте только реальные допущения. "
@@ -770,6 +781,8 @@ async def _generate_batch_items(
 ) -> tuple[list[dict], list[str]]:
     if uses_single_verifier(assistant):
         merged = {**merged, "chemistry_check": "off"}
+    variants = blueprint_examples(merged.get("example_tasks", [])) if getattr(assistant, "generation_policy", "legacy") == "single_verifier" else []
+    variant_bag: list[dict] = []
     items: list[dict] = []
     seen_statements = list(existing_statements)
     errors: list[str] = []
@@ -790,6 +803,15 @@ async def _generate_batch_items(
         take = min(GENERATION_CHUNK, missing)
         if on_attempt is not None:
             await on_attempt(effective_call_budget.used, len(items), errors[-1] if errors else "")
+        selected_examples = merged["example_tasks"]
+        if variants:
+            if not variant_bag:
+                import secrets
+                variant_bag = list(variants)
+                secrets.SystemRandom().shuffle(variant_bag)
+            selected_examples = [variant_bag.pop()]
+        selected_example = (selected_examples or [{}])[0]
+        selected_source = selected_example.get("source_number") or selected_example.get("statement")
         try:
             chunk = await generate_tasks(
                 provider,
@@ -804,9 +826,10 @@ async def _generate_batch_items(
                 instructions=merged["instructions"],
                 grounding=grounding_text,
                 rubric=merged.get("rubric", []),
-                example_tasks=merged["example_tasks"],
+                example_tasks=selected_examples,
                 existing_statements=seen_statements,
-                batch_variant_statements=[item["statement"] for item in items],
+                batch_variant_statements=[item["statement"] for item in items
+                    if not variants or (item.get("_blueprint", {}).get("source_number") or item.get("_blueprint", {}).get("example_statement")) == selected_source],
                 temperature=float(params.get("temperature") or 0.7),
                 chemistry_check=merged.get("chemistry_check", "auto"),
             )

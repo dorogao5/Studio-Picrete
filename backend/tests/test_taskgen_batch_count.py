@@ -209,3 +209,22 @@ def test_batch_variant_context_excludes_historical_course_tasks(monkeypatch):
     assert not errors
     assert len(items) == 3
     assert contexts == [[], ["Вариант 1"], ["Вариант 1", "Вариант 2"]]
+
+
+def test_blueprint_bag_visits_all_examples_before_repeating(monkeypatch):
+    selected = []
+    async def generate(*args, example_tasks, **kwargs):
+        assert len(example_tasks) == 1
+        e = example_tasks[0]
+        selected.append(e["source_number"])
+        return [{**valid_item(f"Task {len(selected)}"), "_blueprint": {"source_number": e["source_number"]}}]
+    monkeypatch.setattr(taskgen, "generate_tasks", generate)
+    examples = [{"statement": f"Subtype {i}", "source_number": str(i), "generation_anchor": i == 0} for i in range(4)]
+    items, errors = asyncio.run(taskgen._generate_batch_items(
+        SimpleNamespace(), SimpleNamespace(), SimpleNamespace(generation_policy="single_verifier"), "",
+        merged={**MERGED, "example_tasks": examples}, params={}, count=8,
+        grounding_text="", existing_statements=[],
+    ))
+    assert not errors and len(items) == 8
+    assert set(selected[:4]) == set(selected[4:]) == {"0", "1", "2", "3"}
+    assert len(examples) == 4

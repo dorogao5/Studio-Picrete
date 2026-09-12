@@ -22,7 +22,7 @@ def test_bank_tutor_uses_bound_course_and_exact_task_with_reference(monkeypatch)
     assert calls == [("assistant", "course")]
     assert result["task"]["solution"] == "reference"
     context = build_tutor_context(SimpleNamespace(statement=result["task"]["text"], reference_solution=result["task"]["solution"], answer=""), "student", "")
-    assert "не показывайте студенту дословно" in context
+    assert "не раскрывайте также пересказом или таблицей" in context
     assert "reference" in context and "student" in context
 
 

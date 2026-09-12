@@ -1,3 +1,4 @@
+import "katex/contrib/mhchem";
 import "katex/dist/katex.min.css";
 import { memo, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";

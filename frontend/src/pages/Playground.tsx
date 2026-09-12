@@ -1,3 +1,4 @@
+import MathEditor from "../components/MathEditor";
 import { MathTaskSelect } from "../components/MathTaskSelect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -188,33 +189,43 @@ export default function Playground() {
   );
 }
 
-function useSolutionInput() {
+function useSolutionInput(taskKey: string, disabled = false) {
   const [ocrText, setOcrText] = useState("");
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const inputGeneration = useRef(0);
+  const appendUpload = useRef(false);
+  const [editorEpoch, setEditorEpoch] = useState(0);
+  const [fileNames, setFileNames] = useState<string[]>([]);
 
   const reset = useCallback(() => {
     inputGeneration.current += 1;
+    setEditorEpoch(v => v + 1);
     setOcrText("");
     setImageIds([]);
+    setFileNames([]);
     setOcrLoading(false);
     setOcrError("");
     if (fileRef.current) fileRef.current.value = "";
   }, []);
 
+  useEffect(() => { reset(); }, [taskKey, reset]);
+
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const generation = inputGeneration.current;
+    const generation = ++inputGeneration.current;
+    const append = appendUpload.current;
+    const names = Array.from(files, f => f.name);
     setOcrLoading(true);
     setOcrError("");
     try {
       const result = await playgroundApi.ocr(Array.from(files));
       if (generation !== inputGeneration.current) return;
-      setOcrText((prev) => (prev ? `${prev}\n\n---\n\n${result.ocr_text}` : result.ocr_text));
-      setImageIds((prev) => [...prev, ...result.image_ids]);
+      setOcrText((prev) => (append && prev ? `${prev}\n\n---\n\n${result.ocr_text}` : result.ocr_text));
+      setImageIds((prev) => append ? [...prev, ...result.image_ids] : result.image_ids);
+      setFileNames(prev => append ? [...prev, ...names] : names);
     } catch (err) {
       if (generation !== inputGeneration.current) return;
       setOcrError(apiErrorMessage(err));
@@ -237,19 +248,16 @@ function useSolutionInput() {
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
-        <Button variant="secondary" className="shrink-0" onClick={() => fileRef.current?.click()} loading={ocrLoading}>
-          <Upload className="h-4 w-4" /> Загрузить фото или PDF
+        <Button variant="secondary" className="shrink-0" onClick={() => {appendUpload.current = false; fileRef.current?.click();}} loading={ocrLoading}>
+          <Upload className="h-4 w-4" /> {imageIds.length ? "Заменить фото или PDF" : "Загрузить фото или PDF"}
         </Button>
-        {imageIds.length > 0 && <Badge tone="info">{imageIds.length} стр.</Badge>}
+        {imageIds.length > 0 && <><Badge tone="info">Файлов: {imageIds.length}</Badge><Button variant="secondary" disabled={ocrLoading} onClick={() => {appendUpload.current = true; fileRef.current?.click();}}>Добавить файлы</Button></>}
+        {(ocrText || imageIds.length > 0) && <Button variant="secondary" onClick={reset}>Очистить работу</Button>}
         <span className="text-xs text-muted-foreground">DataLab распознает рукопись; результат можно править ниже</span>
       </div>
       <ErrorNote message={ocrError} />
-      <Textarea
-        rows={8}
-        value={ocrText}
-        onChange={(e) => setOcrText(e.target.value)}
-        placeholder="Введите решение студента или загрузите фото — распознанный текст появится здесь"
-      />
+      {fileNames.length > 0 && <ul className="text-xs text-muted-foreground">{fileNames.map((name, i) => <li key={`${i}-${name}`}>{name}</li>)}</ul>}
+      <MathEditor key={`${taskKey}:${editorEpoch}`} value={ocrText} onChange={setOcrText} disabled={disabled || ocrLoading} />
     </div>
   );
 
@@ -508,7 +516,7 @@ function CompareMode({ assistant, providers }: { assistant: Assistant; providers
   const [run, setRun] = useState<PlaygroundRun | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const solution = useSolutionInput();
+  const solution = useSolutionInput(taskId || "manual", running);
   const activeRubric = taskId ? selectedTask?.rubric ?? [] : manualRubric;
   const activeMaxScore = taskId ? selectedTask?.max_score ?? 0 : manualMaxScore;
   const rubricError = validateRubric(activeRubric, activeMaxScore);
@@ -871,7 +879,7 @@ function PipelineMode({ assistant }: { assistant: Assistant }) {
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const solution = useSolutionInput();
+  const solution = useSolutionInput(`${source}:${source === "sviridov" ? bankTask?.task.id ?? "" : taskId}`, running);
   const activeRubric = taskId ? selectedTask?.rubric ?? [] : manualRubric;
   const activeMaxScore = taskId ? selectedTask?.max_score ?? 0 : manualMaxScore;
   const rubricError = validateRubric(activeRubric, activeMaxScore);
@@ -1046,9 +1054,7 @@ function StepOutput({ step }: { step: PipelineRun["steps_log"][number] }) {
         <summary className="cursor-pointer text-muted-foreground flex items-center gap-1">
           <ScanText className="h-3.5 w-3.5" /> OCR-текст ({String(output.source)})
         </summary>
-        <pre className="mt-2 whitespace-pre-wrap rounded bg-muted p-3 font-mono max-h-64 overflow-y-auto">
-          {String(output.ocr_text ?? "")}
-        </pre>
+        <MathText className="mt-2 rounded bg-muted p-3 max-h-64 overflow-y-auto">{String(output.ocr_text ?? "")}</MathText>
       </details>
     );
   }
@@ -1279,7 +1285,7 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
             </Field>
           )}
           <Field label="Решение / вопрос студента" hint="Контекст, который ассистент будет разбирать в диалоге">
-            <Textarea rows={4} value={studentWork} onChange={(e) => setStudentWork(e.target.value)} />
+            <MathEditor value={studentWork} onChange={setStudentWork} label="Решение или вопрос студента" />
           </Field>
           <Field label="Модель" hint="DeepSeek V4.1 Flash — основная модель; экспериментальные модели доступны для предварительных прогонов">
             <Select value={modelEntryId} onChange={(e) => setModelEntryId(e.target.value)}>
@@ -1350,17 +1356,17 @@ function TutorMode({ assistant, providers }: { assistant: Assistant; providers: 
           </div>
           <ErrorNote message={error} />
           <div className="flex items-end gap-2">
-            <Textarea
-              rows={2}
+            <MathEditor
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={setInput}
+              disabled={sending}
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                   e.preventDefault();
                   void send();
                 }
               }}
-              placeholder="Сообщение от лица студента... (Ctrl/Cmd+Enter — отправить)"
+              hint="Сообщение от лица студента... (Ctrl/Cmd+Enter — отправить)"
               className="font-sans"
             />
             <Button onClick={send} loading={sending} disabled={!input.trim() || !modelEntryId || (source === "sviridov" && !bankTask) || (source === "studio" && !taskId)}>
