@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import get_settings
-from app.llm.client import LlmError, LlmResult, _apply_family_params, _apply_sampling_overrides, completion_failure_audit
+from app.llm.client import LlmError, LlmResult, _apply_family_params, _apply_sampling_overrides, completion_failure_audit, aggregate_usage
 from app.security import decrypt_secret
 
 
@@ -174,9 +174,7 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                             raise LlmError("Unexpected tool call during finalization; not executed")
                     if not message.get("content", "").strip():
                         raise LlmError("Empty final tool-dialogue answer")
-                    totals = {key: (sum(u[key] for u in audit["usage_by_call"])
-                                   if all(isinstance(u.get(key), int) for u in audit["usage_by_call"]) else None)
-                              for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+                    totals = aggregate_usage(audit["usage_by_call"])
                     audit["usage"] = totals
                     return LlmResult(text=message["content"], raw=audit,
                         duration_ms=int((time.monotonic() - started) * 1000), tokens_total=totals["total_tokens"],
@@ -235,11 +233,10 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
         if "finish_reason" in err.raw:
             audit["failed_completion"] = err.raw
             audit["usage_by_call"].append(err.raw["usage"])
-            audit["usage"] = {key: (sum(u[key] for u in audit["usage_by_call"])
-                                   if all(isinstance(u.get(key), int) for u in audit["usage_by_call"]) else None)
-                              for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+        audit["usage"] = aggregate_usage(audit["usage_by_call"])
         err.raw = audit
         raise
     except httpx.HTTPError as err:
+        audit["usage"] = aggregate_usage(audit["usage_by_call"])
         raise LlmError("Essential tools network error; no retry", raw=audit) from err
     raise LlmError("Essential tools round budget exhausted", raw=audit)

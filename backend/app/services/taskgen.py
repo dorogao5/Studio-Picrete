@@ -203,7 +203,9 @@ def build_generation_user_message(
             f"{CHEMISTRY_FACTS_GUIDE}"
         )
     )
-    sections.append(
+    # Keep the complete platform contract ahead of per-request data. Roles and
+    # contract contents stay unchanged; no provider-specific cache flags needed.
+    sections.insert(0,
         "Каждая задача: условие + подробное эталонное решение + краткий финальный ответ (answer) "
         "+ рубрика с баллами + список использованных справочных значений (data_used) + "
         f"{evidence_line}\n"

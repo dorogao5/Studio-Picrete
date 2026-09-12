@@ -69,6 +69,26 @@ def completion_failure_audit(usage: object, finish_reason: str | None) -> dict:
     return {"finish_reason": finish_reason, "usage": safe_usage}
 
 
+def aggregate_usage(calls: list[dict]) -> dict:
+    """Unknown counters remain unknown, including partially reported flows."""
+    def total(path):
+        values = []
+        for usage in calls:
+            value = usage
+            for key in path:
+                value = value.get(key) if isinstance(value, dict) else None
+            if type(value) is not int or value < 0:
+                return None
+            values.append(value)
+        return sum(values) if values else None
+
+    result = {key: total((key,)) for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+    for parent, counter in (("prompt_tokens_details", "cached_tokens"),
+                            ("completion_tokens_details", "reasoning_tokens")):
+        result[parent] = {counter: total((parent, counter))}
+    return result
+
+
 async def _stream_completion(
     client: httpx.AsyncClient, url: str, payload: dict, headers: dict, provider_name: str
 ) -> tuple[str, dict, str | None]:
