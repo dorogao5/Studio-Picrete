@@ -246,6 +246,7 @@ async def generate_tasks(
     rubric: list[dict] | None = None,
     example_tasks: list[dict] | None = None,
     existing_statements: list[str] | None = None,
+    batch_variant_statements: list[str] | None = None,
     temperature: float = 0.7,
     chemistry_check: str = "auto",
 ) -> list[dict]:
@@ -263,9 +264,9 @@ async def generate_tasks(
         anchors = [e for e in candidates if e.get("generation_anchor") is True]
         example_tasks = [secrets.choice(anchors or candidates)] if candidates else []
     if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
-        # Recent tasks are not exemplars. Their full text made the model copy the
-        # preceding blueprint instead of the selected one, and defeated prefix caching.
-        existing_statements = []
+        # Only variants from this request share the selected blueprint. Historical
+        # course tasks may describe unrelated models and must not become exemplars.
+        existing_statements = list(batch_variant_statements or [])[-8:]
     user_message = build_generation_user_message(
         topic=topic,
         difficulty=difficulty,
@@ -299,7 +300,11 @@ async def generate_tasks(
             + "\nСохраните вещество, данные как данные, искомое как искомое и число вопросов. "
             "Разрешено менять численные значения входных величин и пересчитать результат; "
             "запрещено вводить вместо заданной величины другую физическую/химическую величину. "
-            "Для качественного вопроса сохраняйте форму и предмет сравнения."
+            "Для качественного вопроса сохраняйте форму и предмет сравнения. "
+            "Общие инструкции блюпринта применяйте только к выбранному образцу: "
+            "не добавляйте не нужные ему этапы и искомые. Равенство из определения не требует "
+            "искусственного обоснования малостью величин; проверяйте только реальные допущения. "
+            "Не добавляйте посторонние расчёты к краткому ответу."
         )
     result = await llm.chat(
         provider,
@@ -801,6 +806,7 @@ async def _generate_batch_items(
                 rubric=merged.get("rubric", []),
                 example_tasks=merged["example_tasks"],
                 existing_statements=seen_statements,
+                batch_variant_statements=[item["statement"] for item in items],
                 temperature=float(params.get("temperature") or 0.7),
                 chemistry_check=merged.get("chemistry_check", "auto"),
             )

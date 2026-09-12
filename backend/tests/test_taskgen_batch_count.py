@@ -193,3 +193,19 @@ def test_successful_chunk_is_saved_before_later_generation_is_cancelled(monkeypa
     monkeypatch.setattr(taskgen, 'generate_tasks', generate)
     asyncio.run(scenario())
     assert len(saved) == 1
+
+
+def test_batch_variant_context_excludes_historical_course_tasks(monkeypatch):
+    contexts = []
+    async def generate(*args, batch_variant_statements, **kwargs):
+        contexts.append(list(batch_variant_statements))
+        return [valid_item(f"Вариант {len(contexts)}")]
+    monkeypatch.setattr(taskgen, "generate_tasks", generate)
+    items, errors = asyncio.run(taskgen._generate_batch_items(
+        SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), "",
+        merged=MERGED, params={}, count=3, grounding_text="",
+        existing_statements=["Посторонняя задача другого блюпринта"],
+    ))
+    assert not errors
+    assert len(items) == 3
+    assert contexts == [[], ["Вариант 1"], ["Вариант 1", "Вариант 2"]]
