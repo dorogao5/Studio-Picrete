@@ -371,6 +371,7 @@ class GeneratedTaskOut(ORMModel):
 
 
 class GeneratedTaskUpdate(BaseModel):
+    topic: str | None = Field(default=None, max_length=256)
     statement: str | None = None
     reference_solution: str | None = None
     answer: str | None = None

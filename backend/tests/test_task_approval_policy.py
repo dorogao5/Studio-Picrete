@@ -198,6 +198,25 @@ def test_editing_content_invalidates_previous_approval(monkeypatch) -> None:
     assert result.validation == {}
 
 
+def test_topic_patch_invalidates_approval_without_changing_task_identity(monkeypatch):
+    task = generated_task(status="approved", validation={"approval": {"basis": "teacher_override"}}, approved=True)
+    result, db = call_update(monkeypatch, task, {"topic": "Каноническая подтема"})
+    assert result.topic == "Каноническая подтема" and result.id == "task-1"
+    assert result.status == "draft" and result.approved is False and result.validation == {}
+    assert result.statement == "Условие" and db.commits == 1
+
+
+def test_topic_edit_and_explicit_teacher_approval_uses_current_fingerprint(monkeypatch):
+    task = generated_task()
+    result, db = call_update(monkeypatch, task, {"topic": "Каноническая подтема",
+        "status": "approved", "approval_reason": "Исправлена группировка по выбранной подтеме"})
+    assert result.topic == "Каноническая подтема" and result.id == "task-1"
+    assert result.status == "approved" and result.approved is True
+    approval = result.validation["approval"]
+    assert approval["content_fingerprint"] == task_content_fingerprint(result, approval["validation_config"])
+    assert approval["reviewed_by"] == "teacher-1" and db.commits == 1
+
+
 def test_editing_structured_chemistry_facts_invalidates_automatic_evidence() -> None:
     task = generated_task(status="validated")
     task.grounding = {

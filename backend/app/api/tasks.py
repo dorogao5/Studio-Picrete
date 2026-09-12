@@ -625,7 +625,7 @@ async def update_task(
     task = await _get_task_or_404(db, assistant_id, task_id)
     data = {field: value for field, value in body.model_dump(exclude_unset=True).items() if value is not None}
     approval_reason = str(data.pop("approval_reason", "")).strip()
-    content_fields = {"statement", "reference_solution", "answer", "images", "rubric", "max_score"}
+    content_fields = {"statement", "reference_solution", "answer", "images", "rubric", "max_score", "topic"}
     changes_content = bool(content_fields.intersection(data))
     requested_status = data.get("status")
     if requested_status is None and "approved" in data:
