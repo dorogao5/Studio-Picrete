@@ -704,6 +704,7 @@ async def _generate_batch_items(
     call_budget: _GenerationCallBudget | None = None,
     on_attempt: Callable[[int, int, str], Awaitable[None]] | None = None,
     on_items: Callable[[list[dict]], Awaitable[None]] | None = None,
+    on_error_audit: Callable[[dict], Awaitable[None]] | None = None,
 ) -> tuple[list[dict], list[str]]:
     items: list[dict] = []
     seen_statements = list(existing_statements)
@@ -745,6 +746,20 @@ async def _generate_batch_items(
                 chemistry_check=merged.get("chemistry_check", "auto"),
             )
         except llm.LlmError as err:
+            if on_error_audit is not None and err.raw:
+                raw = err.raw
+                failed = raw.get("failed_completion", raw)
+                failed = failed if isinstance(failed, dict) else {}
+                finish = failed.get("finish_reason")
+                if (not isinstance(finish, (str, type(None))) or finish not in
+                        {None, "stop", "length", "tool_calls", "content_filter", "function_call", "error"}):
+                    finish = "unknown"
+                safe = llm.completion_failure_audit(failed.get("usage"), finish)
+                safe["attempt"] = effective_call_budget.used
+                safe["total_usage"] = llm.completion_failure_audit(raw.get("usage"), None)["usage"]
+                if type(raw.get("model_calls")) is int and raw["model_calls"] >= 0:
+                    safe["model_calls"] = raw["model_calls"]
+                await on_error_audit(safe)
             errors.append(str(err))
             continue
 
@@ -1045,6 +1060,12 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         await _set_progress(db, batch,
             f"Генерация: запрос {attempt}, получено {done}/{count}{detail}", done, count)
 
+    async def save_error_audit(audit: dict) -> None:
+        batch.params = {**batch.params, "generation_error_audits": [
+            *(batch.params.get("generation_error_audits") or []), audit]}
+        # Persist before the caller propagates the generation failure.
+        await db.commit()
+
     # Лимит рассчитывается один раз на всю партию. Иначе каждая новая волна добора
     # заново получает MAX_REFILL_ATTEMPTS и число оплачиваемых запросов растёт без
     # связи с общим бюджетом кандидатов.
@@ -1100,6 +1121,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
         on_progress=update_generation_progress,
         on_attempt=update_attempt,
         on_items=save_generated,
+        on_error_audit=save_error_audit,
         call_budget=call_budget,
     )
     if not items and gen_errors:
@@ -1271,6 +1293,7 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             existing_statements=list(existing) + [task.statement for task in created],
             call_budget=call_budget,
             on_attempt=update_attempt,
+            on_error_audit=save_error_audit,
         )
         gen_errors.extend(refill_errors)
         if not refill_items:

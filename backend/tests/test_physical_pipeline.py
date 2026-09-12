@@ -288,7 +288,8 @@ def test_verifier_schema_and_prompt_contract():
 
 
 @pytest.mark.parametrize("generation_error", [False, True])
-def test_physical_batch_never_buys_replacement(monkeypatch, generation_error):
+@pytest.mark.parametrize("tools_audit", [False, True])
+def test_physical_batch_never_buys_replacement(monkeypatch, generation_error, tools_audit):
     async def run():
         engine, sessions = await setup_db()
         async with sessions() as db:
@@ -307,7 +308,14 @@ def test_physical_batch_never_buys_replacement(monkeypatch, generation_error):
             async def generate(*a, **k):
                 calls.append("generator")
                 if generation_error:
-                    raise pc.llm.LlmError("mock provider failure")
+                    failed = {"finish_reason": "length", "usage": {
+                        "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30,
+                        "PRIVATE": "private model input"}, "content": "PRIVATE"}
+                    raw = ({"failed_completion": failed, "model_calls": 2,
+                        "usage": {"prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50},
+                        "tool_traces": [{"arguments": "PRIVATE"}], "messages": "PRIVATE"}
+                        if tools_audit else failed)
+                    raise pc.llm.LlmError("mock provider failure", raw=raw)
                 return [{**correction(), "data_used": [], "chemistry_facts": {}}]
             async def chat(*a, **k):
                 calls.append("verifier")
@@ -320,9 +328,22 @@ def test_physical_batch_never_buys_replacement(monkeypatch, generation_error):
             monkeypatch.setattr(taskgen, "repair_generated_task", forbidden)
             monkeypatch.setattr(pc.llm, "chat", chat)
             if generation_error:
-                with pytest.raises(pc.llm.LlmError):
-                    await taskgen._execute_batch(db, batch)
+                monkeypatch.setattr(taskgen, "SessionLocal", sessions)
+                await taskgen.run_batch(batch.id)
                 assert calls == ["generator"]
+                # Read through a new session, after run_batch's rollback/error handling.
+                async with sessions() as persisted_db:
+                    persisted = await persisted_db.get(GenerationBatch, batch.id)
+                    assert persisted.status == "failed" and "mock provider failure" in persisted.error
+                    assert persisted.generated_count == 0
+                    audits = persisted.params["generation_error_audits"]
+                    assert len(audits) == 1 and audits[0]["attempt"] == 1
+                    assert audits[0]["finish_reason"] == "length"
+                    assert audits[0]["usage"]["total_tokens"] == 30
+                    assert audits[0]["total_usage"]["total_tokens"] == (50 if tools_audit else 30)
+                    assert "PRIVATE" not in json.dumps(audits)
+                    assert "tool_traces" not in audits[0] and "messages" not in audits[0]
+                    assert (await persisted_db.execute(select(GeneratedTask))).scalars().all() == []
             else:
                 await taskgen._execute_batch(db, batch)
                 assert calls == ["generator", "verifier"]
