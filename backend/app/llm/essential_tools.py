@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import get_settings
-from app.llm.client import LlmError, LlmResult, _apply_family_params
+from app.llm.client import LlmError, LlmResult, _apply_family_params, completion_failure_audit
 from app.security import decrypt_secret
 
 
@@ -92,7 +92,7 @@ async def completion(client, url, headers, payload):
                 if len(call["function"]["arguments"]) > 16384:
                     raise LlmError("Tool arguments too large")
     if finish not in {"stop", "tool_calls"}:
-        raise LlmError(f"Model finish_reason={finish}; no retry")
+        raise LlmError(f"Model finish_reason={finish}; no retry", raw=completion_failure_audit(usage, finish))
     if calls:
         message["tool_calls"] = list(calls.values())
     if bool(calls) != (finish == "tool_calls"):
@@ -233,6 +233,12 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                     payload["messages"].append({"role": "tool", "tool_call_id": call["id"],
                                                "content": json.dumps(trace, ensure_ascii=False)})
     except LlmError as err:
+        if "finish_reason" in err.raw:
+            audit["failed_completion"] = err.raw
+            audit["usage_by_call"].append(err.raw["usage"])
+            audit["usage"] = {key: (sum(u[key] for u in audit["usage_by_call"])
+                                   if all(isinstance(u.get(key), int) for u in audit["usage_by_call"]) else None)
+                              for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
         err.raw = audit
         raise
     except httpx.HTTPError as err:

@@ -1,12 +1,14 @@
 from functools import lru_cache
+import json
 from pathlib import Path
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import AliasChoices, Field, field_validator
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="STUDIO_", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="STUDIO_", extra="ignore", hide_input_in_errors=True)
 
     database_url: str = "sqlite+aiosqlite:///./data/studio.db"
     secret_key: str = "dev-secret-change-me"
@@ -36,6 +38,36 @@ class Settings(BaseSettings):
     architect_family: str = "gpt"
 
     llm_request_timeout: float = 300.0
+    llm_max_output_tokens_by_model: Annotated[dict[str, int], NoDecode] = Field(
+        default_factory=dict, validation_alias=AliasChoices(
+            "LLM_MAX_OUTPUT_TOKENS_BY_MODEL", "STUDIO_LLM_MAX_OUTPUT_TOKENS_BY_MODEL",
+            "llm_max_output_tokens_by_model"))
+
+    @field_validator("llm_max_output_tokens_by_model", mode="before")
+    @classmethod
+    def validate_output_token_map(cls, value):
+        def pairs(items):
+            result = {}
+            for key, limit in items:
+                if key in result:
+                    raise ValueError
+                result[key] = limit
+            return result
+        try:
+            if isinstance(value, str):
+                if len(value.encode()) > 65536:
+                    raise ValueError
+                value = json.loads(value, object_pairs_hook=pairs) if value.strip() else {}
+            if not isinstance(value, dict) or len(value) > 256:
+                raise ValueError
+            for key, limit in value.items():
+                if (not isinstance(key, str) or not key or len(key.encode()) > 2048
+                        or any(c.isspace() or ord(c) < 32 or 127 <= ord(c) <= 159 for c in key)
+                        or type(limit) is not int or not 0 < limit <= 2**64 - 1):
+                    raise ValueError
+            return value
+        except (ValueError, TypeError, OverflowError, RecursionError):
+            raise ValueError("Invalid model token limit map") from None
     # Exact provider model URIs with verified structured-output support (comma-separated).
     # Empty disables the capability; physical-chemistry/provider/family scope still applies.
     json_schema_model_ids: str = ""

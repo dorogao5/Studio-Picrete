@@ -50,6 +50,20 @@ STREAM_USAGE_FAMILIES = {"deepseek", "qwen", "gpt", "generic"}
 RETRYABLE_ATTEMPTS = 3
 
 
+def completion_failure_audit(usage: object, finish_reason: str | None) -> dict:
+    """Only token counters and terminal status; never response text or reasoning."""
+    source = usage if isinstance(usage, dict) else {}
+    safe_usage = {key: source[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                  if type(source.get(key)) is int and source[key] >= 0}
+    for key in ("prompt_tokens_details", "completion_tokens_details"):
+        details = source.get(key)
+        if isinstance(details, dict):
+            safe_usage[key] = {name: details[name] for name in ("cached_tokens", "reasoning_tokens",
+                "audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens")
+                if type(details.get(name)) is int and details[name] >= 0}
+    return {"finish_reason": finish_reason, "usage": safe_usage}
+
+
 async def _stream_completion(
     client: httpx.AsyncClient, url: str, payload: dict, headers: dict, provider_name: str
 ) -> tuple[str, dict, str | None]:
@@ -91,9 +105,11 @@ async def _stream_completion(
                 if piece:
                     text_parts.append(piece)
     if finish_reason is not None and finish_reason != "stop":
-        raise LlmError(f"{provider_name} завершил ответ неуспешно: finish_reason={finish_reason}")
+        raise LlmError(f"{provider_name} завершил ответ неуспешно: finish_reason={finish_reason}",
+                       raw=completion_failure_audit(usage, finish_reason))
     if payload.get("response_format", {}).get("type") == "json_schema" and finish_reason is None:
-        raise LlmError(f"{provider_name}: поток JSON Schema завершился без finish_reason")
+        raise LlmError(f"{provider_name}: поток JSON Schema завершился без finish_reason",
+                       raw=completion_failure_audit(usage, finish_reason))
     return "".join(text_parts), usage, finish_reason
 
 
@@ -121,6 +137,8 @@ async def _chat(
     essential_tools: bool = False,
     initial_tool_choice: str = "auto",
 ) -> LlmResult:
+    if max_tokens is None:
+        max_tokens = get_settings().llm_max_output_tokens_by_model.get(model.model_id)
     if essential_tools:
         from app.llm.essential_tools import chat_with_tools
         return await chat_with_tools(
