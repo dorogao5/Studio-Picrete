@@ -268,6 +268,14 @@ async def generate_tasks(
         chemistry_check=chemistry_check,
         reuse_blueprint=physical,
     )
+    if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
+        prompt += (
+            "\n\nКОНТРАКТ ТИПОВОГО ВАРИАНТА: выбранный опорный пример задаёт число вопросов, "
+            "вещества и способ решения. Обязательные критерии оценивают эти вопросы, "
+            "а не требуют дополнительных вопросов. Меняйте только независимые данные; "
+            "константы и химическую модель сохраняйте. Перед выдачей сопоставьте вариант "
+            "с опорным примером и устраните расширение задания в том же ответе."
+        )
     use_tools = assistant_tools_enabled(assistant, "generator")
     if use_tools:
         prompt += ESSENTIAL_TOOLS_INSTRUCTION
@@ -282,7 +290,7 @@ async def generate_tasks(
            if (use_tools and physical) or physical_json_schema_enabled(assistant, provider, model) else {}),
         **({"essential_tools": True, "initial_tool_choice": "required"}
            if use_tools else {}),
-        **({"reasoning_effort": "low"}
+        **({"reasoning_effort": "high"}
            if getattr(assistant, "generation_policy", "legacy") == "single_verifier"
            and getattr(provider, "kind", "") == "deepseek" else {}),
     )
