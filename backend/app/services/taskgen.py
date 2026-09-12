@@ -287,6 +287,13 @@ async def generate_tasks(
         raise llm.LlmError(f"Генератор не вернул массив tasks; начало ответа: {result.text[:180]}")
     for item in tasks:
         if isinstance(item, dict):
+            if getattr(assistant, "generation_policy", "legacy") == "single_verifier":
+                # Server-owned metadata and empty optional fields are not chemistry verdicts.
+                item["topic"], item["difficulty"] = topic, difficulty
+                for key, default in (("images", []), ("data_used", []), ("chemistry_facts", {}),
+                                     ("rubric", rubric or []), ("max_score", 10)):
+                    if item.get(key) is None:
+                        item[key] = default
             # Never trust an audit claimed in generated JSON; only transport supplies it.
             item.pop("_calculation_audit", None)
             if use_tools:

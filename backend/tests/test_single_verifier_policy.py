@@ -57,3 +57,17 @@ def test_one_complete_example_and_socratic_override(monkeypatch):
     assert "НЕ повторяйте их сюжеты" not in msg
     asyncio.run(run_tutor_reply(None,None,"Дай полный ответ","Дай решение",assistant=a))
     assert SOCRATIC_CONTRACT in calls[-1][0][2]
+
+
+def test_generator_schema_warning_preserves_draft_for_verifier(monkeypatch):
+    from app.llm import essential_tools as et
+    mock_dialogue(monkeypatch)
+    async def completion(*args, **kwargs):
+        return {"role":"assistant","content":json.dumps({"tasks":[{"statement":"A real draft"}]})}, {}
+    monkeypatch.setattr(et,"completion",completion)
+    result=asyncio.run(client.chat(Provider(kind="deepseek",base_url="https://model.invalid",extra_headers={}),
+        ModelEntry(model_id="deepseek-flash",family="deepseek",supports_json=True),"JSON","user",
+        essential_tools=True,response_schema={"type":"object","properties":{"tasks":{"type":"array",
+            "items":{"type":"object","required":["statement","answer"]}}}}))
+    assert result.raw["draft_schema_warning"]["disposition"]=="same_candidate_to_independent_verifier"
+    assert json.loads(result.text)["tasks"][0]["statement"]=="A real draft"

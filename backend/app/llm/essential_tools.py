@@ -187,7 +187,25 @@ async def chat_with_tools(provider, model, system_prompt, user_content, *, respo
                         try:
                             jsonschema.validate(json.loads(message["content"]), response_schema)
                         except (ValueError, jsonschema.ValidationError) as err:
-                            raise LlmError("Final answer does not match the requested JSON schema; no regeneration") from err
+                            # A generator returns candidates, never admitted tasks. Preserve a usable
+                            # draft for the single verifier instead of buying a replacement because
+                            # optional metadata/formatting differs. Verified-task schemas stay strict.
+                            try:
+                                draft = json.loads(message["content"])
+                            except ValueError:
+                                draft = None
+                            draft_items = draft.get("tasks") if isinstance(draft, dict) else None
+                            if ("tasks" in response_schema.get("properties", {})
+                                    and isinstance(draft_items, list) and draft_items
+                                    and all(isinstance(item, dict) and isinstance(item.get("statement"), str)
+                                            and item["statement"].strip() for item in draft_items)):
+                                audit["draft_schema_warning"] = {
+                                    "path": list(getattr(err, "absolute_path", [])),
+                                    "validator": getattr(err, "validator", "json"),
+                                    "disposition": "same_candidate_to_independent_verifier",
+                                }
+                            else:
+                                raise LlmError("Final answer does not match the requested JSON schema; no regeneration") from err
                     totals = aggregate_usage(audit["usage_by_call"])
                     audit["usage"] = totals
                     return LlmResult(text=message["content"], raw=audit,
