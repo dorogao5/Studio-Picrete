@@ -1,0 +1,85 @@
+{
+  "calculator": {
+    "description": "34-digit Decimal scalar arithmetic; + - * / ^ including fractional powers; unary ln/log (natural), exp, sqrt. Convert and verify physical units explicitly.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "expression"
+      ],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "sympy": {
+    "description": "AST-whitelisted real-symbol algebra. Declare all symbols including variable. Constants pi/E; unary ln/log/exp/sqrt/sin/cos/tan/asin/acos/atan/sinh/cosh/tanh/abs. Solve expression=0 without '=' syntax. Identity false means NOT PROVEN, never automatic inequivalence/grading failure; review domains separately.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "operation",
+        "symbols"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "simplify",
+            "derivative",
+            "integral",
+            "solve",
+            "identity"
+          ]
+        },
+        "expression": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "equation": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "left": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "right": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "variable": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "reference_db": {
+    "description": "Lookup one externally mounted private reference record preserving original value/units/conditions/source labels; returns database SHA256 and separate review_warnings. Source labels are not independent verification.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "reference_id"
+      ],
+      "properties": {
+        "reference_id": {
+          "type": "string",
+          "description": "Common IDs: universal_gas_constant_si, eryomin_gas_constant_j_mol_k, eryomin_avogadro_constant, calorie_to_joule_molar, atmosphere_to_pascal, torr_to_pascal. Other IDs require the private index supplied by the operator."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

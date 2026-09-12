@@ -267,6 +267,8 @@ async def _build_runtime_policy(db: AsyncSession, assistant: Assistant) -> dict:
     }
     if is_physical_chemistry(assistant):
         runtime["decision_supports_json_schema"] = physical_json_schema_enabled(assistant, grader_provider, grader)
+    runtime["decision_tools_enabled"] = getattr(assistant, "decision_tools_enabled", False) is True
+    runtime["tutor_tools_enabled"] = getattr(assistant, "tutor_tools_enabled", False) is True
     # Compatibility for lightweight callers/tests that provide model objects
     # without provider metadata. Real persisted model entries always carry it.
     if generator_provider is None or grader_provider is None:

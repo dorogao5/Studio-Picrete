@@ -1,6 +1,7 @@
 from app.llm import client as llm
 from app.models import Assistant, GeneratedTask, ModelEntry, Provider
 from app.services.assistant_profile import with_assistant_profile
+from app.services.contracts import ESSENTIAL_TOOLS_INSTRUCTION
 
 FALLBACK_TUTOR_PROMPT = """Вы — методичный и доброжелательный преподаватель дисциплины «{discipline}».
 Вы разбираете решение или вопрос студента ПОШАГОВО, при необходимости спускаясь до самых основ,
@@ -52,11 +53,13 @@ async def run_tutor_reply(
     temperature: float = 0.4,
     assistant: Assistant | None = None,
 ) -> llm.LlmResult:
+    use_tools = getattr(assistant, "tutor_tools_enabled", False) is True
     return await llm.chat(
         provider,
         model,
-        with_assistant_profile(system_prompt, assistant),
+        with_assistant_profile(system_prompt, assistant) + (ESSENTIAL_TOOLS_INSTRUCTION if use_tools else ""),
         user_message,
         temperature=temperature,
         json_mode=False,
+        **({"essential_tools": True} if use_tools else {}),
     )

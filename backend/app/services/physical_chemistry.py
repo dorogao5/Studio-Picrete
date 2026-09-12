@@ -17,6 +17,7 @@ from app.llm import client as llm
 from app.config import get_settings
 from app.models import Assistant, GeneratedTask, ModelEntry, Provider
 from app.services.model_policy import current_model_use_policy
+from app.services.contracts import ESSENTIAL_TOOLS_INSTRUCTION, PHYSICAL_VERIFIER_RESPONSE_SCHEMA
 from app.services.task_evidence import normalize_validation_config, task_content_fingerprint
 
 PHYSICAL_CHEMISTRY_VALIDATION_POLICY_VERSION = "physchem-single-verifier-v1"
@@ -88,6 +89,10 @@ def task_verifier_model_id(assistant: Assistant) -> str | None:
     return getattr(assistant, "verifier_model_id", None) or getattr(assistant, "default_grader_model_id", None)
 
 
+def assistant_tools_enabled(assistant, role):
+    return getattr(assistant, f"{role}_tools_enabled", False) is True
+
+
 def student_grading_model_use(assistant: Assistant, model: ModelEntry):
     use = current_model_use_policy().classify(model)
     if (is_physical_chemistry(assistant) and model.family == "qwen" and use.explicitly_configured):
@@ -140,6 +145,7 @@ async def run_physical_validation(
     answer_format: str = "numeric",
     tolerance_pct: float = 2.0,
     system_prompt: str | None = None,
+    essential_tools: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     config = normalize_validation_config(
         {
@@ -162,20 +168,26 @@ async def run_physical_validation(
     correction: dict[str, Any] | None = None
     verifier_report: dict[str, Any] = {"status": "error", "comparison": {"verdict": "uncertain"}}
     model_use = current_model_use_policy().classify(model)
+    calculation_audit = None
     try:
         result = await llm.chat(
             provider,
             model,
-            physical_verifier_prompt(system_prompt),
+            physical_verifier_prompt(system_prompt) + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else ""),
             json.dumps(prompt_context, ensure_ascii=False),
             temperature=0.1,
             json_mode=True,
             thinking="enabled",
+            **({"essential_tools": True, "response_schema": PHYSICAL_VERIFIER_RESPONSE_SCHEMA}
+               if essential_tools else {}),
             **({"reasoning_effort": "high"}
                if getattr(provider, "kind", "") == "yandex" and getattr(model, "family", "") == "deepseek" else {}),
         )
+        calculation_audit = result.raw if essential_tools else None
         response = llm.extract_json(result.text)
     except llm.LlmError as error:
+        if essential_tools:
+            calculation_audit = error.raw
         reasons.append(f"Верификатор не завершил проверку: {error}")
         response = {}
 
@@ -240,4 +252,6 @@ async def run_physical_validation(
             "issues": (verifier_report.get("issues") or []) if correction is not None else [],
         },
     }
+    if calculation_audit is not None:
+        validation["calculation_audit"] = calculation_audit
     return validation, correction

@@ -13,7 +13,7 @@ from app.models import ModelEntry, Provider
 from app.services.chemistry_facts import chemistry_admission_evidence, normalize_chemistry_facts
 from app.services.chemistry_validation import CHEMISTRY_VALIDATION_VERSION
 from app.services.chemistry_units import known_unit_spellings, unit_definition
-from app.services.contracts import CHEMISTRY_FACTS_GUIDE
+from app.services.contracts import CHEMISTRY_FACTS_GUIDE, ESSENTIAL_TOOLS_INSTRUCTION
 from app.services.model_policy import current_model_use_policy
 from app.services.task_evidence import (
     build_task_content_fingerprint,
@@ -1211,6 +1211,7 @@ async def solver_check(
     answer_format: str,
     system_prompt: str = SOLVER_SYSTEM_PROMPT,
     discipline_context: str = "",
+    essential_tools: bool = False,
 ) -> dict:
     hint = ANSWER_FORMAT_HINTS.get(answer_format, ANSWER_FORMAT_HINTS["text"])
     parts = [f"Задача:\n{statement}"]
@@ -1223,7 +1224,10 @@ async def solver_check(
         )
     parts.append(f'Поле "answer" — {hint}. Ответ строго JSON {{"solution": "...", "answer": "..."}}.')
     try:
-        result = await llm.chat(provider, model, system_prompt, "\n\n".join(parts), temperature=0.0, json_mode=True)
+        result = await llm.chat(provider, model,
+            system_prompt + (ESSENTIAL_TOOLS_INSTRUCTION if essential_tools else ""),
+            "\n\n".join(parts), temperature=0.0, json_mode=True,
+            **({"essential_tools": True} if essential_tools else {}))
         parsed = llm.extract_json(result.text)
     except llm.LlmError as err:
         return {
@@ -1233,6 +1237,7 @@ async def solver_check(
             "error": str(err),
             "duration_ms": 0,
             "tokens_total": None,
+            **({"calculation_audit": err.raw} if essential_tools else {}),
         }
     return {
         "status": "ok",
@@ -1241,6 +1246,7 @@ async def solver_check(
         "error": "",
         "duration_ms": result.duration_ms,
         "tokens_total": result.tokens_total,
+        **({"calculation_audit": result.raw} if essential_tools else {}),
     }
 
 
@@ -1261,6 +1267,7 @@ def _solver_report(
         "model": model_name,
         "error": solved["error"],
         "duration_ms": solved.get("duration_ms", 0),
+        **({"calculation_audit": solved["calculation_audit"]} if "calculation_audit" in solved else {}),
         "tokens_total": solved.get("tokens_total"),
         "comparison": comparison or {},
         "solution_comparison": solution_comparison or {},
@@ -1645,6 +1652,7 @@ async def run_validation(
     extract_chemistry_facts_if_missing: bool = False,
     grounding_sheets: list | None = None,
     task_images: list[str] | None = None,
+    essential_tools: bool = False,
 ) -> dict:
     reasons: list[str] = []
 
@@ -1860,6 +1868,7 @@ async def run_validation(
             primary_call = solver_check(
                 solver_provider, solver_model, statement, "", answer_format,
                 discipline_context=discipline_context,
+                **({"essential_tools": True} if essential_tools else {}),
             )
             if advisory_only:
                 solved = await primary_call
@@ -1868,7 +1877,8 @@ async def run_validation(
                     primary_call,
                     solver_check(solver_provider, solver_model, statement, "", answer_format,
                                  system_prompt=SOLVER_VERIFIER_SYSTEM_PROMPT,
-                                 discipline_context=discipline_context),
+                                 discipline_context=discipline_context,
+                                 **({"essential_tools": True} if essential_tools else {})),
                 )
             compared = (
                 compare_answers(reference_answer, solved["answer"], tolerance_pct, context=statement)

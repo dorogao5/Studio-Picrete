@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { apiErrorMessage, assistantsApi } from "../../lib/api";
 import type { Assistant, Criterion, Provider } from "../../lib/types";
@@ -6,6 +6,21 @@ import { Button, Card, ErrorNote, Field, Input, Select, Textarea } from "../../c
 
 import { modelOptions } from "./PromptsTab";
 import { isKnownAdvisoryModel } from "../../lib/modelPolicy";
+import { essentialToolRoles, essentialToolsDefaults, essentialToolsConnectionNote } from "../../lib/essentialTools";
+
+function EssentialToolsToggle({ label, checked, note, onChange }: {
+  label: string; checked: boolean; note: string; onChange: (checked: boolean) => void;
+}) {
+  const id = useId();
+  return <div className="space-y-1.5">
+    <label className="flex items-start gap-2 text-sm">
+      <input type="checkbox" className="mt-0.5" checked={checked}
+        aria-describedby={`${id}-hint`} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
+    </label>
+    <p id={`${id}-hint`} className="text-xs text-muted-foreground">{note}</p>
+  </div>;
+}
 
 export default function ProfileTab({ assistant, providers, onSaved }: { assistant: Assistant; providers: Provider[]; onSaved: () => void }) {
   const models = modelOptions(providers, true);
@@ -15,6 +30,13 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
   const [verifierModel, setVerifierModel] = useState(assistant.verifier_model_id ?? "");
   const [graderModel, setGraderModel] = useState(assistant.default_grader_model_id ?? "");
   const [generatorModel, setGeneratorModel] = useState(assistant.default_generator_model_id ?? "");
+  const [toolsSettings, setToolsSettings] = useState(() => essentialToolsDefaults(assistant));
+  const toolRoleModels = {
+    generator_tools_enabled: generatorModel,
+    verifier_tools_enabled: verifierModel || (physical ? "" : graderModel),
+    tutor_tools_enabled: generatorModel,
+    decision_tools_enabled: graderModel,
+  };
   const [gradingEnabled, setGradingEnabled] = useState(assistant.grading_enabled ?? false);
   const [name, setName] = useState(assistant.name);
   const [description, setDescription] = useState(assistant.description);
@@ -36,6 +58,7 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
         default_grader_model_id: graderModel || null,
         default_generator_model_id: generatorModel || null,
         verifier_model_id: verifierModel || null,
+        ...toolsSettings,
         grading_enabled: gradingEnabled,        description,
         audience,
         topics: topics.split("\n").map((t) => t.trim().replace(/^[•\-–]\s*/, "")).filter(Boolean),
@@ -78,8 +101,21 @@ export default function ProfileTab({ assistant, providers, onSaved }: { assistan
         </Field>
       </Card>
       <Card className="p-5 space-y-4">
+        <h2 className="font-semibold text-sm">Вычисления и справочник</h2>
+        <p className="text-xs text-muted-foreground">
+          Разрешить модели использовать калькулятор для численных расчётов, SymPy для символьной математики
+          и справочник для поиска опорных сведений. Доступность зависит от поддержки вызова инструментов моделью
+          и её подключением. Настройки независимы для каждой роли и сохраняются при смене модели.
+        </p>
+        {essentialToolRoles.map(({ field, label }) => (
+          <EssentialToolsToggle key={field} label={label} checked={toolsSettings[field]}
+            note={essentialToolsConnectionNote(providers, toolRoleModels[field])}
+            onChange={(checked) => setToolsSettings((current) => ({ ...current, [field]: checked }))} />
+        ))}
+      </Card>
+      <Card className="p-5 space-y-4">
         <h2 className="font-semibold text-sm">Профиль дисциплины</h2>
-        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={gradingEnabled} onChange={(e) => setGradingEnabled(e.target.checked)} /><span>Публиковать проверку работ в Picrete (запуск на эталонах Свиридова). Перед публикацией потребуется проверенный прогон в Playground.</span></label>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={gradingEnabled} onChange={(e) => setGradingEnabled(e.target.checked)} /><span>Публиковать проверку работ в Picrete по эталонам курса. Перед публикацией потребуется проверенный прогон в Playground.</span></label>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Название">
             <Input value={name} onChange={(e) => setName(e.target.value)} />

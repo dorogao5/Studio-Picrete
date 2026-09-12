@@ -128,6 +128,10 @@ async def create_assistant(
         topics=body.topics,
         criteria=[c.model_dump() for c in body.criteria],
         nuances=body.nuances,
+        generator_tools_enabled=body.generator_tools_enabled,
+        verifier_tools_enabled=body.verifier_tools_enabled,
+        decision_tools_enabled=body.decision_tools_enabled,
+        tutor_tools_enabled=body.tutor_tools_enabled,
         created_by=user.id,
         updated_by=user.id,
     )
@@ -151,6 +155,9 @@ async def update_assistant(
 ) -> Assistant:
     assistant = await get_assistant_or_404(assistant_id, db)
     payload = body.model_dump(exclude_unset=True)
+    if any(key in payload and payload[key] is None for key in
+           ("generator_tools_enabled", "verifier_tools_enabled", "decision_tools_enabled", "tutor_tools_enabled")):
+        raise HTTPException(422, "Tool flags must be true or false")
     if payload.get("default_generator_model_id"):
         await require_operational_model(db, payload["default_generator_model_id"], allow_advisory=True)
     if payload.get("default_grader_model_id"):

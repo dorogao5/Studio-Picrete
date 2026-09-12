@@ -24,7 +24,9 @@ class LlmResult:
 
 
 class LlmError(Exception):
-    pass
+    def __init__(self, message: str, *, raw: dict | None = None):
+        super().__init__(message)
+        self.raw = raw or {}
 
 
 def _apply_family_params(payload: dict, model: ModelEntry, temperature: float | None, thinking: str | None) -> None:
@@ -116,7 +118,15 @@ async def _chat(
     timeout: float | None = None,
     response_schema: dict | None = None,
     reasoning_effort: str | None = None,
+    essential_tools: bool = False,
 ) -> LlmResult:
+    if essential_tools:
+        from app.llm.essential_tools import chat_with_tools
+        return await chat_with_tools(
+            provider, model, system_prompt, user_content, response_schema=response_schema,
+            reasoning_effort=reasoning_effort, timeout=timeout,
+            temperature=temperature, thinking=thinking, json_mode=json_mode, max_tokens=max_tokens,
+        )
     payload: dict = {
         "model": model.model_id,
         "messages": [

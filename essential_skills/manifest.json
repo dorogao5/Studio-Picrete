@@ -1,0 +1,20 @@
+{
+  "package": "studio-essential-chemistry-gateway",
+  "version": "2.0.0",
+  "upstream_package": "qwen-chem-essential-skills 1.0.0",
+  "tools": [
+    "calculator",
+    "sympy",
+    "reference_db"
+  ],
+  "reference_table": "External private CSV via REFERENCE_DB_PATH; NOT bundled",
+  "reference_record_count": 80,
+  "upstream_reference_sha256": "fb82fd2b7ff2228064883834828c824eadb9adf038c2182e774a1b96fc75b3c2",
+  "catalog": "tool-definitions.json",
+  "protocols": [
+    "JSONL stdin/stdout",
+    "authenticated HTTP POST /invoke",
+    "GET /health"
+  ],
+  "private_data": "No original CSV in Git, image, or public full-table endpoint. Only synthetic fixtures bundled."
+}

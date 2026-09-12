@@ -74,6 +74,10 @@ export interface Assistant {
   default_grader_model_id: string | null;
   default_generator_model_id: string | null;
   verifier_model_id?: string | null;
+  generator_tools_enabled?: boolean;
+  verifier_tools_enabled?: boolean;
+  tutor_tools_enabled?: boolean;
+  decision_tools_enabled?: boolean;
   created_by: string;
   created_by_name: string;
   updated_by_name: string;

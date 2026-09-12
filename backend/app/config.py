@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field
 
 
 class Settings(BaseSettings):
@@ -38,6 +39,16 @@ class Settings(BaseSettings):
     # Exact provider model URIs with verified structured-output support (comma-separated).
     # Empty disables the capability; physical-chemistry/provider/family scope still applies.
     json_schema_model_ids: str = ""
+    essential_tools_gateway_url: str = Field(default="", validation_alias=AliasChoices(
+        "ESSENTIAL_TOOLS_GATEWAY_URL", "STUDIO_ESSENTIAL_TOOLS_GATEWAY_URL", "essential_tools_gateway_url"))
+    essential_tools_gateway_token: str = Field(default="", validation_alias=AliasChoices(
+        "ESSENTIAL_TOOLS_GATEWAY_TOKEN", "STUDIO_ESSENTIAL_TOOLS_GATEWAY_TOKEN", "essential_tools_gateway_token"))
+    essential_tools_max_rounds: int = Field(default=8, validation_alias=AliasChoices(
+        "ESSENTIAL_TOOLS_MAX_ROUNDS", "STUDIO_ESSENTIAL_TOOLS_MAX_ROUNDS", "essential_tools_max_rounds"))
+    essential_tools_max_calls: int = Field(default=24, validation_alias=AliasChoices(
+        "ESSENTIAL_TOOLS_MAX_CALLS", "STUDIO_ESSENTIAL_TOOLS_MAX_CALLS", "essential_tools_max_calls"))
+    essential_tools_timeout: float = Field(default=10.0, validation_alias=AliasChoices(
+        "ESSENTIAL_TOOLS_TIMEOUT", "STUDIO_ESSENTIAL_TOOLS_TIMEOUT", "essential_tools_timeout"))
     data_dir: Path = Path("./data")
 
     # Only explicitly allowlisted models may make decisions that become grades,

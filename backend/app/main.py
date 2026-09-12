@@ -82,6 +82,10 @@ SQLITE_COLUMN_BACKFILL: dict[str, dict[str, str]] = {
     },
     "assistants": {
         "verifier_model_id": "VARCHAR(32)",
+        "generator_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "verifier_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "decision_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "tutor_tools_enabled": "BOOLEAN NOT NULL DEFAULT 0",
         "grading_enabled": "BOOLEAN NOT NULL DEFAULT 0",
         "updated_by": "VARCHAR(32) DEFAULT ''",
         "updated_at": "DATETIME",
@@ -145,6 +149,10 @@ async def ensure_sqlite_columns(conn) -> None:
 
 async def ensure_postgres_columns(conn) -> None:
     await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS verifier_model_id VARCHAR(32)")
+    await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS generator_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS verifier_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS decision_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS tutor_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     await conn.exec_driver_sql("ALTER TABLE tutor_runs ADD COLUMN IF NOT EXISTS bank_task JSONB")
     await conn.exec_driver_sql("ALTER TABLE assistants ADD COLUMN IF NOT EXISTS grading_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     await conn.exec_driver_sql(

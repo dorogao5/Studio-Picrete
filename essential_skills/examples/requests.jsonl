@@ -1,0 +1,3 @@
+{"tool":"calculator","arguments":{"expression":"-8.314*525*ln(490)/1000"}}
+{"tool":"sympy","arguments":{"operation":"identity","left":"(x+1)**2","right":"x**2+2*x+1","symbols":["x"]}}
+{"tool":"reference_db","arguments":{"reference_id":"universal_gas_constant_si"}}

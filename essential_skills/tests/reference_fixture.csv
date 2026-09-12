@@ -1,0 +1,3 @@
+reference_id,entity,property,value,unit,conditions,uncertainty_or_warning,source
+synthetic_rate,test_species,rate_constant,0.125,s^-1,{},Synthetic test data only,test_fixture_v1
+synthetic_energy,test_species,energy,12000,J mol^-1,{},Synthetic test data only,test_fixture_v1

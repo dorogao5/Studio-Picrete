@@ -1,0 +1,5 @@
+{
+  "iupac_atomic_weight_bromine": [
+    {"code": "source_annotation_error", "field": "uncertainty_or_warning", "message": "The original monoisotopic label is incorrect: bromine has two stable isotopes. Original record and numeric value are preserved unchanged; this annotation is not a revalidation of source provenance."}
+  ]
+}

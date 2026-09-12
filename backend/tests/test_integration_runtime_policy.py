@@ -52,6 +52,8 @@ def test_runtime_policy_resolves_actual_default_model_id(monkeypatch) -> None:
         "decision_model_id": "deepseek-v4-pro",
         "tier": "decision",
         "allowed_uses": ["student_tutor", "task_validation", "grading"],
+        "decision_tools_enabled": False,
+        "tutor_tools_enabled": False,
     }
 
 

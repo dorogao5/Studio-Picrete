@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!requirements.txt
+!tools.py
+!gateway.py
+!worker.py
+!server.py
+!http_server.py
+!reference-warnings.json

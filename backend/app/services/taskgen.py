@@ -28,11 +28,13 @@ from app.services.contracts import (
     CHEMISTRY_FACTS_GUIDE, GENERATION_JSON_CONTRACT, JSON_LATEX_ESCAPING_NOTE,
     PHYSICAL_GENERATION_JSON_EXAMPLE,
     PHYSICAL_GENERATION_RESPONSE_SCHEMA,
+    ESSENTIAL_TOOLS_INSTRUCTION,
 )
 from app.services.grounding import AUTHORITY_LABELS, KB_HEADER, build_grounding_block
 from app.services.physical_chemistry import (
     is_physical_chemistry,
     run_physical_validation,
+    assistant_tools_enabled,
     task_verifier_model_id,
     physical_json_schema_enabled,
 )
@@ -255,6 +257,9 @@ async def generate_tasks(
         chemistry_check=chemistry_check,
         reuse_blueprint=physical,
     )
+    use_tools = assistant_tools_enabled(assistant, "generator")
+    if use_tools:
+        prompt += ESSENTIAL_TOOLS_INSTRUCTION
     result = await llm.chat(
         provider,
         model,
@@ -263,12 +268,20 @@ async def generate_tasks(
         temperature=temperature,
         json_mode=True,
         **({"response_schema": PHYSICAL_GENERATION_RESPONSE_SCHEMA}
-           if physical_json_schema_enabled(assistant, provider, model) else {}),
+           if (use_tools and physical) or physical_json_schema_enabled(assistant, provider, model) else {}),
+        **({"essential_tools": True}
+           if use_tools else {}),
     )
     parsed = llm.extract_json(result.text)
     tasks = _coerce_tasks(parsed)
     if tasks is None:
         raise llm.LlmError(f"Генератор не вернул массив tasks; начало ответа: {result.text[:180]}")
+    for item in tasks:
+        if isinstance(item, dict):
+            # Never trust an audit claimed in generated JSON; only transport supplies it.
+            item.pop("_calculation_audit", None)
+            if use_tools:
+                item["_calculation_audit"] = result.raw
     return tasks
 
 
@@ -638,6 +651,7 @@ def task_from_item(
             "chemistry_facts": chemistry_facts,
             "chemistry_facts_source": "generator",
             "validation_contract": contract,
+            **({"calculation_audit": item["_calculation_audit"]} if "_calculation_audit" in item else {}),
         },
     )
 
@@ -856,6 +870,7 @@ async def _validate_batch(
                     answer_format=contract["answer_format"],
                     tolerance_pct=contract["tolerance_pct"],
                     system_prompt=verifier_prompt.system_prompt if verifier_prompt else None,
+                    essential_tools=assistant_tools_enabled(assistant, "verifier"),
                 )
                 return task, validation, correction
             validation = await run_validation(
@@ -874,6 +889,7 @@ async def _validate_batch(
                 solver_provider=solver_provider,
                 solver_model=solver_model,
                 run_solver=contract["validation_solver"],
+                essential_tools=assistant_tools_enabled(assistant, "verifier"),
                 run_data=contract["validation_data_check"],
                 validation_config=contract,
                 discipline_context=discipline_context,

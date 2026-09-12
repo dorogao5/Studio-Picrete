@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Bound responses to valid tool requests. Malformed HTTP requests may return unbound transport errors.",
+  "type": "object",
+  "required": ["tool_name", "tool_version", "arguments", "trace_id", "normalized_result", "status"],
+  "properties": {
+    "trace_id": {"type": "string", "minLength": 1},
+    "tool_name": {"enum": ["calculator", "sympy", "reference_db"]},
+    "tool_version": {"type": "string", "minLength": 1},
+    "arguments": {"type": "object"},
+    "normalized_result": {},
+    "status": {"enum": ["success", "error"]},
+    "error_type": {"type": "string"},
+    "error": {"type": "string"}
+  },
+  "allOf": [{"if": {"properties": {"status": {"const": "error"}}}, "then": {"required": ["error_type", "error"], "properties": {"normalized_result": {"type": "null"}}}}],
+  "additionalProperties": true
+}

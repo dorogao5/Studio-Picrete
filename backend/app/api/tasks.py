@@ -511,6 +511,7 @@ async def revalidate_task(
         solver_provider=solver_provider,
         solver_model=solver_model,
         run_solver=contract["validation_solver"],
+        essential_tools=getattr(assistant, "verifier_tools_enabled", False) is True,
         run_data=contract["validation_data_check"],
         validation_config=contract,
         discipline_context=build_assistant_profile(assistant),

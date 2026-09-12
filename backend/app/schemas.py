@@ -124,6 +124,10 @@ class AssistantOut(ORMModel):
     default_grader_model_id: str | None
     default_generator_model_id: str | None
     verifier_model_id: str | None = None
+    generator_tools_enabled: bool = False
+    verifier_tools_enabled: bool = False
+    decision_tools_enabled: bool = False
+    tutor_tools_enabled: bool = False
     created_by: str = ""
     created_by_name: str = ""
     updated_by_name: str = ""
@@ -162,6 +166,10 @@ class CourseUpdate(BaseModel):
 
 
 class AssistantCreate(BaseModel):
+    decision_tools_enabled: bool = False
+    tutor_tools_enabled: bool = False
+    generator_tools_enabled: bool = False
+    verifier_tools_enabled: bool = False
     name: str
     discipline: str
     description: str = ""
@@ -173,6 +181,10 @@ class AssistantCreate(BaseModel):
 
 
 class AssistantUpdate(BaseModel):
+    generator_tools_enabled: bool | None = None
+    verifier_tools_enabled: bool | None = None
+    decision_tools_enabled: bool | None = None
+    tutor_tools_enabled: bool | None = None
     grading_enabled: bool | None = None
     name: str | None = None
     discipline: str | None = None

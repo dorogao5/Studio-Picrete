@@ -5,7 +5,7 @@ from app.llm import client as llm
 from app.models import Assistant, ModelEntry, Provider
 from app.services.assistant_profile import with_assistant_profile
 from app.services.grading_contract import GradingContractError, validate_grading_output, validate_grading_request
-from app.services.contracts import GRADING_RESPONSE_SCHEMA
+from app.services.contracts import GRADING_RESPONSE_SCHEMA, ESSENTIAL_TOOLS_INSTRUCTION
 from app.services.physical_chemistry import physical_json_schema_enabled
 
 
@@ -72,15 +72,17 @@ async def run_grading(
         task_text, reference_solution, rubric, max_score, ocr_text, grounding=grounding
     )
     try:
+        use_tools = getattr(assistant, "decision_tools_enabled", False) is True
         result = await llm.chat(
             provider,
             model,
-            with_assistant_profile(system_prompt, assistant),
+            with_assistant_profile(system_prompt, assistant) + (ESSENTIAL_TOOLS_INSTRUCTION if use_tools else ""),
             user_message,
             temperature=temperature,
             json_mode=True,
             **({"response_schema": GRADING_RESPONSE_SCHEMA}
                if physical_json_schema_enabled(assistant, provider, model) else {}),
+            **({"essential_tools": True} if use_tools else {}),
         )
     except llm.LlmError as err:
         return GradeOutcome(output=None, raw_text="", duration_ms=0, tokens_total=None, error=str(err))

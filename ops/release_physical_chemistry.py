@@ -323,11 +323,16 @@ async def plan_studio(db, content, args, release_digest, live_bank):
         provider = await db.get(Provider, model.provider_id)
         require(provider and provider.enabled, f"Required {family} provider disabled")
         if family == "qwen":
+            require(provider.kind == "yandex", "Physical chemistry uses the configured Yandex provider")
             require("qwen3.6" in model.model_id.casefold(), "Expected actual Qwen 3.6 model, refusing a silent replacement")
         models[family] = model
     require(hasattr(assistant, "verifier_model_id"), "Deploy Kant verifier_model_id ORM/schema change first")
+    require(all(hasattr(assistant, name) for name in ("generator_tools_enabled", "verifier_tools_enabled", "tutor_tools_enabled", "decision_tools_enabled")),
+            "Deploy essential tools assistant flags ORM/schema change first")
     changes.set(assistant, {"default_generator_model_id": QWEN_ID, "default_grader_model_id": QWEN_ID,
                             "verifier_model_id": DEEPSEEK_ID, "grading_enabled": True,
+                            "generator_tools_enabled": True, "verifier_tools_enabled": True,
+                            "tutor_tools_enabled": True, "decision_tools_enabled": True,
                             "topics": list(dict.fromkeys((assistant.topics or []) + [t['topic'] for t in content['topics']]))})
     changes.set(assistant, content['profile'])
     require(bool(assistant.criteria), "Existing assistant grading criteria are required; not fabricated by release")
