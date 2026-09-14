@@ -136,14 +136,19 @@ def test_private_table_optional(monkeypatch):
     path=Path(configured)
     assert path.is_absolute()
     rows=list(csv.DictReader(path.open()))
-    assert len(rows)==80 and len({r['reference_id'] for r in rows})==80
+    assert rows and len({r['reference_id'] for r in rows}) == len(rows)
     monkeypatch.setenv('REFERENCE_DB_PATH',str(path))
     before=hashlib.sha256(path.read_bytes()).hexdigest()
     for row in rows:
         out=dispatch('reference_db',{'reference_id':row['reference_id']})
         assert out['status']=='success'
         original=dict(row,conditions=json.loads(row['conditions']))
+        original.pop('aliases', None)
         assert out['normalized_result']['record']==original
+        for alias in json.loads(row.get('aliases') or '[]'):
+            alias_out = dispatch('reference_db', {'reference_id': alias})
+            assert alias_out['status'] == 'success'
+            assert alias_out['normalized_result'] == out['normalized_result']
     assert hashlib.sha256(path.read_bytes()).hexdigest()==before
 
 def test_timeout_kills_and_reaps(monkeypatch):

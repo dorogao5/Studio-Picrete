@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 MAX_EXPRESSION_LENGTH = 512
 CALCULATOR_VERSION = 'scientific-calculator-v3'
 SYMPY_VERSION = 'ast-sympy-v2'
-REFERENCE_VERSION = 'reference-db-private-v1'
+REFERENCE_VERSION = 'reference-db-private-v2'
 FUNCTIONS = {'ln': sp.log, 'log': sp.log, 'exp': sp.exp, 'sqrt': sp.sqrt,
              'sin': sp.sin, 'cos': sp.cos, 'tan': sp.tan, 'asin': sp.asin,
              'acos': sp.acos, 'atan': sp.atan, 'sinh': sp.sinh, 'cosh': sp.cosh,
@@ -138,16 +138,35 @@ def sympy_tool(arguments):
     return trace('sympy',arguments,data,SYMPY_VERSION)
 
 def reference_db(arguments):
+    from reference_search import search
     configured = os.environ.get('REFERENCE_DB_PATH')
     if not configured: raise ValueError('REFERENCE_DB_PATH is required for private reference lookup')
-    path = Path(configured)
-    data = path.read_bytes()
+    data = Path(configured).read_bytes()
     records = list(csv.DictReader(io.StringIO(data.decode('utf-8'))))
-    record = next((r for r in records if r['reference_id']==arguments.get('reference_id')),None)
-    if record is None: raise ValueError('unknown reference id')
-    record['conditions'] = json.loads(record['conditions'])
-    warnings = json.loads((ROOT/'reference-warnings.json').read_text()).get(record['reference_id'],[])
-    return trace('reference_db',arguments,dict(database_id=REFERENCE_VERSION,database_version='1.0.0',database_sha256=hashlib.sha256(data).hexdigest(),record=record,review_warnings=warnings),REFERENCE_VERSION)
+    annotations = json.loads((ROOT/'reference-warnings.json').read_text())
+    aliases_by_id = {}
+    for record in records:
+        aliases = json.loads(record.pop('aliases', '') or '[]')
+        if not isinstance(aliases,list) or any(not isinstance(a,str) for a in aliases):
+            raise ValueError('invalid reference aliases')
+        for key in [record['reference_id']]+aliases:
+            if key in aliases_by_id: raise ValueError('ambiguous reference id')
+            aliases_by_id[key] = record
+        record['conditions'] = json.loads(record['conditions'])
+    result = dict(database_id=REFERENCE_VERSION, database_version='1.0.0',
+                  database_sha256=hashlib.sha256(data).hexdigest())
+    if 'query' in arguments:
+        result.update(search(records, arguments))
+        for candidate in result['candidates']:
+            candidate['review_warnings'] = annotations.get(candidate['record']['reference_id'],[])
+        result['review_warnings'] = annotations.get(result.get('record',{}).get('reference_id'),[])
+    else:
+        if set(arguments) != {'reference_id'} or not isinstance(arguments.get('reference_id'),str) or not arguments['reference_id'].strip() or len(arguments['reference_id'])>512:
+            raise ValueError('provide query for search, or reference_id from a previous search')
+        record = aliases_by_id.get(arguments['reference_id'])
+        if record is None: raise ValueError('unknown reference id; search with query and property instead of guessing IDs')
+        result.update(record=record,review_warnings=annotations.get(record['reference_id'],[]))
+    return trace('reference_db',arguments,result,REFERENCE_VERSION)
 
 def dispatch(tool, arguments):
     try:

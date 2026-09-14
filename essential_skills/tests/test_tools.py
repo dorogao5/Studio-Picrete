@@ -17,3 +17,31 @@ def test_reference_lookup(monkeypatch):
     out = dispatch("reference_db", {"reference_id":"synthetic_rate"})
     assert out["status"] == "success"
     assert out["normalized_result"]["record"]["unit"] == "s^-1"
+
+def test_reference_alias_returns_only_canonical_record(monkeypatch, tmp_path):
+    import csv
+    import hashlib
+    import json
+    path = tmp_path / 'private.csv'
+    with path.open('w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['reference_id', 'value', 'unit', 'conditions', 'aliases'])
+        writer.writeheader()
+        writer.writerow(dict(reference_id='synthetic_canonical', value='7', unit='J',
+                             conditions='{}', aliases=json.dumps(['synthetic_old'])))
+    monkeypatch.setenv('REFERENCE_DB_PATH', str(path))
+    current = dispatch('reference_db', {'reference_id': 'synthetic_canonical'})
+    legacy = dispatch('reference_db', {'reference_id': 'synthetic_old'})
+    assert current['normalized_result'] == legacy['normalized_result']
+    assert legacy['normalized_result']['record'] == dict(reference_id='synthetic_canonical', value='7', unit='J', conditions={})
+    assert legacy['normalized_result']['database_sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+def test_reference_alias_collision_fails_closed(monkeypatch, tmp_path):
+    import csv
+    path = tmp_path / 'private.csv'
+    with path.open('w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['reference_id', 'conditions', 'aliases'])
+        writer.writeheader()
+        writer.writerow(dict(reference_id='synthetic_a', conditions='{}', aliases='["synthetic_b"]'))
+        writer.writerow(dict(reference_id='synthetic_b', conditions='{}', aliases='[]'))
+    monkeypatch.setenv('REFERENCE_DB_PATH', str(path))
+    assert dispatch('reference_db', {'reference_id': 'synthetic_b'})['status'] == 'error'

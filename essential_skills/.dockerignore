@@ -7,3 +7,6 @@
 !server.py
 !http_server.py
 !reference-warnings.json
+
+!reference_search.py
+!chemical_names.json

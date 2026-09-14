@@ -182,7 +182,7 @@ def test_budgets_defaults_metadata_and_flags():
     assert settings.essential_tools_max_rounds == 8 and settings.essential_tools_max_calls == 24
     assistant = AssistantCreate(name="test", discipline="test")
     assert all(getattr(assistant, f"{role}_tools_enabled") is False for role in ("generator", "verifier", "tutor", "decision"))
-    assert "universal_gas_constant_si" in et.DEFINITIONS["reference_db"]["parameters"]["properties"]["reference_id"]["description"]
+    assert "query" in et.DEFINITIONS["reference_db"]["parameters"]["properties"]
 
 
 def test_flags_database_defaults():
@@ -347,3 +347,18 @@ def test_http_error_message_sanitizes_credentials():
             assert "bad [REDACTED] parameter" in str(caught.value)
             assert "MODEL-SECRET" not in str(caught.value) and "DO_NOT_PRINT" not in str(caught.value)
     asyncio.run(check())
+
+
+def test_reference_search_roundtrip(monkeypatch):
+    args = {"query": "H2O", "property": "standard_molar_formation_enthalpy", "phase": "gas", "temperature_k": 298.15, "limit": 2}
+    requests, calls = mock_dialogue(monkeypatch, name="reference_db", arguments=json.dumps(args))
+    result = run()
+    assert len(calls) == 2
+    assert [body["arguments"] for url, body, _ in requests if url.endswith("/invoke")] == [args]
+    assert result.raw["tool_traces"][0]["status"] == "success"
+
+
+@pytest.mark.parametrize("args", [{}, {"query":"AgCl","reference_id":"invented"}, {"reference_id":"known","phase":"gas"}, {"query":"water","phase":"plasma"}, {"query":"water","limit":True}, {"query":"water","temperature_k":-1}])
+def test_reference_search_rejects_invalid_contract(args):
+    with pytest.raises(client.LlmError):
+        et.validate_arguments("reference_db", args)

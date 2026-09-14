@@ -67,19 +67,133 @@
     }
   },
   "reference_db": {
-    "description": "Lookup one externally mounted private reference record preserving original value/units/conditions/source labels; returns database SHA256 and separate review_warnings. Source labels are not independent verification.",
+    "description": "Search verified stored reference records by chemical formula/name and property. Start with query; never invent reference_id. Returns values, units, phases, conditions, sources and actual IDs. unique gives record; ambiguous gives candidates to refine; not_found means no stored data; conditions_unverified must not be treated as an exact condition match. No external web retrieval or invented values.",
     "parameters": {
       "type": "object",
-      "required": [
-        "reference_id"
-      ],
+      "required": [],
       "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "Substance formula (preferred; case sensitive: CO differs from Co), chemical name in Russian/English, or a half-reaction. Examples: AgCl; H2O; [Cu(NH3)4]2+; gas constant. No private index is needed."
+        },
+        "property": {
+          "type": "string",
+          "enum": [
+            "solubility_product",
+            "standard_molar_formation_enthalpy",
+            "standard_molar_entropy",
+            "standard_molar_heat_capacity_pressure",
+            "acid_dissociation_constant",
+            "base_dissociation_constant",
+            "complex_instability_constant",
+            "standard_electrode_potential",
+            "molar_gas_constant",
+            "avogadro_number",
+            "relative_atomic_mass",
+            "molar_mass",
+            "atomic_number",
+            "electron_configuration",
+            "mean_bond_energy",
+            "diatomic_dissociation_energy",
+            "cryoscopic_constant",
+            "ebullioscopic_constant",
+            "limiting_ionic_mobility",
+            "van_der_waals_a",
+            "van_der_waals_b",
+            "calorie_to_joule",
+            "atmosphere_to_pascal",
+            "torr_to_pascal",
+            "molar_energy_per_wavenumber",
+            "electrode_potential_at_specified_concentration"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "solid",
+            "liquid",
+            "gas",
+            "aqueous"
+          ],
+          "description": "Required material phase when known; unknown phase is reported, not assumed."
+        },
+        "temperature_k": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100000,
+          "description": "Optional exact temperature in kelvin. Missing source temperature is reported as unverified; values at other temperatures are excluded."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
         "reference_id": {
           "type": "string",
-          "description": "Common IDs: universal_gas_constant_si, eryomin_gas_constant_j_mol_k, eryomin_avogadro_constant, calorie_to_joule_molar, atmosphere_to_pascal, torr_to_pascal. Other IDs require the private index supplied by the operator."
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "Exact ID returned by search. Use alone. Known legacy IDs remain supported; returned units are authoritative."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "query"
+          ],
+          "not": {
+            "required": [
+              "reference_id"
+            ]
+          }
+        },
+        {
+          "required": [
+            "reference_id"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "query"
+                ]
+              },
+              {
+                "required": [
+                  "property"
+                ]
+              },
+              {
+                "required": [
+                  "phase"
+                ]
+              },
+              {
+                "required": [
+                  "temperature_k"
+                ]
+              },
+              {
+                "required": [
+                  "limit"
+                ]
+              },
+              {
+                "required": [
+                  "offset"
+                ]
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 }

@@ -4,7 +4,7 @@
   "tool_versions": {
     "calculator": "scientific-calculator-v3",
     "sympy": "ast-sympy-v2",
-    "reference_db": "reference-db-private-v1"
+    "reference_db": "reference-db-private-v2"
   },
   "upstream_package": "qwen-chem-essential-skills 1.0.0",
   "tools": [

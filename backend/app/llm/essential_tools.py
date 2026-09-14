@@ -19,6 +19,10 @@ def validate_arguments(name, arguments):
     if name not in DEFINITIONS or not isinstance(arguments, dict):
         raise LlmError("Unknown tool or invalid arguments")
     schema = DEFINITIONS[name]["parameters"]
+    try:
+        jsonschema.validate(arguments, schema)
+    except jsonschema.ValidationError as err:
+        raise LlmError("Invalid tool arguments: " + err.message[:200]) from err
     if set(arguments) - set(schema["properties"]) or any(key not in arguments for key in schema["required"]):
         raise LlmError("Invalid tool argument keys")
     for key, value in arguments.items():

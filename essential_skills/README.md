@@ -6,16 +6,24 @@ verifier or chemistry classifier is involved. Client integration is separate.
 
 ## Private data is NOT bundled
 
-The original is **reference_db.csv**, not reference_db.json: 80 private records.
+The source is **reference_db.csv**, not reference_db.json. The initial snapshot
+contained 80 private records; the active operator-maintained table can grow.
 This public repository must not contain its values. Exact `/reference_db.csv`
 gitignore and an allowlist Docker context exclude it. Docker COPY includes code
 and correction metadata only. Never force-add or rename the private CSV into a
 tracked file, or bake it into an image layer. Transfer privately and mount read-only.
 
 Original SHA256: `fb82fd2b7ff2228064883834828c824eadb9adf038c2182e774a1b96fc75b3c2`.
-No numeric values, source labels, original warnings or conditions are changed.
-The catalog lists only common constant/conversion identifiers, not the full private
-80-ID namespace; any further index stays private with the operator.
+The hash above identifies the original snapshot, not the active table. Current
+responses hash the actual private file. Operator updates may select a verified
+current value and source, preserving previous snapshots outside the active table.
+Each quantity at the same conditions has one canonical record. An optional
+`aliases` CSV column contains a JSON list of legacy IDs; lookup resolves these
+to the canonical record and omits the alias list from the response. Callers must
+use the returned unit (a legacy ID may now resolve to the canonical SI unit).
+Ambiguous aliases fail closed. Private aliases and the full index stay with the
+operator and must not be embedded in the image or public catalog.
+The catalog exposes search fields and common constant identifiers. Search reads the mounted private table at runtime; the model never needs its full index.
 Separate `reference-warnings.json` flags
 the incorrect bromine monoisotopic annotation (two stable isotopes); response
 `review_warnings` does not overwrite the source record. Source labels remain
@@ -68,7 +76,7 @@ calculation or replace it with "dimensionless". Reference-record units are uncha
 This unit-contract change is versioned as `scientific-calculator-v3` (previously
 `scientific-calculator-v2`). Since trace IDs include the tool version, identical
 arguments now have a different trace from old probes, including on error paths.
-SymPy and reference tool versions are unchanged; `manifest.json` lists each version.
+SymPy is unchanged. Reference discovery is versioned `reference-db-private-v2`; `manifest.json` lists each version.
 
 Symbolic AST allowlist builds SymPy objects, never sympify/parse_expr/eval strings.
 Allowed: decimal constants, declared real symbols, pi/E, arithmetic and listed
@@ -136,3 +144,18 @@ symbolic expression terminated with a bound error and subsequent calculation
 recovered. This is a local resource smoke, not a claim of production deployment
 or guaranteed timing under the production host's load. Production Compose itself
 was read, not started. No private CSV was used in any image or container test.
+
+## Reference discovery (v2)
+
+Start with `{"query":"AgCl","property":"solubility_product"}`; never guess an ID.
+`query` accepts formulas, supported Russian/English names, or a property phrase.
+Use `property` from the catalog, optional `phase` and `temperature_k` to refine.
+Search returns full records with units, conditions, sources and database SHA256.
+`unique` includes `record`; `ambiguous` requires choosing/refining candidates;
+`conditions_unverified` means a requested condition is missing; `not_found` supplies
+no value. HTTP/tool success means the search ran, not that chemistry is validated.
+Known temperature/phase mismatches are excluded; unknown conditions are explicit.
+No interpolation or inferred values. Formula case is significant (`CO` vs `Co`).
+`limit` (1..8) and `offset` paginate candidates. A returned ID may be used for
+subsequent exact lookup via `reference_id` alone; search already includes the value.
+Public chemical names are metadata only; all reference values remain mounted.
