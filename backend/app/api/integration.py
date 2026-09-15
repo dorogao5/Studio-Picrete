@@ -4,7 +4,7 @@ import secrets
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
 from sqlalchemy import select
@@ -748,3 +748,85 @@ async def course_bank_image(assistant_id: str, course_id: str, item_id: str, ima
     if not r.is_success:
         raise HTTPException(404, "Изображение не найдено")
     return Response(r.content, media_type=r.headers.get("content-type", "image/png"), headers={"Cache-Control":"private, no-store"})
+
+
+class HomeworkBatchRequest(BaseModel):
+    assistant_id: str = Field(min_length=1, max_length=64)
+    template_id: str = Field(min_length=1, max_length=64)
+    batch_id: str = Field(pattern="^[a-f0-9]{32}$")
+    difficulty: str = Field(default="", pattern="^(easy|medium|hard)?$")
+    count: int = Field(ge=1, le=100)
+
+
+@router.get("/internal/homework/blueprints/{assistant_id}")
+async def homework_blueprints(assistant_id: str, authorization: str = Header(default=""),
+                              db: AsyncSession = Depends(get_db)) -> dict:
+    _authenticate_picrete_generation(authorization)
+    assistant = await get_assistant_or_404(assistant_id, db)
+    if not uses_single_verifier(assistant):
+        return {"items": []}
+    templates = (await db.scalars(select(TaskTemplate).where(TaskTemplate.assistant_id == assistant_id)
+                                .order_by(TaskTemplate.topic, TaskTemplate.name, TaskTemplate.id))).all()
+    return {"items": [{"id": t.id, "name": t.name, "topic": t.topic, "difficulty": t.difficulty}
+                      for t in templates]}
+
+
+@router.post("/internal/homework/batch")
+async def homework_batch(body: HomeworkBatchRequest, background: BackgroundTasks,
+                         authorization: str = Header(default=""), db: AsyncSession = Depends(get_db)) -> dict:
+    """Idempotent start/poll: a retry never creates another paid batch."""
+    _authenticate_picrete_generation(authorization)
+    batch = await db.get(GenerationBatch, body.batch_id)
+    if batch is not None:
+        if (batch.assistant_id != body.assistant_id or batch.template_id != body.template_id
+                or batch.requested_count != body.count or batch.created_by != "homework"):
+            raise HTTPException(409, "Идентификатор генерации уже занят")
+    else:
+        assistant = await get_assistant_or_404(body.assistant_id, db)
+        if not uses_single_verifier(assistant):
+            raise HTTPException(422, "Для курса не настроена независимая проверка генерации")
+        template = await db.get(TaskTemplate, body.template_id)
+        if template is None or template.assistant_id != assistant.id:
+            raise HTTPException(422, "Блюпринт не найден в этом курсе")
+        if body.difficulty and template.difficulty != body.difficulty:
+            raise HTTPException(422, "Сложность блюпринта изменилась. Создайте ДЗ с актуальным блюпринтом")
+        from app.services.taskgen import merge_template_params
+        template_snapshot = merge_template_params(template, topic=template.topic, difficulty=template.difficulty, instructions="")
+        generator_id = assistant.default_generator_model_id
+        verifier_id = task_verifier_model_id(assistant)
+        if not generator_id or not verifier_id:
+            raise HTTPException(422, "Выберите модели генерации и проверки в Studio")
+        provider, generator = await resolve_model(db, generator_id)
+        _, verifier = await resolve_model(db, verifier_id)
+        try:
+            require_decision_model(generator, allow_advisory=True)
+            require_decision_model(verifier)
+            prompt = await resolve_generator_prompt_version(db, assistant.id, None)
+        except (ModelUsePolicyError, GenerationError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        batch = GenerationBatch(id=body.batch_id, assistant_id=assistant.id, template_id=template.id,
+            status="running", created_by="homework", requested_count=body.count,
+            model_used=f"{provider.name}/{generator.model_id}",
+            params={"model_entry_id": generator.id, "solver_model_entry_id": verifier.id,
+                    "topic": template.topic, "difficulty": template.difficulty, "count": body.count,
+                    "instructions": "", "temperature": 0.7, "validate_tasks": True,
+                    "prompt_version_id": prompt.id if prompt else None, "homework_template_snapshot": template_snapshot},
+            progress={"stage": "В очереди", "done": 0, "total": body.count})
+        db.add(batch)
+        await db.commit()
+        background.add_task(run_batch, batch.id)
+        return {"status": "running", "ready_count": 0}
+    tasks = (await db.scalars(select(GeneratedTask).where(GeneratedTask.batch_id == batch.id)
+                             .order_by(GeneratedTask.created_at, GeneratedTask.id))).all()
+    ready = [t for t in tasks if task_is_export_ready(t)]
+    # Identical statements must never masquerade as personal variants.
+    unique = {}
+    for task in ready:
+        unique.setdefault(" ".join(task.statement.split()).casefold(), task)
+    ready = list(unique.values())[:body.count]
+    complete = len(ready) == body.count
+    from app.services.export import build_variants_export
+    return {"status": "ready" if complete else ("running" if batch.status == "running" else "failed"),
+            "ready_count": len(ready), "progress": batch.progress,
+            "error": "Не все варианты прошли проверку или найдены одинаковые условия. Проверьте пакет в Studio.",
+            "tasks": build_variants_export(ready, {})["tasks"]}

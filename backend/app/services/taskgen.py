@@ -1124,6 +1124,9 @@ async def _execute_batch(db: AsyncSession, batch: GenerationBatch) -> None:
             raise GenerationError("Шаблон не найден")
 
     merged = merge_batch_template_params(template, params)
+    if getattr(batch, "created_by", "") == "homework" and isinstance(params.get("homework_template_snapshot"), dict):
+        merged = params["homework_template_snapshot"]
+
     if physical:
         merged["chemistry_check"] = "off"
     system_prompt = await resolve_generator_prompt(db, batch.assistant_id, params.get("prompt_version_id"))
